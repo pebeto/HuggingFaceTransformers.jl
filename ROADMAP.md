@@ -77,7 +77,7 @@ this one path; we generalize afterward.
 - [x] **Safetensors loader.** Lazy `mmap`-backed reader returning
       `Dict{String, AbstractArray}` keyed on HF parameter names. Handle
       sharded safetensors (`model.safetensors.index.json`) on day one.
-- [ ] **Generic `tokenizer.json` parser.** Implement the Rust-tokenizer JSON
+- [x] **Generic `tokenizer.json` parser.** Implement the Rust-tokenizer JSON
       schema (BPE + byte-level pretokenizer is enough for Llama/GPT2/Qwen).
       No dependency on `BytePairEncoding.jl`. Tokenize/detokenize round-trips
       must match HF byte-for-byte for a fixture set.

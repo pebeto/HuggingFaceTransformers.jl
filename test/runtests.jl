@@ -18,6 +18,10 @@ using Allspark
         include("weights.jl")
     end
 
+    @testset "Tokenizers" begin
+        include("tokenizers.jl")
+    end
+
     @testset "Aqua" begin
         include("aqua.jl")
     end
