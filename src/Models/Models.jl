@@ -8,4 +8,10 @@ A new model adds: config struct, layer wiring, state-dict map. That's it.
 """
 module Models
 
+using SafeTensors: load_safetensors, load_sharded_safetensors
+
+export load_weights
+
+include("weights.jl")
+
 end # module Models

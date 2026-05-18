@@ -14,6 +14,10 @@ using Allspark
         include("hfhub.jl")
     end
 
+    @testset "Weights" begin
+        include("weights.jl")
+    end
+
     @testset "Aqua" begin
         include("aqua.jl")
     end

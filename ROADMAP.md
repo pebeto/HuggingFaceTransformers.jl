@@ -74,7 +74,7 @@ this one path; we generalize afterward.
       index) via `HTTP.jl` + stdlib `Downloads`. Cache to
       `~/.cache/huggingface/hub` matching Python's layout so users share
       downloads across stacks.
-- [ ] **Safetensors loader.** Lazy `mmap`-backed reader returning
+- [x] **Safetensors loader.** Lazy `mmap`-backed reader returning
       `Dict{String, AbstractArray}` keyed on HF parameter names. Handle
       sharded safetensors (`model.safetensors.index.json`) on day one.
 - [ ] **Generic `tokenizer.json` parser.** Implement the Rust-tokenizer JSON
