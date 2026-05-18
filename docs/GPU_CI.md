@@ -1,8 +1,8 @@
 # GPU CI plan
 
-GitHub-hosted runners do not have GPUs, so the matrix in `.github/workflows/CI.yml` is CPU-only. Allspark is fundamentally a GPU library — without GPU coverage we cannot merge anything in Phase 1 (KV-cache mutation) or Phase 4 (FlashAttention, fp16/bf16, quantization) with confidence. This document describes the plan for adding it.
+GitHub-hosted runners do not have GPUs, so the matrix in `.github/workflows/CI.yml` is CPU-only. Allspark is fundamentally a GPU library — without GPU coverage we cannot safely merge anything that touches KV-cache mutation, FlashAttention kernels, or low-precision (fp16/bf16) and quantized inference. This document describes the plan for adding it.
 
-This is not wired up yet. It will be activated as part of Phase 1.
+This is not wired up yet.
 
 ## Options considered
 
@@ -37,7 +37,7 @@ Out of scope while the project is pre-alpha. Revisit if funding/sponsorship make
 
 ## Decision
 
-Adopt **Buildkite + JuliaGPU cluster**. Once we have a working Phase 1 prototype, open an issue against the JuliaGPU buildkite infrastructure repository requesting a project slot, and land a `.buildkite/pipeline.yml` covering:
+Adopt **Buildkite + JuliaGPU cluster**. Once we have a working end-to-end inference prototype, open an issue against the JuliaGPU buildkite infrastructure repository requesting a project slot, and land a `.buildkite/pipeline.yml` covering:
 
 - Julia 1.10 + Julia 1.12.
 - CUDA backend.
@@ -51,5 +51,5 @@ Until then, contributors are expected to run the GPU test suite locally before s
 These are the test files that must run on GPU CI in addition to the CPU matrix:
 
 - `test/gpu/` — anything under this directory.
-- The numeric-parity tests (Phase 1) should run on both CPU and GPU, with tolerance widened for fp16/bf16 paths.
+- Numeric-parity tests should run on both CPU and GPU, with tolerance widened for fp16/bf16 paths.
 - KV-cache tests must run on GPU; in-place mutation semantics differ between `Array` and `CuArray`/`ROCArray`/`MtlArray`.

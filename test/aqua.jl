@@ -4,7 +4,8 @@ using Allspark
 Aqua.test_all(
     Allspark;
     ambiguities=false,
-    # Phase 0: submodules are stubs, so declared deps are not yet `using`-ed.
-    # Re-enable once Phase 1 starts pulling in Flux/NNlib/SafeTensors/etc.
+    # Several declared deps (Flux, NNlib, SafeTensors, ...) are wired up
+    # across multiple submodules; re-enable once every declared dep is
+    # `using`-ed somewhere.
     stale_deps=false,
 )

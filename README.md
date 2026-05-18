@@ -6,27 +6,7 @@ models. Spiritual successor to
 
 > **Status: pre-alpha.** The API shown below is *aspirational*. The project
 > bootstrap is done; nothing else works yet. See
-> [`ROADMAP.md`](ROADMAP.md) for the phased build plan.
-
-## Why a new package?
-
-`Transformers.jl` is effectively unmaintained, and it depends on a long
-chain of also-unmaintained helper packages (`NeuralAttentionlib`,
-`BytePairEncoding`, `FuncPipelines`, `BangBang`, `Pickle`, ...). Reviving
-it means reviving all of them. Greenfield is cheaper.
-
-Allspark makes a few opinionated choices:
-
-- **Lean dependencies** — only `Flux`, `NNlib`, `SafeTensors`, `JSON3`,
-  `HTTP`, `HuggingFaceApi`, and a couple of stdlibs. Everything else is
-  vendored inline.
-- **Safetensors only** — no Pickle, no PyTorch `.bin`.
-- **Generic loaders** — one `tokenizer.json` parser, one state-dict mapping
-  table per model, no per-model textencoder subclasses.
-- **Decoder generation as a first-class feature** — KV-cache, sampling and
-  chat templating are part of the core path, not afterthoughts.
-
-Read [`ROADMAP.md`](ROADMAP.md) for the full philosophy.
+> [`ROADMAP.md`](ROADMAP.md) for the build plan.
 
 ## Target API
 

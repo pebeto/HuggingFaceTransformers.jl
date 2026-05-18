@@ -51,7 +51,7 @@ Goal: an empty but installable package, CI green, with a North Star
 example that prints `TODO` until Phase 1 fills it in.
 
 - [x] `Project.toml` with the lean dependency set (Flux, NNlib, SafeTensors,
-      JSON3, HTTP, SHA, HuggingFaceApi, FillArrays, ChainRulesCore). Pin to
+      JSON3, HTTP, Downloads, SHA, FillArrays, ChainRulesCore). Pin to
       Julia ≥ 1.10, test on 1.10 and 1.12.
 - [x] `src/Allspark.jl` skeleton with submodule layout: `HFHub`, `Tokenizers`,
       `Layers`, `Models`, `Generation`.
@@ -69,9 +69,9 @@ example that prints `TODO` until Phase 1 fills it in.
 This is the smallest end-to-end vertical slice. Everything is built to serve
 this one path; we generalize afterward.
 
-- [ ] **HFHub client.** Resolve `org/repo[@revision]`, download
+- [x] **HFHub client.** Resolve `org/repo[@revision]`, download
       `config.json` + `tokenizer.json` + `model.safetensors` (and shard
-      index) via `HuggingFaceApi.jl`. Cache to
+      index) via `HTTP.jl` + stdlib `Downloads`. Cache to
       `~/.cache/huggingface/hub` matching Python's layout so users share
       downloads across stacks.
 - [ ] **Safetensors loader.** Lazy `mmap`-backed reader returning

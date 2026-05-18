@@ -10,6 +10,10 @@ using Allspark
         @test isdefined(Allspark, :Generation)
     end
 
+    @testset "HFHub" begin
+        include("hfhub.jl")
+    end
+
     @testset "Aqua" begin
         include("aqua.jl")
     end
