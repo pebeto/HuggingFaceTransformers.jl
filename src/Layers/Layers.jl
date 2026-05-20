@@ -15,11 +15,22 @@ using Statistics
 
 export KVCache, RMSNorm, RoPE, Linear, SiLUGatedMLP, GQA
 
+"""
+    KVCache{T <: AbstractArray}
+
+A mutable KV-cache wrapper used to store preallocated keys and values for autoregressive generation.
+Contains fields `k` and `v` of shape `(batch_size, n_kv_heads, max_seq, head_dim)`.
+"""
 mutable struct KVCache{T<:AbstractArray}
     k::T
     v::T
 end
 
+"""
+    KVCache(batch_size::Integer, n_kv_heads::Integer, max_seq::Integer, head_dim::Integer; eltype = Float32)
+
+Create a preallocated `KVCache` of shape `(batch_size, n_kv_heads, max_seq, head_dim)` with element type `eltype`.
+"""
 function KVCache(
     batch_size::Integer,
     n_kv_heads::Integer,
@@ -35,11 +46,22 @@ end
 Flux.@layer KVCache
 Flux.Optimisers.trainable(::KVCache) = (;)
 
+"""
+    RMSNorm{W, T}
+
+Root Mean Square Normalization layer. Normalizes inputs along the first dimension (features/channels).
+\$\\text{RMSNorm}(x) = \\frac{x}{\\sqrt{\\text{mean}(x^2) + \\epsilon}} \\cdot w\$
+"""
 struct RMSNorm{W,T}
     weight::W
     eps::T
 end
 
+"""
+    RMSNorm(dim::Integer, eps::Real = 1f-6)
+
+Construct an `RMSNorm` layer of dimension `dim` with stability parameter `eps`.
+"""
 function RMSNorm(dim::Integer, eps::Real=1.0f-6)
     weight = ones(Float32, dim)
     return RMSNorm(weight, Float32(eps))
@@ -53,10 +75,22 @@ end
 Flux.@layer RMSNorm
 Flux.Optimisers.trainable(m::RMSNorm) = (; weight=m.weight)
 
+"""
+    RoPE{F}
+
+Rotary Position Embeddings (RoPE) layer. Computes positional rotations using frequency buffers `inv_freq`.
+Supports Llama 3 scaling/wavelength-interpolation if constructed with the appropriate scaling parameters.
+"""
 struct RoPE{F}
     inv_freq::F
 end
 
+"""
+    RoPE(dim::Integer; base::Real = 500000.0, scaling_factor = nothing, low_freq_factor = nothing, high_freq_factor = nothing, old_context_len = nothing)
+
+Construct a `RoPE` layer for a head dimension of size `dim`.
+If scaling parameters are provided, applies Llama 3 NTK-style frequency scaling.
+"""
 function RoPE(
     dim::Integer;
     base::Real=500000.0,
@@ -131,10 +165,20 @@ end
 Flux.@layer RoPE
 Flux.Optimisers.trainable(::RoPE) = (;)
 
+"""
+    Linear{W}
+
+A bias-less linear projection layer. Computes W * x for any input array `x` by flattening extra dimensions.
+"""
 struct Linear{W}
     weight::W
 end
 
+"""
+    Linear(in_features::Integer, out_features::Integer; init = Flux.glorot_uniform)
+
+Construct a bias-less `Linear` layer with input dimension `in_features` and output dimension `out_features`.
+"""
 function Linear(in_features::Integer, out_features::Integer; init=Flux.glorot_uniform)
     weight = init(out_features, in_features)
     return Linear(weight)
@@ -150,12 +194,23 @@ end
 Flux.@layer Linear
 Flux.Optimisers.trainable(m::Linear) = (; weight=m.weight)
 
+"""
+    SiLUGatedMLP{G, U, D}
+
+SiLU-Gated Multi-Layer Perceptron (gated FFN) layer used in modern transformer decoders (e.g. Llama).
+\$\\text{SiLUGatedMLP}(x) = (\\text{SiLU}(W_{gate} x) \\odot W_{up} x) W_{down}\$
+"""
 struct SiLUGatedMLP{G,U,D}
     gate_proj::G
     up_proj::U
     down_proj::D
 end
 
+"""
+    SiLUGatedMLP(in_features::Integer, hidden_features::Integer; init = Flux.glorot_uniform)
+
+Construct a `SiLUGatedMLP` layer with input size `in_features` and hidden size `hidden_features`.
+"""
 function SiLUGatedMLP(
     in_features::Integer, hidden_features::Integer; init=Flux.glorot_uniform
 )
@@ -176,6 +231,12 @@ function Flux.Optimisers.trainable(m::SiLUGatedMLP)
     (; gate_proj=m.gate_proj, up_proj=m.up_proj, down_proj=m.down_proj)
 end
 
+"""
+    GQA{Q, K, V, O, R}
+
+Grouped-Query Attention (GQA) layer. Partitions queries into groups sharing key/value heads.
+Accepts an optional `KVCache` to update/retrieve past keys and values.
+"""
 struct GQA{Q,K,V,O,R}
     wq::Q
     wk::K
@@ -187,6 +248,11 @@ struct GQA{Q,K,V,O,R}
     head_dim::Int
 end
 
+"""
+    GQA(hidden_dim::Integer, num_heads_q::Integer, num_heads_k::Integer, head_dim::Integer, rope::RoPE; init = Flux.glorot_uniform)
+
+Construct a `GQA` layer with key/value caching and RoPE integration.
+"""
 function GQA(
     hidden_dim::Integer,
     num_heads_q::Integer,
