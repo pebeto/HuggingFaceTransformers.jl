@@ -22,6 +22,10 @@ using Allspark
         include("tokenizers.jl")
     end
 
+    @testset "Layers" begin
+        include("layers.jl")
+    end
+
     @testset "Aqua" begin
         include("aqua.jl")
     end

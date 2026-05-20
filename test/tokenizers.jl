@@ -88,8 +88,9 @@ const FIXTURE_MERGE_PAIRS = [
     ("Ġwor", "ld"),
 ]
 
-const FIXTURE_MERGED_TOKENS =
-    ["he", "ll", "hell", "hello", "Ġw", "or", "Ġwor", "ld", "Ġworld"]
+const FIXTURE_MERGED_TOKENS = [
+    "he", "ll", "hell", "hello", "Ġw", "or", "Ġwor", "ld", "Ġworld"
+]
 
 const FIXTURE_ENDOFTEXT_ID = 1000
 
@@ -122,12 +123,14 @@ function _fixture_dict(; merges_as_strings::Bool=false)
                 "special" => true,
             ),
         ],
-        "pre_tokenizer" => Dict(
-            "type" => "ByteLevel", "add_prefix_space" => false, "use_regex" => true
-        ),
+        "pre_tokenizer" =>
+            Dict("type" => "ByteLevel", "add_prefix_space" => false, "use_regex" => true),
         "decoder" => Dict("type" => "ByteLevel"),
         "model" => Dict(
-            "type" => "BPE", "vocab" => vocab, "merges" => merges, "unk_token" => nothing
+            "type" => "BPE",
+            "vocab" => vocab,
+            "merges" => merges,
+            "unk_token" => nothing,
         ),
     )
 end

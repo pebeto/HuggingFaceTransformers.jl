@@ -11,8 +11,7 @@ function BPEModel(
     unk_token::Union{Nothing,AbstractString}=nothing,
 )
     id_to_token = Dict{Int,String}(id => tok for (tok, id) in vocab)
-    merge_ranks =
-        Dict{Tuple{String,String},Int}(p => i - 1 for (i, p) in enumerate(merges))
+    merge_ranks = Dict{Tuple{String,String},Int}(p => i - 1 for (i, p) in enumerate(merges))
     unk = unk_token === nothing ? nothing : String(unk_token)
     return BPEModel(vocab, id_to_token, merge_ranks, unk)
 end

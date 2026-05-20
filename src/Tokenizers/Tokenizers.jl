@@ -54,7 +54,7 @@ function _parse_model(m::JSON3.Object)
     typ = String(m[:type]::AbstractString)
     typ == "BPE" || throw(
         ArgumentError(
-            "unsupported tokenizer model: $(typ); only BPE is supported in this release",
+            "unsupported tokenizer model: $(typ); only BPE is supported in this release"
         ),
     )
     vocab_raw = m[:vocab]::JSON3.Object
@@ -84,9 +84,8 @@ function _parse_pre_tokenizer(p::JSON3.Object)
         )
     elseif typ == "Split"
         pat = p[:pattern]::JSON3.Object
-        haskey(pat, :Regex) || throw(
-            ArgumentError("Split pretokenizer requires a Regex pattern: $(pat)"),
-        )
+        haskey(pat, :Regex) ||
+            throw(ArgumentError("Split pretokenizer requires a Regex pattern: $(pat)"))
         regex_str = String(pat[:Regex]::AbstractString)
         behavior_str = String(p[:behavior]::AbstractString)
         behavior = if behavior_str == "Isolated"
@@ -96,7 +95,7 @@ function _parse_pre_tokenizer(p::JSON3.Object)
         else
             throw(
                 ArgumentError(
-                    "Split pretokenizer with unsupported behavior: $(behavior_str)",
+                    "Split pretokenizer with unsupported behavior: $(behavior_str)"
                 ),
             )
         end
@@ -141,8 +140,7 @@ function load_tokenizer(path::AbstractString)
     model = _parse_model(parsed[:model]::JSON3.Object)
 
     pre_raw = get(parsed, :pre_tokenizer, nothing)
-    pre =
-        pre_raw isa JSON3.Object ? _parse_pre_tokenizer(pre_raw) : IdentityPreTokenizer()
+    pre = pre_raw isa JSON3.Object ? _parse_pre_tokenizer(pre_raw) : IdentityPreTokenizer()
 
     dec_raw = get(parsed, :decoder, nothing)
     dec = dec_raw isa JSON3.Object ? _parse_decoder(dec_raw) : ByteLevelDecoder()

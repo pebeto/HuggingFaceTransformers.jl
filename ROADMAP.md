@@ -81,7 +81,7 @@ this one path; we generalize afterward.
       schema (BPE + byte-level pretokenizer is enough for Llama/GPT2/Qwen).
       No dependency on `BytePairEncoding.jl`. Tokenize/detokenize round-trips
       must match HF byte-for-byte for a fixture set.
-- [ ] **Minimal layer kit.** `RMSNorm`, `RoPE` (with scaling hooks for
+- [x] **Minimal layer kit.** `RMSNorm`, `RoPE` (with scaling hooks for
       Llama3), `Linear` (no bias variant), `SiLU`-gated MLP, GQA attention.
       All `Flux.@layer`-annotated, all `Functors.fmap`-friendly.
 - [ ] **`LlamaModel` + `LlamaForCausalLM`.** Hardcoded for now; serves as the

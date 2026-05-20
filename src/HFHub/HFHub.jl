@@ -114,12 +114,17 @@ function parse_repo(s::AbstractString; default_revision::AbstractString=DEFAULT_
 end
 
 function _hub_url(ref::RepoRef, filename::AbstractString)
-    return string(default_endpoint(), '/', ref.repo_id, "/resolve/", ref.revision, '/', filename)
+    return string(
+        default_endpoint(), '/', ref.repo_id, "/resolve/", ref.revision, '/', filename
+    )
 end
 
 function _auth_headers(token::Union{AbstractString,Nothing})
-    return isnothing(token) ? Pair{String,String}[] :
-           Pair{String,String}["Authorization" => "Bearer $token"]
+    return if isnothing(token)
+        Pair{String,String}[]
+    else
+        Pair{String,String}["Authorization" => "Bearer $token"]
+    end
 end
 
 """
@@ -169,21 +174,23 @@ function _head_metadata(
     return FileMetadata(strip(raw_etag, '"'), commit, size)
 end
 
-function _download_to(url::AbstractString, dest::AbstractString,
-                      token::Union{AbstractString,Nothing}; verbose::Bool=false)
-    progress = verbose ?
-        (total, now) -> _print_progress(url, total, now) :
-        nothing
+function _download_to(
+    url::AbstractString,
+    dest::AbstractString,
+    token::Union{AbstractString,Nothing};
+    verbose::Bool=false,
+)
+    progress = verbose ? (total, now) -> _print_progress(url, total, now) : nothing
     Downloads.download(url, dest; headers=_auth_headers(token), progress=progress)
     verbose && println()
     return dest
 end
 
 function _print_progress(url, total, now)
-    total == 0 && return
+    total == 0 && return nothing
     pct = round(100 * now / total; digits=1)
     print("\rdownloading $url  $(now)/$(total) bytes ($(pct)%)")
-    return
+    return nothing
 end
 
 """
@@ -219,9 +226,8 @@ function download_file(
         )
         cached_commit = strip(read(refs_file, String))
         snapshot_path = joinpath(repo_folder, "snapshots", cached_commit, filename)
-        ispath(snapshot_path) || error(
-            "local_files_only=true but $snapshot_path is missing from the cache",
-        )
+        ispath(snapshot_path) ||
+            error("local_files_only=true but $snapshot_path is missing from the cache")
         return snapshot_path
     end
 
@@ -297,8 +303,12 @@ function snapshot_download(
     push!(
         paths,
         download_file(
-            repo_id, "config.json"; revision=revision, cache_dir=cache_dir,
-            token=token, verbose=verbose,
+            repo_id,
+            "config.json";
+            revision=revision,
+            cache_dir=cache_dir,
+            token=token,
+            verbose=verbose,
         ),
     )
 
@@ -308,8 +318,12 @@ function snapshot_download(
             push!(
                 paths,
                 download_file(
-                    repo_id, fname; revision=revision, cache_dir=cache_dir,
-                    token=token, verbose=verbose,
+                    repo_id,
+                    fname;
+                    revision=revision,
+                    cache_dir=cache_dir,
+                    token=token,
+                    verbose=verbose,
                 ),
             )
         catch err
@@ -319,8 +333,12 @@ function snapshot_download(
 
     sharded = try
         idx_path = download_file(
-            repo_id, "model.safetensors.index.json";
-            revision=revision, cache_dir=cache_dir, token=token, verbose=verbose,
+            repo_id,
+            "model.safetensors.index.json";
+            revision=revision,
+            cache_dir=cache_dir,
+            token=token,
+            verbose=verbose,
         )
         push!(paths, idx_path)
         idx = JSON3.read(read(idx_path, String))
@@ -328,8 +346,12 @@ function snapshot_download(
             push!(
                 paths,
                 download_file(
-                    repo_id, String(shard);
-                    revision=revision, cache_dir=cache_dir, token=token, verbose=verbose,
+                    repo_id,
+                    String(shard);
+                    revision=revision,
+                    cache_dir=cache_dir,
+                    token=token,
+                    verbose=verbose,
                 ),
             )
         end
@@ -341,8 +363,12 @@ function snapshot_download(
         push!(
             paths,
             download_file(
-                repo_id, "model.safetensors";
-                revision=revision, cache_dir=cache_dir, token=token, verbose=verbose,
+                repo_id,
+                "model.safetensors";
+                revision=revision,
+                cache_dir=cache_dir,
+                token=token,
+                verbose=verbose,
             ),
         )
     end

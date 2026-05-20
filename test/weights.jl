@@ -45,10 +45,7 @@ using Allspark.Models: load_weights
             for k in keys(shard2)
                 weight_map[k] = shard2_name
             end
-            index = Dict(
-                "metadata" => Dict("total_size" => 0),
-                "weight_map" => weight_map,
-            )
+            index = Dict("metadata" => Dict("total_size" => 0), "weight_map" => weight_map)
             index_path = joinpath(dir, "model.safetensors.index.json")
             open(io -> JSON3.write(io, index), index_path, "w")
 

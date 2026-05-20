@@ -21,10 +21,8 @@ using Test
 end
 
 @testset "repo_folder_name" begin
-    @test repo_folder_name("meta-llama/Llama-3.2-1B") ==
-          "models--meta-llama--Llama-3.2-1B"
-    @test repo_folder_name("BAAI/bge-small-en-v1.5") ==
-          "models--BAAI--bge-small-en-v1.5"
+    @test repo_folder_name("meta-llama/Llama-3.2-1B") == "models--meta-llama--Llama-3.2-1B"
+    @test repo_folder_name("BAAI/bge-small-en-v1.5") == "models--BAAI--bge-small-en-v1.5"
     @test repo_folder_name("org/name"; repo_type="dataset") == "datasets--org--name"
 end
 
@@ -65,8 +63,9 @@ if get(ENV, "ALLSPARK_TEST_NETWORK", "0") == "1"
         mktempdir() do cache
             path = HFHub.download_file(repo_id, "config.json"; cache_dir=cache)
             @test isfile(path)
-            @test occursin(joinpath("models--$(replace(repo_id, '/' => "--"))",
-                                    "snapshots"), path)
+            @test occursin(
+                joinpath("models--$(replace(repo_id, '/' => "--"))", "snapshots"), path
+            )
 
             # The path should be a (relative) symlink into ../../blobs/<etag>.
             @test islink(path)
@@ -76,14 +75,14 @@ if get(ENV, "ALLSPARK_TEST_NETWORK", "0") == "1"
 
             # refs/<revision> should hold a commit SHA matching the snapshot dir.
             commit = basename(dirname(path))
-            refs_file = joinpath(cache, "models--$(replace(repo_id, '/' => "--"))",
-                                 "refs", "main")
+            refs_file = joinpath(
+                cache, "models--$(replace(repo_id, '/' => "--"))", "refs", "main"
+            )
             @test isfile(refs_file)
             @test strip(read(refs_file, String)) == commit
 
             # Second call must reuse the cached blob (no re-download).
-            blob_dir = joinpath(cache, "models--$(replace(repo_id, '/' => "--"))",
-                                "blobs")
+            blob_dir = joinpath(cache, "models--$(replace(repo_id, '/' => "--"))", "blobs")
             blob_before = sort(readdir(blob_dir))
             path2 = HFHub.download_file(repo_id, "config.json"; cache_dir=cache)
             @test path2 == path
@@ -91,7 +90,7 @@ if get(ENV, "ALLSPARK_TEST_NETWORK", "0") == "1"
 
             # local_files_only must work after the cache is warm.
             path3 = HFHub.download_file(
-                repo_id, "config.json"; cache_dir=cache, local_files_only=true,
+                repo_id, "config.json"; cache_dir=cache, local_files_only=true
             )
             @test path3 == path
         end
@@ -105,7 +104,7 @@ if get(ENV, "ALLSPARK_TEST_NETWORK", "0") == "1"
             @test isfile(joinpath(snap, "config.json"))
             # Either sharded index or a single safetensors must be present.
             @test isfile(joinpath(snap, "model.safetensors")) ||
-                  isfile(joinpath(snap, "model.safetensors.index.json"))
+                isfile(joinpath(snap, "model.safetensors.index.json"))
         end
     end
 end
