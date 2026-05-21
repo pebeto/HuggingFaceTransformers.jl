@@ -18,8 +18,11 @@ export KVCache, RMSNorm, RoPE, Linear, SiLUGatedMLP, GQA
 """
     KVCache{T <: AbstractArray}
 
-A mutable KV-cache wrapper used to store preallocated keys and values for autoregressive generation.
-Contains fields `k` and `v` of shape `(batch_size, n_kv_heads, max_seq, head_dim)`.
+A mutable KV-cache wrapper holding preallocated keys and values for
+autoregressive generation. Both fields are 4-D arrays of shape
+`(head_dim, n_kv_heads, max_seq, batch_size)` — feature-first to match the
+projection layout used in `GQA`, so cache writes/reads are straight slice
+assignments with no `permutedims`.
 """
 mutable struct KVCache{T<:AbstractArray}
     k::T
@@ -27,19 +30,20 @@ mutable struct KVCache{T<:AbstractArray}
 end
 
 """
-    KVCache(batch_size::Integer, n_kv_heads::Integer, max_seq::Integer, head_dim::Integer; eltype = Float32)
+    KVCache(head_dim::Integer, n_kv_heads::Integer, max_seq::Integer, batch_size::Integer; eltype = Float32)
 
-Create a preallocated `KVCache` of shape `(batch_size, n_kv_heads, max_seq, head_dim)` with element type `eltype`.
+Create a preallocated `KVCache` of shape
+`(head_dim, n_kv_heads, max_seq, batch_size)` with element type `eltype`.
 """
 function KVCache(
-    batch_size::Integer,
+    head_dim::Integer,
     n_kv_heads::Integer,
     max_seq::Integer,
-    head_dim::Integer;
+    batch_size::Integer;
     eltype=Float32,
 )
-    k = zeros(eltype, batch_size, n_kv_heads, max_seq, head_dim)
-    v = zeros(eltype, batch_size, n_kv_heads, max_seq, head_dim)
+    k = zeros(eltype, head_dim, n_kv_heads, max_seq, batch_size)
+    v = zeros(eltype, head_dim, n_kv_heads, max_seq, batch_size)
     return KVCache(k, v)
 end
 
@@ -276,6 +280,14 @@ function repeat_kv(x::AbstractArray, group_size::Integer)
 end
 
 function (m::GQA)(x::AbstractArray; cache=nothing, step=nothing, position_ids=nothing)
+    if !isnothing(cache) && isnothing(step)
+        throw(
+            ArgumentError(
+                "GQA was passed a KV-cache without a `step`; pass both or neither.",
+            ),
+        )
+    end
+
     seq_len = size(x, 2)
     batch_size = size(x, 3)
 
@@ -289,9 +301,10 @@ function (m::GQA)(x::AbstractArray; cache=nothing, step=nothing, position_ids=no
     k = reshape(k, m.head_dim, m.num_heads_k, seq_len, batch_size)
     v = reshape(v, m.head_dim, m.num_heads_k, seq_len, batch_size)
 
-    # Compute position ids if not specified
+    # Compute position ids if not specified — 0-indexed to match HF's RoPE convention.
+    # `step` is a 1-indexed Julia cache slot; the corresponding absolute position is `step - 1`.
     if isnothing(position_ids)
-        start_pos = isnothing(step) ? 1 : step
+        start_pos = isnothing(step) ? 0 : step - 1
         position_ids = collect(start_pos:(start_pos + seq_len - 1))
     end
 
@@ -299,19 +312,13 @@ function (m::GQA)(x::AbstractArray; cache=nothing, step=nothing, position_ids=no
     q_rotated = m.rope(q, position_ids)
     k_rotated = m.rope(k, position_ids)
 
-    # Handle KV cache updates/retrievals
-    if !isnothing(cache) && !isnothing(step)
-        k_perm = permutedims(k_rotated, (4, 2, 3, 1))
-        v_perm = permutedims(v, (4, 2, 3, 1))
-
-        cache.k[:, :, step:(step + seq_len - 1), :] .= k_perm
-        cache.v[:, :, step:(step + seq_len - 1), :] .= v_perm
-
-        k_full_perm = cache.k[:, :, 1:(step + seq_len - 1), :]
-        v_full_perm = cache.v[:, :, 1:(step + seq_len - 1), :]
-
-        k_full = permutedims(k_full_perm, (4, 2, 3, 1))
-        v_full = permutedims(v_full_perm, (4, 2, 3, 1))
+    # Handle KV cache updates/retrievals (no permutedims — cache layout matches k_rotated).
+    if !isnothing(cache)
+        cache_slice = step:(step + seq_len - 1)
+        cache.k[:, :, cache_slice, :] .= k_rotated
+        cache.v[:, :, cache_slice, :] .= v
+        k_full = cache.k[:, :, 1:(step + seq_len - 1), :]
+        v_full = cache.v[:, :, 1:(step + seq_len - 1), :]
     else
         k_full = k_rotated
         v_full = v
@@ -334,9 +341,10 @@ function (m::GQA)(x::AbstractArray; cache=nothing, step=nothing, position_ids=no
 
     scores = batched_mul(q_flat, k_flat_t) ./ sqrt(Float32(m.head_dim))
 
-    # Causal masking
+    # Causal masking. Key at array index `j` is at absolute position `j - 1` (0-indexed);
+    # query `i` is at `position_ids[i]`. Mask iff key_pos > query_pos.
     if seq_len > 1
-        mask = [j > position_ids[i] for i in 1:seq_len, j in 1:seq_len_kv]
+        mask = [(j - 1) > position_ids[i] for i in 1:seq_len, j in 1:seq_len_kv]
         mask_val = mask .* Float32(-1e9)
         scores = scores .+ reshape(mask_val, seq_len, seq_len_kv, 1)
     end

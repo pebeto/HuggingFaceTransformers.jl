@@ -129,10 +129,13 @@ end
     @test any(g[:, 1, 1] .!= 0)
 
     # 3. KV-cache verification
-    # Preallocate cache
-    cache = KVCache(2, num_heads_k, 10, head_dim)
-    @test size(cache.k) == (2, num_heads_k, 10, head_dim)
-    @test size(cache.v) == (2, num_heads_k, 10, head_dim)
+    # Preallocate cache (head_dim, n_kv_heads, max_seq, batch)
+    cache = KVCache(head_dim, num_heads_k, 10, 2)
+    @test size(cache.k) == (head_dim, num_heads_k, 10, 2)
+    @test size(cache.v) == (head_dim, num_heads_k, 10, 2)
+
+    # Passing a cache without a step must error
+    @test_throws ArgumentError gqa(x; cache=cache)
 
     # First: Prefill 3 tokens (step 1)
     x1 = rand(Float32, hidden_dim, 3, 2)
