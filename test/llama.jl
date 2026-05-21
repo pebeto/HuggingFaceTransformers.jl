@@ -1,0 +1,97 @@
+using Test
+using Random
+using Flux
+using Allspark.Models
+using Allspark.Models: TokenEmbedding, build_caches
+
+function _tiny_config(; rope_scaling=nothing)
+    return LlamaConfig(;
+        vocab_size=64,
+        hidden_size=16,
+        intermediate_size=32,
+        num_hidden_layers=2,
+        num_attention_heads=4,
+        num_key_value_heads=2,
+        head_dim=4,
+        max_position_embeddings=16,
+        rope_theta=10000.0,
+        rms_norm_eps=1.0e-5,
+        rope_scaling=rope_scaling,
+    )
+end
+
+@testset "TokenEmbedding" begin
+    embed = TokenEmbedding(10, 4)
+    @test size(embed.weight) == (4, 10)
+
+    ids_vec = [0, 3, 9]
+    @test size(embed(ids_vec)) == (4, 3)
+
+    ids_mat = [0 1; 2 3; 4 5]
+    out = embed(ids_mat)
+    @test size(out) == (4, 3, 2)
+
+    # Embeddings are looked up correctly: column for id == column of weight at id+1
+    @test embed([0])[:, 1] == embed.weight[:, 1]
+    @test embed([7])[:, 1] == embed.weight[:, 8]
+end
+
+@testset "LlamaForCausalLM" begin
+    Random.seed!(0x1234)
+    cfg = _tiny_config()
+    lm = LlamaForCausalLM(cfg)
+
+    @test lm.config === cfg
+    @test length(lm.model.layers) == cfg.num_hidden_layers
+    @test size(lm.lm_head.weight) == (cfg.vocab_size, cfg.hidden_size)
+
+    @testset "forward shapes" begin
+        ids = rand(0:(cfg.vocab_size - 1), 5, 2)
+        logits = lm(ids)
+        @test size(logits) == (cfg.vocab_size, 5, 2)
+    end
+
+    @testset "gradients flow" begin
+        ids = rand(0:(cfg.vocab_size - 1), 3, 1)
+        grads = Flux.gradient(m -> sum(m(ids)), lm)
+        @test grads[1] !== nothing
+        @test grads[1].model !== nothing
+        @test grads[1].lm_head !== nothing
+    end
+
+    @testset "KV-cache prefill→decode parity" begin
+        ids = rand(0:(cfg.vocab_size - 1), 4, 1)
+        out_full = lm(ids)
+
+        caches = build_caches(lm, cfg.max_position_embeddings, 1)
+        @test length(caches) == cfg.num_hidden_layers
+        @test size(caches[1].k) ==
+            (cfg.head_dim, cfg.num_key_value_heads, cfg.max_position_embeddings, 1)
+
+        out_prefill = lm(ids[1:3, :]; caches=caches, step=1)
+        @test size(out_prefill) == (cfg.vocab_size, 3, 1)
+
+        out_decode = lm(ids[4:4, :]; caches=caches, step=4)
+        @test size(out_decode) == (cfg.vocab_size, 1, 1)
+
+        @test isapprox(out_full[:, 4:4, :], out_decode; atol=1.0e-4)
+    end
+end
+
+@testset "Llama-3 rope scaling wires through" begin
+    cfg = _tiny_config(;
+        rope_scaling=LlamaRopeScaling(;
+            factor=8.0,
+            low_freq_factor=1.0,
+            high_freq_factor=4.0,
+            original_max_position_embeddings=8,
+        ),
+    )
+    lm = LlamaForCausalLM(cfg)
+    rope_scaled = lm.model.layers[1].self_attn.rope
+    rope_unscaled = LlamaForCausalLM(_tiny_config()).model.layers[1].self_attn.rope
+    @test rope_scaled.inv_freq != rope_unscaled.inv_freq
+
+    ids = rand(0:(cfg.vocab_size - 1), 3, 1)
+    @test size(lm(ids)) == (cfg.vocab_size, 3, 1)
+end

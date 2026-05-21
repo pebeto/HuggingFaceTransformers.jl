@@ -84,7 +84,7 @@ this one path; we generalize afterward.
 - [x] **Minimal layer kit.** `RMSNorm`, `RoPE` (with scaling hooks for
       Llama3), `Linear` (no bias variant), `SiLU`-gated MLP, GQA attention.
       All `Flux.@layer`-annotated, all `Functors.fmap`-friendly.
-- [ ] **`LlamaModel` + `LlamaForCausalLM`.** Hardcoded for now; serves as the
+- [x] **`LlamaModel` + `LlamaForCausalLM`.** Hardcoded for now; serves as the
       template for Phase 2's generalization.
 - [ ] **State-dict mapping.** Pure-data table mapping HF keys
       (`model.layers.0.self_attn.q_proj.weight`) to internal layer addresses.
