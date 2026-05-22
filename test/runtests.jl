@@ -26,6 +26,10 @@ using Allspark
         include("llama.jl")
     end
 
+    @testset "Generation" begin
+        include("generate.jl")
+    end
+
     @testset "Layers" begin
         include("layers.jl")
     end

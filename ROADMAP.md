@@ -89,11 +89,15 @@ this one path; we generalize afterward.
 - [x] **State-dict mapping.** Pure-data table mapping HF keys
       (`model.layers.0.self_attn.q_proj.weight`) to internal layer addresses.
       Loader walks the table; no method dispatch tricks.
-- [ ] **KV-cache.** Preallocated `(batch, n_kv_heads, max_seq, head_dim)`
-      tensors, mutated in place per step. One shared type, threaded through
-      every decoder block via a struct field — not via global state or
-      `BangBang`-style functional updates.
-- [ ] **`generate()` API.** Greedy, temperature, top-k, top-p, repetition
+- [x] **KV-cache.** Preallocated `(head_dim, n_kv_heads, max_seq, batch)`
+      tensors (feature-first Julia layout — deviates from the originally
+      planned PyTorch ordering so cache writes/reads are zero-copy slice
+      assignments instead of `permutedims`), mutated in place per step.
+      One shared `KVCache` type, threaded through every decoder block as
+      a plain value — not via global state or `BangBang`-style functional
+      updates. `build_caches(lm, max_seq, batch)` allocates a per-layer
+      bundle; `reset!(caches)` zeros them for reuse.
+- [x] **`generate()` API.** Greedy, temperature, top-k, top-p, repetition
       penalty, `max_new_tokens`, EOS stopping. Signature should feel familiar
       to anyone coming from HF's `model.generate`.
 - [ ] **Chat templating.** Minimal Jinja subset (`if`, `for`, variables,

@@ -13,7 +13,7 @@ using NNlib
 using LinearAlgebra
 using Statistics
 
-export KVCache, RMSNorm, RoPE, Linear, SiLUGatedMLP, GQA
+export KVCache, RMSNorm, RoPE, Linear, SiLUGatedMLP, GQA, reset!
 
 """
     KVCache{T <: AbstractArray}
@@ -49,6 +49,40 @@ end
 
 Flux.@layer KVCache
 Flux.Optimisers.trainable(::KVCache) = (;)
+
+Base.eltype(::KVCache{T}) where {T} = eltype(T)
+Base.size(c::KVCache) = size(c.k)
+
+function Base.show(io::IO, c::KVCache)
+    h, k, s, b = size(c.k)
+    return print(
+        io, "KVCache(", h, "×", k, "×", s, "×", b, ", ", eltype(c), ")"
+    )
+end
+
+"""
+    reset!(cache::KVCache) -> cache
+
+Zero the cache's `k` and `v` arrays in place so the same allocation can
+be reused across generations. Returns the cache for chaining.
+"""
+function reset!(cache::KVCache)
+    fill!(cache.k, 0)
+    fill!(cache.v, 0)
+    return cache
+end
+
+"""
+    reset!(caches::AbstractVector{<:KVCache}) -> caches
+
+Reset a per-layer cache bundle (the vector returned by `build_caches`).
+"""
+function reset!(caches::AbstractVector{<:KVCache})
+    for c in caches
+        reset!(c)
+    end
+    return caches
+end
 
 """
     RMSNorm{W, T}

@@ -162,3 +162,33 @@ end
     # Since GQA has randomly initialized weights, out_full[:, 4:4, :] should match out2 exactly (modulo floating point error)
     @test isapprox(out_full[:, 4:4, :], out2, atol=1e-4)
 end
+
+@testset "KVCache affordances" begin
+    using Allspark.Layers: reset!
+
+    cache = KVCache(8, 2, 16, 4)
+    @test eltype(cache) === Float32
+    @test size(cache) == (8, 2, 16, 4)
+    @test occursin("KVCache(8×2×16×4, Float32)", sprint(show, cache))
+
+    # In-place mutation: writing to .k / .v is visible through any alias.
+    aliased = cache
+    cache.k[1, 1, 1, 1] = 7.0f0
+    @test aliased.k[1, 1, 1, 1] == 7.0f0
+
+    # reset! zeros both fields and returns the same cache.
+    cache.v[2, 2, 5, 1] = -3.0f0
+    @test reset!(cache) === cache
+    @test all(cache.k .== 0)
+    @test all(cache.v .== 0)
+
+    # reset! over a Vector{KVCache} (the build_caches shape).
+    caches = [KVCache(4, 2, 8, 1) for _ in 1:3]
+    caches[2].k[1, 1, 1, 1] = 1.0f0
+    reset!(caches)
+    @test all(c -> all(c.k .== 0) && all(c.v .== 0), caches)
+
+    # Custom eltype propagates.
+    cache_f16 = KVCache(8, 2, 16, 4; eltype=Float16)
+    @test eltype(cache_f16) === Float16
+end

@@ -98,8 +98,17 @@ end
         @test size(caches[1].k) ==
             (cfg.head_dim, cfg.num_key_value_heads, cfg.max_position_embeddings, 1)
 
+        cache0 = caches[1]
+        k_arr_id = objectid(cache0.k)
+
         out_prefill = lm(ids[1:3, :]; caches=caches, step=1)
         @test size(out_prefill) == (cfg.vocab_size, 3, 1)
+
+        # The cache is the *same* allocation — we mutate it, never replace it.
+        @test caches[1] === cache0
+        @test objectid(cache0.k) === k_arr_id
+        @test any(cache0.k[:, :, 1:3, :] .!= 0)
+        @test all(cache0.k[:, :, 4:end, :] .== 0)
 
         out_decode = lm(ids[4:4, :]; caches=caches, step=4)
         @test size(out_decode) == (cfg.vocab_size, 1, 1)
