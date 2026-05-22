@@ -204,3 +204,82 @@ function build_caches(
         ) for _ in 1:(cfg.num_hidden_layers)
     ]
 end
+
+"""
+    llama_state_dict_map(cfg::LlamaConfig) -> Dict{String, Tuple{Tuple, Symbol}}
+
+Build the HuggingFace → internal parameter table for a Llama model with
+the given config. Each entry maps an HF parameter name to
+`(julia_path, transform)`, ready to be fed to [`load_into!`](@ref).
+
+Pure data: the table is generated from `cfg` only, with no dispatch on
+model or layer types. Adding a new decoder-only model is a copy-paste of
+this function with the per-block names swapped.
+
+The `lm_head.weight` entry is omitted when `cfg.tie_word_embeddings` is
+true — [`load_state_dict!`](@ref) materializes it from the embedding
+afterwards.
+"""
+function llama_state_dict_map(cfg::LlamaConfig)
+    out = Dict{String,Tuple{Tuple,Symbol}}()
+
+    out["model.embed_tokens.weight"] =
+        ((:model, :embed_tokens, :weight), :transpose)
+
+    for i in 0:(cfg.num_hidden_layers - 1)
+        layer_path = (:model, :layers, i + 1)
+        hf_prefix = "model.layers.$(i)"
+
+        out["$(hf_prefix).input_layernorm.weight"] =
+            ((layer_path..., :input_layernorm, :weight), :as_is)
+        out["$(hf_prefix).self_attn.q_proj.weight"] =
+            ((layer_path..., :self_attn, :wq, :weight), :as_is)
+        out["$(hf_prefix).self_attn.k_proj.weight"] =
+            ((layer_path..., :self_attn, :wk, :weight), :as_is)
+        out["$(hf_prefix).self_attn.v_proj.weight"] =
+            ((layer_path..., :self_attn, :wv, :weight), :as_is)
+        out["$(hf_prefix).self_attn.o_proj.weight"] =
+            ((layer_path..., :self_attn, :wo, :weight), :as_is)
+        out["$(hf_prefix).post_attention_layernorm.weight"] =
+            ((layer_path..., :post_attention_layernorm, :weight), :as_is)
+        out["$(hf_prefix).mlp.gate_proj.weight"] =
+            ((layer_path..., :mlp, :gate_proj, :weight), :as_is)
+        out["$(hf_prefix).mlp.up_proj.weight"] =
+            ((layer_path..., :mlp, :up_proj, :weight), :as_is)
+        out["$(hf_prefix).mlp.down_proj.weight"] =
+            ((layer_path..., :mlp, :down_proj, :weight), :as_is)
+    end
+
+    out["model.norm.weight"] = ((:model, :norm, :weight), :as_is)
+
+    if !cfg.tie_word_embeddings
+        out["lm_head.weight"] = ((:lm_head, :weight), :as_is)
+    end
+
+    return out
+end
+
+"""
+    load_state_dict!(lm::LlamaForCausalLM, weights) -> lm
+
+Populate `lm` in-place from `weights`, an HF-keyed dictionary (typically
+the return value of [`load_weights`](@ref)). When
+`lm.config.tie_word_embeddings` is true, `lm.lm_head.weight` is
+materialized from `lm.model.embed_tokens.weight` after the rest of the
+state-dict is applied.
+"""
+function load_state_dict!(
+    lm::LlamaForCausalLM, weights::AbstractDict{String,<:AbstractArray}
+)
+    load_into!(lm, weights, llama_state_dict_map(lm.config))
+
+    if lm.config.tie_word_embeddings
+        # embed.weight is (hidden, vocab); lm_head.weight is (vocab, hidden).
+        # Materialize the transpose rather than share storage — the loader stays
+        # pure-data this way, and the ~vocab×hidden memory cost is a Phase 4
+        # optimization once we have a real workload to measure against.
+        copyto!(lm.lm_head.weight, permutedims(lm.model.embed_tokens.weight, (2, 1)))
+    end
+
+    return lm
+end

@@ -86,7 +86,7 @@ this one path; we generalize afterward.
       All `Flux.@layer`-annotated, all `Functors.fmap`-friendly.
 - [x] **`LlamaModel` + `LlamaForCausalLM`.** Hardcoded for now; serves as the
       template for Phase 2's generalization.
-- [ ] **State-dict mapping.** Pure-data table mapping HF keys
+- [x] **State-dict mapping.** Pure-data table mapping HF keys
       (`model.layers.0.self_attn.q_proj.weight`) to internal layer addresses.
       Loader walks the table; no method dispatch tricks.
 - [ ] **KV-cache.** Preallocated `(batch, n_kv_heads, max_seq, head_dim)`

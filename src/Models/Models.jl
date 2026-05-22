@@ -12,16 +12,19 @@ using Flux
 using SafeTensors: load_safetensors, load_sharded_safetensors
 using ..Layers: RMSNorm, RoPE, Linear, SiLUGatedMLP, GQA, KVCache
 
-export load_weights
+export load_weights, load_into!
 export LlamaConfig,
     LlamaRopeScaling,
     LlamaDecoderLayer,
     LlamaModel,
     LlamaForCausalLM,
     TokenEmbedding,
-    build_caches
+    build_caches,
+    llama_state_dict_map,
+    load_state_dict!
 
 include("weights.jl")
+include("state_dict.jl")
 include("llama.jl")
 
 end # module Models
