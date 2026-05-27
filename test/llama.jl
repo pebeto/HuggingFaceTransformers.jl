@@ -66,7 +66,7 @@ end
     @test embed([7])[:, 1] == embed.weight[:, 8]
 end
 
-@testset "LlamaForCausalLM" begin
+@testset verbose = true "LlamaForCausalLM" begin
     Random.seed!(0x1234)
     cfg = _tiny_config()
     lm = LlamaForCausalLM(cfg)
@@ -219,7 +219,7 @@ end
     @test lm.lm_head.weight == sd["model.embed_tokens.weight"]
 end
 
-@testset "load_state_dict! — error paths" begin
+@testset verbose = true "load_state_dict! — error paths" begin
     cfg = _tiny_config()
     lm = LlamaForCausalLM(cfg)
 

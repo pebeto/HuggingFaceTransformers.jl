@@ -19,7 +19,7 @@ using Allspark.Tokenizers:
     apply_pre,
     apply_dec
 
-@testset "byte-level mapping" begin
+@testset verbose = true "byte-level mapping" begin
     @testset "bijective over all 256 bytes" begin
         @test length(BYTES_TO_UNICODE) == 256
         @test length(UNICODE_TO_BYTES) == 256
@@ -141,7 +141,7 @@ function _write_fixture(dir; merges_as_strings::Bool=false)
     return path
 end
 
-@testset "load_tokenizer + encode/decode" begin
+@testset verbose = true "load_tokenizer + encode/decode" begin
     @testset "array-format merges" begin
         mktempdir() do dir
             path = _write_fixture(dir)
@@ -213,7 +213,7 @@ end
     end
 end
 
-@testset "pre-tokenizer building blocks" begin
+@testset verbose = true "pre-tokenizer building blocks" begin
     @testset "ByteLevel with regex" begin
         pre = ByteLevelPreTokenizer(false, true)
         @test apply_pre(pre, ["hello world"]) == ["hello", "Ġworld"]

@@ -1,7 +1,7 @@
 using Test
 using Allspark
 
-@testset "Allspark.jl" begin
+@testset verbose = true "Allspark.jl" begin
     @testset "loads cleanly" begin
         @test isdefined(Allspark, :HFHub)
         @test isdefined(Allspark, :Tokenizers)
@@ -10,27 +10,31 @@ using Allspark
         @test isdefined(Allspark, :Generation)
     end
 
-    @testset "HFHub" begin
+    @testset verbose = true "HFHub" begin
         include("hfhub.jl")
     end
 
-    @testset "Weights" begin
+    @testset verbose = true "Weights" begin
         include("weights.jl")
     end
 
-    @testset "Tokenizers" begin
+    @testset verbose = true "Tokenizers" begin
         include("tokenizers.jl")
     end
 
-    @testset "Llama" begin
+    @testset verbose = true "Llama" begin
         include("llama.jl")
     end
 
-    @testset "Generation" begin
+    @testset verbose = true "Generation" begin
         include("generate.jl")
     end
 
-    @testset "Layers" begin
+    @testset verbose = true "ChatTemplate" begin
+        include("chat_template.jl")
+    end
+
+    @testset verbose = true "Layers" begin
         include("layers.jl")
     end
 

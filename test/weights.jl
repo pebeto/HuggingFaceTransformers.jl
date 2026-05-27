@@ -3,7 +3,7 @@ using JSON3
 using SafeTensors: serialize
 using Allspark.Models: load_weights
 
-@testset "load_weights" begin
+@testset verbose = true "load_weights" begin
     @testset "single-file checkpoint" begin
         mktempdir() do dir
             weights = Dict(

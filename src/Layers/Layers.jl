@@ -137,7 +137,6 @@ function RoPE(
     high_freq_factor::Union{Nothing,Real}=nothing,
     old_context_len::Union{Nothing,Integer}=nothing,
 )
-    half_dim = dim ÷ 2
     indices = 0:2:(dim - 2)
     inv_freq = 1.0 ./ (base .^ (indices ./ dim))
 

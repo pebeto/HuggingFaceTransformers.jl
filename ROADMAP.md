@@ -100,9 +100,14 @@ this one path; we generalize afterward.
 - [x] **`generate()` API.** Greedy, temperature, top-k, top-p, repetition
       penalty, `max_new_tokens`, EOS stopping. Signature should feel familiar
       to anyone coming from HF's `model.generate`.
-- [ ] **Chat templating.** Minimal Jinja subset (`if`, `for`, variables,
-      filters: `trim`, `tojson`) — enough to render Llama-3, Qwen2, Mistral
-      templates from `tokenizer_config.json`. No full Jinja engine.
+- [x] **Chat templating.** Minimal Jinja subset (`if` / `elif` / `else`,
+      `for`, `set`, variables, attribute + item access, slicing,
+      arithmetic / comparison / logical ops, `in` / `not in`,
+      `is defined`, filters: `trim`, `tojson`, `raise_exception()`, loop
+      variables, whitespace control) — enough to render simplified
+      Llama-3, Qwen2.5, and Mistral templates from `tokenizer_config.json`.
+      No full Jinja engine (no tuples / list / dict literals, no float
+      literals, no macros, no includes, no custom filters or tests).
 - [ ] **REPL chat example.** `examples/repl_chat.jl` — the
       hello-world that proves the package works.
 - [ ] **First parity test.** Load Llama-3.2-1B, run a fixed prompt, assert

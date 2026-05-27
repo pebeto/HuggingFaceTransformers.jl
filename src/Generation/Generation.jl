@@ -5,17 +5,26 @@ Decoder sampling: `generate()` (greedy / temperature / top-k / top-p /
 repetition penalty / max_new_tokens / EOS), plus the minimal Jinja
 subset needed to render chat templates from `tokenizer_config.json`.
 
-The signature of `generate` deliberately mirrors HuggingFace's
-`model.generate` so callers coming from `transformers` need to relearn
-nothing. Batch-1 only in this release.
+`generate`'s signature mirrors HuggingFace's `model.generate` so callers
+from `transformers` use it without relearning the API. Batch-1 only.
 """
 module Generation
 
+using JSON3
 using Random
 using ..Models: LlamaForCausalLM, build_caches
 using ..Tokenizers: Tokenizer, encode, decode
 
-export generate
+export generate, ChatTemplate, apply_chat_template
+
+include("jinja/ast.jl")
+include("jinja/blocks.jl")
+include("jinja/lexer.jl")
+include("jinja/expr_parser.jl")
+include("jinja/template_parser.jl")
+include("jinja/evaluator.jl")
+include("jinja/renderer.jl")
+include("chat_template.jl")
 
 function _softmax(x::AbstractVector{T}) where {T<:AbstractFloat}
     m = maximum(x)
@@ -134,8 +143,8 @@ sequence. Batch-1 only.
 Keyword arguments mirror HuggingFace's `model.generate`:
 
 - `max_new_tokens::Integer = 16` — cap on tokens to add.
-- `do_sample::Bool = false` — greedy when `false`; the `temperature` /
-  `top_k` / `top_p` / `rng` knobs are ignored.
+- `do_sample::Bool = false` — greedy when `false`; ignores
+  `temperature`, `top_k`, `top_p`, and `rng`.
 - `temperature::Real = 1.0` — divide logits before softmax.
 - `top_k::Union{Nothing, Integer} = nothing` — keep the top-k logits.
 - `top_p::Union{Nothing, Real} = nothing` — nucleus sampling cutoff in `(0, 1]`.
