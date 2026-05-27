@@ -108,8 +108,15 @@ this one path; we generalize afterward.
       Llama-3, Qwen2.5, and Mistral templates from `tokenizer_config.json`.
       No full Jinja engine (no tuples / list / dict literals, no float
       literals, no macros, no includes, no custom filters or tests).
-- [ ] **REPL chat example.** `examples/repl_chat.jl` — the
-      hello-world that proves the package works.
+- [x] **REPL chat example.** `examples/repl_chat.jl` downloads a
+      Llama via `HFHub.snapshot_download`, parses `config.json` /
+      `tokenizer_config.json` / `generation_config.json` inline so the
+      reader sees the full HF → Allspark mapping, builds
+      `LlamaForCausalLM` + `load_state_dict!`, then loops on `stdin`
+      applying the chat template per turn. Falls back to a hardcoded
+      Llama-3 template when the model's bundled `chat_template` uses
+      Jinja features outside our scope (tool calls, date filters,
+      tuple literals).
 - [ ] **First parity test.** Load Llama-3.2-1B, run a fixed prompt, assert
       logits match recorded Python output within `1e-3` (fp32 CPU).
 
