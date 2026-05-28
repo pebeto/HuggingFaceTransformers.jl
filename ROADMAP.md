@@ -140,7 +140,18 @@ decoder LLMs, since that's where demand lives.
       stops at 1B / 3B and a server can opt into 8B / 70B without
       changing code. Fixtures are recorded once by
       `python3 test/fixtures/record_llama_parity.py <VARIANT>`.
-- [ ] Mistral — Llama variant with sliding-window attention.
+- [x] Mistral. `MistralConfig` + `MistralForCausalLM` in
+      `src/Models/mistral.jl` reuse `LlamaDecoderLayer` / `LlamaModel`
+      (the generic decoder pieces) and thread `cfg.sliding_window`
+      into `GQA`. `GQA` grew a `window_size::Union{Nothing,Int}` field
+      and a corresponding mask branch that fires both during prefill
+      (when `seq_len > 1`) and during cached decode (when
+      `seq_len_kv > window`). The HF parameter naming is identical to
+      Llama's, so `mistral_state_dict_map` delegates to the shared
+      `_decoder_state_dict_map` helper. Parity is gated on
+      `ALLSPARK_TEST_PARITY_MISTRAL` (separate from the Llama gate)
+      and covers v0.2 (sliding_window=4096) and v0.3 (no sliding) via
+      `python3 test/fixtures/record_mistral_parity.py <VARIANT>`.
 - [ ] Qwen2 / Qwen2.5 — tied embeddings, different RoPE base.
 - [ ] Gemma2 — logit softcap, sliding window, attention scaling.
 - [ ] Phi-3.

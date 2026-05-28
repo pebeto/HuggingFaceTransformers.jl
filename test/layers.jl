@@ -1,4 +1,5 @@
 using Test
+using Random
 using Allspark.Layers
 using Flux
 using NNlib
@@ -161,6 +162,82 @@ end
 
     # Since GQA has randomly initialized weights, out_full[:, 4:4, :] should match out2 exactly (modulo floating point error)
     @test isapprox(out_full[:, 4:4, :], out2, atol=1e-4)
+end
+
+@testset verbose = true "GQA sliding window" begin
+    hidden_dim = 16
+    num_heads_q = 4
+    num_heads_k = 2
+    head_dim = 8
+    rope = RoPE(head_dim; base=10000.0)
+
+    @testset "window default is nothing (no restriction)" begin
+        gqa = GQA(hidden_dim, num_heads_q, num_heads_k, head_dim, rope)
+        @test gqa.window_size === nothing
+    end
+
+    @testset "window >= seq_len is equivalent to no window" begin
+        # Build two GQAs sharing the same projections; one windowed wider
+        # than the sequence, one unwindowed. They must agree token-for-token.
+        Random.seed!(0xC0FFEE)
+        gqa_full = GQA(hidden_dim, num_heads_q, num_heads_k, head_dim, rope)
+        gqa_wide = GQA(
+            gqa_full.wq,
+            gqa_full.wk,
+            gqa_full.wv,
+            gqa_full.wo,
+            gqa_full.rope,
+            gqa_full.num_heads_q,
+            gqa_full.num_heads_k,
+            gqa_full.head_dim,
+            10,                          # window > seq_len
+        )
+
+        x = rand(Float32, hidden_dim, 5, 1)
+        @test gqa_full(x) ≈ gqa_wide(x)
+    end
+
+    @testset "window restricts past context (output diverges)" begin
+        Random.seed!(0xBADF00D)
+        gqa_full = GQA(hidden_dim, num_heads_q, num_heads_k, head_dim, rope)
+        gqa_win = GQA(
+            gqa_full.wq,
+            gqa_full.wk,
+            gqa_full.wv,
+            gqa_full.wo,
+            gqa_full.rope,
+            gqa_full.num_heads_q,
+            gqa_full.num_heads_k,
+            gqa_full.head_dim,
+            2,                           # window of 2 (self + 1 past)
+        )
+
+        x = rand(Float32, hidden_dim, 5, 1)
+        out_full = gqa_full(x)
+        out_win = gqa_win(x)
+
+        # Within the window: identical (positions 0 and 1 see the same context).
+        @test out_full[:, 1, 1] ≈ out_win[:, 1, 1]
+        @test out_full[:, 2, 1] ≈ out_win[:, 2, 1]
+        # Outside the window: must diverge.
+        @test !(out_full[:, 5, 1] ≈ out_win[:, 5, 1])
+    end
+
+    @testset "decode-step mask applies when cache exceeds window" begin
+        # KV cache with 6 valid slots, window 2. A single-token decode at step 6
+        # must mask everything older than position 4 (slots 1..3 of the cache).
+        gqa = GQA(
+            hidden_dim, num_heads_q, num_heads_k, head_dim, rope; window_size=2
+        )
+        cache = KVCache(head_dim, num_heads_k, 10, 1)
+        # Prefill 5 tokens.
+        x_pref = rand(Float32, hidden_dim, 5, 1)
+        gqa(x_pref; cache=cache, step=1)
+        # Decode one token. Mustn't error; output shape must be correct.
+        x_dec = rand(Float32, hidden_dim, 1, 1)
+        out = gqa(x_dec; cache=cache, step=6)
+        @test size(out) == (hidden_dim, 1, 1)
+    end
 end
 
 @testset "KVCache affordances" begin

@@ -273,6 +273,10 @@ end
 
 Grouped-Query Attention (GQA) layer. Partitions queries into groups sharing key/value heads.
 Accepts an optional `KVCache` to update/retrieve past keys and values.
+
+When `window_size` is set, attention is restricted to a sliding window of the
+`window_size` most-recent positions (inclusive of the current query), matching
+Mistral's sliding-window attention. `nothing` (the default) is plain causal.
 """
 struct GQA{Q,K,V,O,R}
     wq::Q
@@ -283,10 +287,11 @@ struct GQA{Q,K,V,O,R}
     num_heads_q::Int
     num_heads_k::Int
     head_dim::Int
+    window_size::Union{Nothing,Int}
 end
 
 """
-    GQA(hidden_dim::Integer, num_heads_q::Integer, num_heads_k::Integer, head_dim::Integer, rope::RoPE; init = Flux.glorot_uniform)
+    GQA(hidden_dim::Integer, num_heads_q::Integer, num_heads_k::Integer, head_dim::Integer, rope::RoPE; window_size=nothing, init = Flux.glorot_uniform)
 
 Construct a `GQA` layer with key/value caching and RoPE integration.
 """
@@ -296,13 +301,17 @@ function GQA(
     num_heads_k::Integer,
     head_dim::Integer,
     rope::RoPE;
+    window_size::Union{Nothing,Integer}=nothing,
     init=Flux.glorot_uniform,
 )
     wq = Linear(hidden_dim, num_heads_q * head_dim; init=init)
     wk = Linear(hidden_dim, num_heads_k * head_dim; init=init)
     wv = Linear(hidden_dim, num_heads_k * head_dim; init=init)
     wo = Linear(num_heads_q * head_dim, hidden_dim; init=init)
-    return GQA(wq, wk, wv, wo, rope, Int(num_heads_q), Int(num_heads_k), Int(head_dim))
+    win = isnothing(window_size) ? nothing : Int(window_size)
+    return GQA(
+        wq, wk, wv, wo, rope, Int(num_heads_q), Int(num_heads_k), Int(head_dim), win
+    )
 end
 
 function repeat_kv(x::AbstractArray, group_size::Integer)
@@ -374,10 +383,25 @@ function (m::GQA)(x::AbstractArray; cache=nothing, step=nothing, position_ids=no
 
     scores = batched_mul(q_flat, k_flat_t) ./ sqrt(Float32(m.head_dim))
 
-    # Causal masking. Key at array index `j` is at absolute position `j - 1` (0-indexed);
-    # query `i` is at `position_ids[i]`. Mask iff key_pos > query_pos.
-    if seq_len > 1
-        mask = [(j - 1) > position_ids[i] for i in 1:seq_len, j in 1:seq_len_kv]
+    # Mask construction. Key at array index `j` is at absolute position `j - 1`
+    # (0-indexed); query `i` is at `position_ids[i]`. Mask iff:
+    #   - causal:   key_pos > query_pos, or
+    #   - sliding:  query_pos - key_pos >= window_size (when set).
+    # The seq_len==1 fast path holds for plain causal (single query never sees a
+    # future key), but a sliding window of size W still needs masking once the
+    # KV cache exceeds W entries — hence the second branch of `needs_mask`.
+    has_window = !isnothing(m.window_size)
+    needs_mask = seq_len > 1 || (has_window && seq_len_kv > m.window_size)
+    if needs_mask
+        mask = if has_window
+            w = m.window_size
+            [
+                (j - 1) > position_ids[i] || position_ids[i] - (j - 1) >= w for
+                i in 1:seq_len, j in 1:seq_len_kv
+            ]
+        else
+            [(j - 1) > position_ids[i] for i in 1:seq_len, j in 1:seq_len_kv]
+        end
         mask_val = mask .* Float32(-1e9)
         scores = scores .+ reshape(mask_val, seq_len, seq_len_kv, 1)
     end

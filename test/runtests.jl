@@ -26,6 +26,10 @@ using Allspark
         include("llama.jl")
     end
 
+    @testset verbose = true "Mistral" begin
+        include("mistral.jl")
+    end
+
     @testset verbose = true "Generation" begin
         include("generate.jl")
     end
@@ -56,6 +60,12 @@ using Allspark
     if !isempty(get(ENV, "ALLSPARK_TEST_PARITY", ""))
         @testset verbose = true "Llama parity" begin
             include("parity_llama.jl")
+        end
+    end
+
+    if !isempty(get(ENV, "ALLSPARK_TEST_PARITY_MISTRAL", ""))
+        @testset verbose = true "Mistral parity" begin
+            include("parity_mistral.jl")
         end
     end
 end

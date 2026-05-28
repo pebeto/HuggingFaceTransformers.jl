@@ -221,12 +221,28 @@ true — [`load_state_dict!`](@ref) materializes it from the embedding
 afterwards.
 """
 function llama_state_dict_map(cfg::LlamaConfig)
+    return _decoder_state_dict_map(cfg.num_hidden_layers, cfg.tie_word_embeddings)
+end
+
+"""
+    _decoder_state_dict_map(num_hidden_layers, tie_word_embeddings) -> Dict
+
+Pure-data state-dict map for any HF decoder-only LM whose parameter naming
+matches the Llama / Mistral convention (`model.embed_tokens.weight`,
+`model.layers.{i}.self_attn.{q,k,v,o}_proj.weight`, `model.layers.{i}.mlp.{gate,up,down}_proj.weight`,
+`model.layers.{i}.{input_layernorm,post_attention_layernorm}.weight`,
+`model.norm.weight`, optional `lm_head.weight`).
+
+Both `llama_state_dict_map` and `mistral_state_dict_map` delegate here so a
+fix to the path table benefits every consumer.
+"""
+function _decoder_state_dict_map(num_hidden_layers::Integer, tie_word_embeddings::Bool)
     out = Dict{String,Tuple{Tuple,Symbol}}()
 
     out["model.embed_tokens.weight"] =
         ((:model, :embed_tokens, :weight), :transpose)
 
-    for i in 0:(cfg.num_hidden_layers - 1)
+    for i in 0:(num_hidden_layers - 1)
         layer_path = (:model, :layers, i + 1)
         hf_prefix = "model.layers.$(i)"
 
@@ -252,7 +268,7 @@ function llama_state_dict_map(cfg::LlamaConfig)
 
     out["model.norm.weight"] = ((:model, :norm, :weight), :as_is)
 
-    if !cfg.tie_word_embeddings
+    if !tie_word_embeddings
         out["lm_head.weight"] = ((:lm_head, :weight), :as_is)
     end
 

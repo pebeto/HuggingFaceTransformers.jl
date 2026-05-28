@@ -12,7 +12,9 @@ module Generation
 
 using JSON3
 using Random
-using ..Models: LlamaForCausalLM, build_caches
+using ..Models: LlamaForCausalLM, MistralForCausalLM, build_caches
+
+const DecoderLM = Union{LlamaForCausalLM,MistralForCausalLM}
 using ..Tokenizers: Tokenizer, encode, decode
 
 export generate, ChatTemplate, apply_chat_template
@@ -155,7 +157,7 @@ Keyword arguments mirror HuggingFace's `model.generate`:
 - `rng::AbstractRNG = Random.default_rng()`.
 """
 function generate(
-    lm::LlamaForCausalLM,
+    lm::DecoderLM,
     input_ids::AbstractVector{<:Integer};
     max_new_tokens::Integer=16,
     do_sample::Bool=false,
@@ -213,7 +215,7 @@ end
 Tokenize → generate → detokenize. The REPL-friendly entry point.
 """
 function generate(
-    lm::LlamaForCausalLM,
+    lm::DecoderLM,
     tokenizer::Tokenizer,
     prompt::AbstractString;
     kwargs...,
