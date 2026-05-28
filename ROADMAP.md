@@ -117,8 +117,16 @@ this one path; we generalize afterward.
       Llama-3 template when the model's bundled `chat_template` uses
       Jinja features outside our scope (tool calls, date filters,
       tuple literals).
-- [ ] **First parity test.** Load Llama-3.2-1B, run a fixed prompt, assert
-      logits match recorded Python output within `1e-3` (fp32 CPU).
+- [x] **First parity test.** `test/parity_llama.jl` loads
+      Llama-3.2-1B-Instruct, encodes a fixed prompt, runs the model in
+      fp32 CPU, and asserts that the last-position argmax + top-50
+      logits match a recorded HuggingFace fixture within `1e-3`. Gated
+      on `ALLSPARK_TEST_PARITY=1` so the default `Pkg.test()` stays
+      offline. The reference fixture
+      (`test/fixtures/llama_3_2_1b_parity.json`) is generated once by
+      `test/fixtures/record_llama_parity.py`, which uses
+      `transformers` + `torch` with eager attention and no special-token
+      injection so the comparison is apples-to-apples.
 
 ## Phase 2 — Generalize: model coverage
 

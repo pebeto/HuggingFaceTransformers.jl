@@ -45,4 +45,13 @@ using Allspark
     @testset "JET smoke" begin
         include("jet.jl")
     end
+
+    # Integration parity test: requires HF model download + a recorded
+    # Python-side fixture. Gated so default `Pkg.test()` stays fast and
+    # offline. Set ALLSPARK_TEST_PARITY=1 to opt in.
+    if get(ENV, "ALLSPARK_TEST_PARITY", "0") == "1"
+        @testset verbose = true "Llama-3.2-1B parity" begin
+            include("parity_llama.jl")
+        end
+    end
 end
