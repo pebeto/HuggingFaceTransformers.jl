@@ -46,11 +46,15 @@ using Allspark
         include("jet.jl")
     end
 
-    # Integration parity test: requires HF model download + a recorded
-    # Python-side fixture. Gated so default `Pkg.test()` stays fast and
-    # offline. Set ALLSPARK_TEST_PARITY=1 to opt in.
-    if get(ENV, "ALLSPARK_TEST_PARITY", "0") == "1"
-        @testset verbose = true "Llama-3.2-1B parity" begin
+    # Integration parity tests: each variant needs an HF model download +
+    # a recorded Python-side fixture. Gated so default `Pkg.test()` stays
+    # fast and offline. Examples:
+    #   ALLSPARK_TEST_PARITY=1B           # one variant
+    #   ALLSPARK_TEST_PARITY=1B,3B        # several
+    #   ALLSPARK_TEST_PARITY=all          # everything with a fixture present
+    #   ALLSPARK_TEST_PARITY=1            # legacy alias for 1B
+    if !isempty(get(ENV, "ALLSPARK_TEST_PARITY", ""))
+        @testset verbose = true "Llama parity" begin
             include("parity_llama.jl")
         end
     end

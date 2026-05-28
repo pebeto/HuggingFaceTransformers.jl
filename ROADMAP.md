@@ -117,16 +117,13 @@ this one path; we generalize afterward.
       Llama-3 template when the model's bundled `chat_template` uses
       Jinja features outside our scope (tool calls, date filters,
       tuple literals).
-- [x] **First parity test.** `test/parity_llama.jl` loads
-      Llama-3.2-1B-Instruct, encodes a fixed prompt, runs the model in
-      fp32 CPU, and asserts that the last-position argmax + top-50
-      logits match a recorded HuggingFace fixture within `1e-3`. Gated
-      on `ALLSPARK_TEST_PARITY=1` so the default `Pkg.test()` stays
-      offline. The reference fixture
-      (`test/fixtures/llama_3_2_1b_parity.json`) is generated once by
-      `test/fixtures/record_llama_parity.py`, which uses
-      `transformers` + `torch` with eager attention and no special-token
-      injection so the comparison is apples-to-apples.
+- [x] **First parity test.** `test/parity_llama.jl` loads a Llama
+      variant, encodes a fixed prompt, runs the model in fp32 CPU,
+      and asserts that the last-position argmax + top-50 logits match
+      a recorded HuggingFace fixture within `1e-3` (per-fixture
+      `tolerance` overridable). Variants are individually gated so a
+      laptop can run 1B / 3B while a server opts into 8B / 70B; see
+      Phase 2's "Llama 3.x variants" entry for the full table.
 
 ## Phase 2 — Generalize: model coverage
 
@@ -134,8 +131,15 @@ Each model needs the five-part contract: config struct, layer wiring,
 state-dict map, numeric-parity test, runnable example. Bias toward modern
 decoder LLMs, since that's where demand lives.
 
-- [ ] Llama 3.x variants (covered by Phase 1; just add 3B, 8B, 70B parity
-      tests gated on resource availability).
+- [x] Llama 3.x variants. `test/parity_llama.jl` is parameterized over
+      a `VARIANTS` table — `1B` (`meta-llama/Llama-3.2-1B-Instruct`),
+      `3B` (`Llama-3.2-3B-Instruct`), `8B` (`Llama-3.1-8B-Instruct`),
+      `70B` (`Llama-3.1-70B-Instruct`). Each variant runs only when
+      both (a) the env gate `ALLSPARK_TEST_PARITY` names it (or `all`)
+      and (b) the corresponding fixture file exists, so a laptop run
+      stops at 1B / 3B and a server can opt into 8B / 70B without
+      changing code. Fixtures are recorded once by
+      `python3 test/fixtures/record_llama_parity.py <VARIANT>`.
 - [ ] Mistral — Llama variant with sliding-window attention.
 - [ ] Qwen2 / Qwen2.5 — tied embeddings, different RoPE base.
 - [ ] Gemma2 — logit softcap, sliding window, attention scaling.
