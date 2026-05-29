@@ -152,7 +152,20 @@ decoder LLMs, since that's where demand lives.
       `ALLSPARK_TEST_PARITY_MISTRAL` (separate from the Llama gate)
       and covers v0.2 (sliding_window=4096) and v0.3 (no sliding) via
       `python3 test/fixtures/record_mistral_parity.py <VARIANT>`.
-- [ ] Qwen2 / Qwen2.5 — tied embeddings, different RoPE base.
+- [x] Qwen2 / Qwen2.5. `QwenConfig` + `QwenForCausalLM` in
+      `src/Models/qwen.jl` reuse `LlamaDecoderLayer` / `LlamaModel`.
+      The architectural deltas vs Llama/Mistral that landed here:
+      `Linear` now carries an optional bias (dispatched on the type
+      parameter so the no-bias path stays branch-free); `GQA` takes
+      `qkv_bias=true` to wire bias into Q/K/V but not O; and
+      `_decoder_state_dict_map` accepts `qkv_bias=true` to emit the
+      `q_proj.bias` / `k_proj.bias` / `v_proj.bias` entries that
+      Qwen weights carry. `tie_word_embeddings` is honored as for
+      Llama (Qwen2.5 0.5B and 1.5B tie; 3B and 7B don't). Parity is
+      gated on `ALLSPARK_TEST_PARITY_QWEN` and covers 0.5B / 1.5B /
+      3B / 7B via `python3 test/fixtures/record_qwen_parity.py
+      <VARIANT>`. Example: `examples/repl_chat_qwen.jl` with a
+      ChatML-format fallback template.
 - [ ] Gemma2 — logit softcap, sliding window, attention scaling.
 - [ ] Phi-3.
 - [ ] GPT-2 / GPT-NeoX (encoder-light legacy support, useful for tests and

@@ -75,20 +75,45 @@ end
     @test Flux.Optimisers.trainable(rope) == (;)
 end
 
-@testset "Linear (no bias)" begin
-    lin = Linear(4, 3)
-    @test size(lin.weight) == (3, 4)
+@testset verbose = true "Linear" begin
+    @testset "no bias (default)" begin
+        lin = Linear(4, 3)
+        @test size(lin.weight) == (3, 4)
+        @test lin.bias === nothing
 
-    x = rand(Float32, 4, 5, 2)
-    y = lin(x)
-    @test size(y) == (3, 5, 2)
+        x = rand(Float32, 4, 5, 2)
+        y = lin(x)
+        @test size(y) == (3, 5, 2)
 
-    # Test gradient flow and parameter updates
-    grads = Flux.gradient(m -> sum(m(x)), lin)
-    @test grads[1] !== nothing
-    @test size(grads[1].weight) == (3, 4)
+        grads = Flux.gradient(m -> sum(m(x)), lin)
+        @test grads[1] !== nothing
+        @test size(grads[1].weight) == (3, 4)
+        @test keys(Flux.Optimisers.trainable(lin)) == (:weight,)
+    end
 
-    @test keys(Flux.Optimisers.trainable(lin)) == (:weight,)
+    @testset "with bias" begin
+        lin = Linear(4, 3; bias=true)
+        @test size(lin.weight) == (3, 4)
+        @test lin.bias isa AbstractVector
+        @test length(lin.bias) == 3
+        # Default bias is zero, so output should equal no-bias output.
+        @test all(lin.bias .== 0)
+
+        x = rand(Float32, 4, 5, 2)
+        y = lin(x)
+        @test size(y) == (3, 5, 2)
+
+        # Set a non-zero bias and verify it's added to the output.
+        lin.bias .= Float32[1, 10, 100]
+        y2 = lin(x)
+        # y2 - y should equal the bias broadcast across (5, 2).
+        diff = y2 .- y
+        @test diff[1, 1, 1] ≈ 1.0f0
+        @test diff[2, 3, 2] ≈ 10.0f0
+        @test diff[3, 5, 1] ≈ 100.0f0
+
+        @test keys(Flux.Optimisers.trainable(lin)) == (:weight, :bias)
+    end
 end
 
 @testset "SiLUGatedMLP" begin

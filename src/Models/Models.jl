@@ -23,10 +23,12 @@ export LlamaConfig,
     llama_state_dict_map,
     load_state_dict!
 export MistralConfig, MistralForCausalLM, mistral_state_dict_map
+export QwenConfig, QwenForCausalLM, qwen_state_dict_map
 
 include("weights.jl")
 include("state_dict.jl")
 include("llama.jl")
 include("mistral.jl")
+include("qwen.jl")
 
 end # module Models

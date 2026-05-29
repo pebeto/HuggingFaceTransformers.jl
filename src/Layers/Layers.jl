@@ -203,33 +203,54 @@ Flux.@layer RoPE
 Flux.Optimisers.trainable(::RoPE) = (;)
 
 """
-    Linear{W}
+    Linear{W, B}
 
-A bias-less linear projection layer. Computes W * x for any input array `x` by flattening extra dimensions.
+A linear projection layer with optional bias. `B` is `Nothing` for a
+bias-less layer (Llama / Mistral convention) or an `AbstractVector` when
+a bias is present (Qwen Q/K/V projections, BERT linears, …).
+
+Forward and `trainable` dispatch on `B` so the no-bias path stays free
+of runtime branching.
 """
-struct Linear{W}
+struct Linear{W,B}
     weight::W
+    bias::B
 end
 
 """
-    Linear(in_features::Integer, out_features::Integer; init = Flux.glorot_uniform)
+    Linear(in_features::Integer, out_features::Integer; bias=false, init = Flux.glorot_uniform)
 
-Construct a bias-less `Linear` layer with input dimension `in_features` and output dimension `out_features`.
+Construct a `Linear` layer with input dimension `in_features` and output
+dimension `out_features`. Set `bias=true` for an additive bias vector
+initialized to zero.
 """
-function Linear(in_features::Integer, out_features::Integer; init=Flux.glorot_uniform)
+function Linear(
+    in_features::Integer, out_features::Integer; bias::Bool=false, init=Flux.glorot_uniform
+)
     weight = init(out_features, in_features)
-    return Linear(weight)
+    b = bias ? zeros(Float32, out_features) : nothing
+    return Linear(weight, b)
 end
 
-function (m::Linear)(x::AbstractArray)
+function (m::Linear{W,Nothing})(x::AbstractArray) where {W}
     sz = size(x)
     x_flat = reshape(x, sz[1], :)
     y_flat = m.weight * x_flat
     return reshape(y_flat, size(m.weight, 1), sz[2:end]...)
 end
 
+function (m::Linear{W,<:AbstractVector})(x::AbstractArray) where {W}
+    sz = size(x)
+    x_flat = reshape(x, sz[1], :)
+    y_flat = m.weight * x_flat .+ m.bias
+    return reshape(y_flat, size(m.weight, 1), sz[2:end]...)
+end
+
 Flux.@layer Linear
-Flux.Optimisers.trainable(m::Linear) = (; weight=m.weight)
+Flux.Optimisers.trainable(m::Linear{W,Nothing}) where {W} = (; weight=m.weight)
+function Flux.Optimisers.trainable(m::Linear{W,<:AbstractVector}) where {W}
+    return (; weight=m.weight, bias=m.bias)
+end
 
 """
     SiLUGatedMLP{G, U, D}
@@ -291,9 +312,13 @@ struct GQA{Q,K,V,O,R}
 end
 
 """
-    GQA(hidden_dim::Integer, num_heads_q::Integer, num_heads_k::Integer, head_dim::Integer, rope::RoPE; window_size=nothing, init = Flux.glorot_uniform)
+    GQA(hidden_dim::Integer, num_heads_q::Integer, num_heads_k::Integer, head_dim::Integer, rope::RoPE; window_size=nothing, qkv_bias=false, init = Flux.glorot_uniform)
 
 Construct a `GQA` layer with key/value caching and RoPE integration.
+
+`qkv_bias=true` adds an additive bias to the Q/K/V projections (matching
+Qwen2/2.5 and other architectures that bias QKV but not the output
+projection). `wo` never carries a bias.
 """
 function GQA(
     hidden_dim::Integer,
@@ -302,11 +327,12 @@ function GQA(
     head_dim::Integer,
     rope::RoPE;
     window_size::Union{Nothing,Integer}=nothing,
+    qkv_bias::Bool=false,
     init=Flux.glorot_uniform,
 )
-    wq = Linear(hidden_dim, num_heads_q * head_dim; init=init)
-    wk = Linear(hidden_dim, num_heads_k * head_dim; init=init)
-    wv = Linear(hidden_dim, num_heads_k * head_dim; init=init)
+    wq = Linear(hidden_dim, num_heads_q * head_dim; bias=qkv_bias, init=init)
+    wk = Linear(hidden_dim, num_heads_k * head_dim; bias=qkv_bias, init=init)
+    wv = Linear(hidden_dim, num_heads_k * head_dim; bias=qkv_bias, init=init)
     wo = Linear(num_heads_q * head_dim, hidden_dim; init=init)
     win = isnothing(window_size) ? nothing : Int(window_size)
     return GQA(

@@ -30,6 +30,10 @@ using Allspark
         include("mistral.jl")
     end
 
+    @testset verbose = true "Qwen" begin
+        include("qwen.jl")
+    end
+
     @testset verbose = true "Generation" begin
         include("generate.jl")
     end
@@ -66,6 +70,12 @@ using Allspark
     if !isempty(get(ENV, "ALLSPARK_TEST_PARITY_MISTRAL", ""))
         @testset verbose = true "Mistral parity" begin
             include("parity_mistral.jl")
+        end
+    end
+
+    if !isempty(get(ENV, "ALLSPARK_TEST_PARITY_QWEN", ""))
+        @testset verbose = true "Qwen parity" begin
+            include("parity_qwen.jl")
         end
     end
 end

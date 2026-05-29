@@ -225,18 +225,24 @@ function llama_state_dict_map(cfg::LlamaConfig)
 end
 
 """
-    _decoder_state_dict_map(num_hidden_layers, tie_word_embeddings) -> Dict
+    _decoder_state_dict_map(num_hidden_layers, tie_word_embeddings; qkv_bias=false) -> Dict
 
 Pure-data state-dict map for any HF decoder-only LM whose parameter naming
-matches the Llama / Mistral convention (`model.embed_tokens.weight`,
+matches the Llama / Mistral / Qwen convention (`model.embed_tokens.weight`,
 `model.layers.{i}.self_attn.{q,k,v,o}_proj.weight`, `model.layers.{i}.mlp.{gate,up,down}_proj.weight`,
 `model.layers.{i}.{input_layernorm,post_attention_layernorm}.weight`,
 `model.norm.weight`, optional `lm_head.weight`).
 
-Both `llama_state_dict_map` and `mistral_state_dict_map` delegate here so a
-fix to the path table benefits every consumer.
+`qkv_bias=true` additionally emits entries for `q_proj.bias`, `k_proj.bias`,
+and `v_proj.bias` — used by Qwen2/2.5, which biases QKV but not the output
+projection.
+
+`llama_state_dict_map`, `mistral_state_dict_map`, and `qwen_state_dict_map`
+delegate here so a fix to the path table benefits every consumer.
 """
-function _decoder_state_dict_map(num_hidden_layers::Integer, tie_word_embeddings::Bool)
+function _decoder_state_dict_map(
+    num_hidden_layers::Integer, tie_word_embeddings::Bool; qkv_bias::Bool=false
+)
     out = Dict{String,Tuple{Tuple,Symbol}}()
 
     out["model.embed_tokens.weight"] =
@@ -256,6 +262,14 @@ function _decoder_state_dict_map(num_hidden_layers::Integer, tie_word_embeddings
             ((layer_path..., :self_attn, :wv, :weight), :as_is)
         out["$(hf_prefix).self_attn.o_proj.weight"] =
             ((layer_path..., :self_attn, :wo, :weight), :as_is)
+        if qkv_bias
+            out["$(hf_prefix).self_attn.q_proj.bias"] =
+                ((layer_path..., :self_attn, :wq, :bias), :as_is)
+            out["$(hf_prefix).self_attn.k_proj.bias"] =
+                ((layer_path..., :self_attn, :wk, :bias), :as_is)
+            out["$(hf_prefix).self_attn.v_proj.bias"] =
+                ((layer_path..., :self_attn, :wv, :bias), :as_is)
+        end
         out["$(hf_prefix).post_attention_layernorm.weight"] =
             ((layer_path..., :post_attention_layernorm, :weight), :as_is)
         out["$(hf_prefix).mlp.gate_proj.weight"] =
