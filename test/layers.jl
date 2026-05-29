@@ -189,6 +189,137 @@ end
     @test isapprox(out_full[:, 4:4, :], out2, atol=1e-4)
 end
 
+@testset verbose = true "GemmaRMSNorm" begin
+    dim = 8
+
+    @testset "default weight=0 gives identity-scaled output" begin
+        rms = GemmaRMSNorm(dim)
+        # With weight=0, scaling is (1 + 0) = 1, so we recover the un-scaled
+        # RMS-normalized vector.
+        x = randn(Float32, dim, 3, 2)
+        out = rms(x)
+        # Direct computation: x / rms(x) with no scale.
+        expected = x ./ sqrt.(sum(x .^ 2; dims=1) ./ dim .+ rms.eps)
+        @test out ≈ expected
+    end
+
+    @testset "weight=1 scales by 2" begin
+        rms = GemmaRMSNorm(dim)
+        fill!(rms.weight, 1.0f0)
+        x = randn(Float32, dim, 3, 2)
+        out = rms(x)
+        expected = 2 .* (x ./ sqrt.(sum(x .^ 2; dims=1) ./ dim .+ rms.eps))
+        @test out ≈ expected
+    end
+end
+
+@testset verbose = true "softcap" begin
+    @testset "nothing is identity" begin
+        x = randn(Float32, 4, 3)
+        @test softcap(x, nothing) === x
+    end
+
+    @testset "cap*tanh(x/cap) on arrays" begin
+        x = Float32[0, 1, 100, -100]
+        cap = 5.0
+        out = softcap(x, cap)
+        @test all(abs.(out) .<= 5.0)             # bounded (fp32 saturates to exactly ±cap)
+        @test out[1] ≈ 0.0                        # softcap(0) = 0
+        # Inputs ≫ cap saturate at ±cap.
+        @test isapprox(out[3], 5.0; atol=1e-3)
+        @test isapprox(out[4], -5.0; atol=1e-3)
+    end
+end
+
+@testset verbose = true "GeluGatedMLP" begin
+    mlp = GeluGatedMLP(4, 8)
+    x = rand(Float32, 4, 5, 2)
+    y = mlp(x)
+    @test size(y) == (4, 5, 2)
+
+    grads = Flux.gradient(m -> sum(m(x)), mlp)
+    @test grads[1] !== nothing
+    @test keys(Flux.Optimisers.trainable(mlp)) == (:gate_proj, :up_proj, :down_proj)
+
+    # GELU and SiLU differ — same weights should give different outputs.
+    silu = SiLUGatedMLP(4, 8)
+    # Share projections for a fair comparison.
+    silu.gate_proj.weight .= mlp.gate_proj.weight
+    silu.up_proj.weight .= mlp.up_proj.weight
+    silu.down_proj.weight .= mlp.down_proj.weight
+    @test !(mlp(x) ≈ silu(x))
+end
+
+@testset verbose = true "GQA softcap and query_scale" begin
+    hidden_dim = 16
+    num_heads_q = 4
+    num_heads_k = 2
+    head_dim = 8
+    rope = RoPE(head_dim; base=10000.0)
+
+    @testset "softcap bounds attention output stability" begin
+        # With softcap, attention scores are pre-bounded. Compare against
+        # an identical GQA without softcap — the outputs must differ.
+        Random.seed!(0xCAFE)
+        gqa_raw = GQA(hidden_dim, num_heads_q, num_heads_k, head_dim, rope)
+        gqa_cap = GQA(
+            gqa_raw.wq,
+            gqa_raw.wk,
+            gqa_raw.wv,
+            gqa_raw.wo,
+            gqa_raw.rope,
+            gqa_raw.num_heads_q,
+            gqa_raw.num_heads_k,
+            gqa_raw.head_dim,
+            nothing,           # window_size
+            5.0f0,             # softcap
+            nothing,           # query_scale
+        )
+        x = randn(Float32, hidden_dim, 4, 1) .* 10   # large inputs → big scores
+        out_raw = gqa_raw(x)
+        out_cap = gqa_cap(x)
+        @test size(out_cap) == size(out_raw)
+        @test !(out_raw ≈ out_cap)
+    end
+
+    @testset "query_scale overrides sqrt(head_dim)" begin
+        # Use query_scale = sqrt(head_dim) explicitly — should match the default.
+        Random.seed!(0xFEED)
+        gqa_default = GQA(hidden_dim, num_heads_q, num_heads_k, head_dim, rope)
+        gqa_match = GQA(
+            gqa_default.wq,
+            gqa_default.wk,
+            gqa_default.wv,
+            gqa_default.wo,
+            gqa_default.rope,
+            gqa_default.num_heads_q,
+            gqa_default.num_heads_k,
+            gqa_default.head_dim,
+            nothing,
+            nothing,
+            Float32(sqrt(head_dim)),
+        )
+        x = randn(Float32, hidden_dim, 4, 1)
+        @test gqa_default(x) ≈ gqa_match(x)
+
+        # And a different query_scale must change the result.
+        gqa_other = GQA(
+            gqa_default.wq,
+            gqa_default.wk,
+            gqa_default.wv,
+            gqa_default.wo,
+            gqa_default.rope,
+            gqa_default.num_heads_q,
+            gqa_default.num_heads_k,
+            gqa_default.head_dim,
+            nothing,
+            nothing,
+            Float32(2.0 * sqrt(head_dim)),
+        )
+        @test !(gqa_default(x) ≈ gqa_other(x))
+    end
+end
+
 @testset verbose = true "GQA sliding window" begin
     hidden_dim = 16
     num_heads_q = 4
@@ -216,6 +347,8 @@ end
             gqa_full.num_heads_k,
             gqa_full.head_dim,
             10,                          # window > seq_len
+            nothing,                     # softcap
+            nothing,                     # query_scale
         )
 
         x = rand(Float32, hidden_dim, 5, 1)
@@ -235,6 +368,8 @@ end
             gqa_full.num_heads_k,
             gqa_full.head_dim,
             2,                           # window of 2 (self + 1 past)
+            nothing,                     # softcap
+            nothing,                     # query_scale
         )
 
         x = rand(Float32, hidden_dim, 5, 1)

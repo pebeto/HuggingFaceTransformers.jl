@@ -13,7 +13,16 @@ using NNlib
 using LinearAlgebra
 using Statistics
 
-export KVCache, RMSNorm, RoPE, Linear, SiLUGatedMLP, GQA, reset!
+export KVCache,
+    RMSNorm,
+    GemmaRMSNorm,
+    RoPE,
+    Linear,
+    SiLUGatedMLP,
+    GeluGatedMLP,
+    GQA,
+    softcap,
+    reset!
 
 """
     KVCache{T <: AbstractArray}
@@ -112,6 +121,51 @@ end
 
 Flux.@layer RMSNorm
 Flux.Optimisers.trainable(m::RMSNorm) = (; weight=m.weight)
+
+"""
+    GemmaRMSNorm{W, T}
+
+Gemma2's RMSNorm variant: scales by `(1 + weight)` instead of just
+`weight`. The off-by-one matters for numerical parity — HF's checkpoint
+weights are stored under the assumption of this scaling, so substituting
+plain `RMSNorm` yields drifted logits.
+"""
+struct GemmaRMSNorm{W,T}
+    weight::W
+    eps::T
+end
+
+"""
+    GemmaRMSNorm(dim::Integer, eps::Real = 1f-6)
+
+Construct a `GemmaRMSNorm` layer of dimension `dim`. The weight starts
+at zero (so `(1 + weight) = 1` and the norm is identity-scaled before
+loading from the checkpoint).
+"""
+function GemmaRMSNorm(dim::Integer, eps::Real=1.0f-6)
+    weight = zeros(Float32, dim)
+    return GemmaRMSNorm(weight, Float32(eps))
+end
+
+function (m::GemmaRMSNorm)(x::AbstractArray)
+    rms = sqrt.(sum(x .^ 2; dims=1) ./ size(x, 1) .+ m.eps)
+    return (x ./ rms) .* (1 .+ m.weight)
+end
+
+Flux.@layer GemmaRMSNorm
+Flux.Optimisers.trainable(m::GemmaRMSNorm) = (; weight=m.weight)
+
+"""
+    softcap(x, cap)
+
+`cap * tanh(x / cap)`. Used by Gemma2 to bound attention scores
+(`attn_logit_softcapping`) and final logits (`final_logit_softcapping`).
+Returns `x` unchanged when `cap` is `nothing`.
+"""
+softcap(x, ::Nothing) = x
+softcap(x, cap::Real) = oftype(x, cap) * tanh(x / oftype(x, cap))
+softcap(x::AbstractArray, cap::Real) = Float32(cap) .* tanh.(x ./ Float32(cap))
+softcap(x::AbstractArray, ::Nothing) = x
 
 """
     RoPE{F}
@@ -290,6 +344,50 @@ function Flux.Optimisers.trainable(m::SiLUGatedMLP)
 end
 
 """
+    GeluGatedMLP{G, U, D}
+
+Gated FFN variant that uses GELU (tanh approximation) as the activation
+instead of SiLU. Used by Gemma2. The tanh form matches HF's
+`gelu_pytorch_tanh`:
+`0.5 * x * (1 + tanh(√(2/π) * (x + 0.044715 * x³)))`.
+"""
+struct GeluGatedMLP{G,U,D}
+    gate_proj::G
+    up_proj::U
+    down_proj::D
+end
+
+"""
+    GeluGatedMLP(in_features::Integer, hidden_features::Integer; init = Flux.glorot_uniform)
+
+Construct a `GeluGatedMLP` layer with input size `in_features` and hidden
+size `hidden_features`.
+"""
+function GeluGatedMLP(
+    in_features::Integer, hidden_features::Integer; init=Flux.glorot_uniform
+)
+    gate_proj = Linear(in_features, hidden_features; init=init)
+    up_proj = Linear(in_features, hidden_features; init=init)
+    down_proj = Linear(hidden_features, in_features; init=init)
+    return GeluGatedMLP(gate_proj, up_proj, down_proj)
+end
+
+@inline _gelu_tanh(x) =
+    Float32(0.5) * x *
+    (1 + tanh(sqrt(Float32(2 / pi)) * (x + Float32(0.044715) * x^3)))
+
+function (m::GeluGatedMLP)(x::AbstractArray)
+    g = _gelu_tanh.(m.gate_proj(x))
+    u = m.up_proj(x)
+    return m.down_proj(g .* u)
+end
+
+Flux.@layer GeluGatedMLP
+function Flux.Optimisers.trainable(m::GeluGatedMLP)
+    (; gate_proj=m.gate_proj, up_proj=m.up_proj, down_proj=m.down_proj)
+end
+
+"""
     GQA{Q, K, V, O, R}
 
 Grouped-Query Attention (GQA) layer. Partitions queries into groups sharing key/value heads.
@@ -309,6 +407,8 @@ struct GQA{Q,K,V,O,R}
     num_heads_k::Int
     head_dim::Int
     window_size::Union{Nothing,Int}
+    softcap::Union{Nothing,Float32}      # Attention-score softcap (Gemma2).
+    query_scale::Union{Nothing,Float32}  # Override for the `sqrt(head_dim)` divisor.
 end
 
 """
@@ -328,6 +428,8 @@ function GQA(
     rope::RoPE;
     window_size::Union{Nothing,Integer}=nothing,
     qkv_bias::Bool=false,
+    softcap::Union{Nothing,Real}=nothing,
+    query_scale::Union{Nothing,Real}=nothing,
     init=Flux.glorot_uniform,
 )
     wq = Linear(hidden_dim, num_heads_q * head_dim; bias=qkv_bias, init=init)
@@ -335,8 +437,20 @@ function GQA(
     wv = Linear(hidden_dim, num_heads_k * head_dim; bias=qkv_bias, init=init)
     wo = Linear(num_heads_q * head_dim, hidden_dim; init=init)
     win = isnothing(window_size) ? nothing : Int(window_size)
+    sc = isnothing(softcap) ? nothing : Float32(softcap)
+    qs = isnothing(query_scale) ? nothing : Float32(query_scale)
     return GQA(
-        wq, wk, wv, wo, rope, Int(num_heads_q), Int(num_heads_k), Int(head_dim), win
+        wq,
+        wk,
+        wv,
+        wo,
+        rope,
+        Int(num_heads_q),
+        Int(num_heads_k),
+        Int(head_dim),
+        win,
+        sc,
+        qs,
     )
 end
 
@@ -407,7 +521,14 @@ function (m::GQA)(x::AbstractArray; cache=nothing, step=nothing, position_ids=no
     k_flat = reshape(k_perm, seq_len_kv, m.head_dim, m.num_heads_q * batch_size)
     k_flat_t = permutedims(k_flat, (2, 1, 3))
 
-    scores = batched_mul(q_flat, k_flat_t) ./ sqrt(Float32(m.head_dim))
+    scale = isnothing(m.query_scale) ? sqrt(Float32(m.head_dim)) : m.query_scale
+    scores = batched_mul(q_flat, k_flat_t) ./ scale
+
+    # Gemma2 caps attention scores before mask + softmax: `cap * tanh(s / cap)`.
+    if !isnothing(m.softcap)
+        cap = m.softcap
+        scores = cap .* tanh.(scores ./ cap)
+    end
 
     # Mask construction. Key at array index `j` is at absolute position `j - 1`
     # (0-indexed); query `i` is at `position_ids[i]`. Mask iff:

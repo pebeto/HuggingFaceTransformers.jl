@@ -166,7 +166,27 @@ decoder LLMs, since that's where demand lives.
       3B / 7B via `python3 test/fixtures/record_qwen_parity.py
       <VARIANT>`. Example: `examples/repl_chat_qwen.jl` with a
       ChatML-format fallback template.
-- [ ] Gemma2 — logit softcap, sliding window, attention scaling.
+- [x] Gemma2. Biggest model-shape delta in Phase 2: introduced new
+      layer primitives and a new decoder block instead of reusing
+      Llama's. The layer kit grew `GemmaRMSNorm` (uses `(1 + weight)`
+      scaling), `GeluGatedMLP` (GELU tanh approximation as the MLP
+      activation), and a `softcap(x, cap)` helper. `GQA` gained
+      `softcap` and `query_scale` optional fields so Gemma2's
+      attention-score softcap and per-variant `query_pre_attn_scalar`
+      (2B=224, 9B=256, 27B=144) flow through without forking the
+      attention layer. `GemmaDecoderLayer` is its own struct because
+      Gemma's block has four RMSNorms per layer (pre + post for both
+      attention and MLP) instead of Llama's two. `GemmaModel` also
+      scales the input embedding by `sqrt(hidden_size)` (HF parity).
+      The final logit softcap lives in `GemmaForCausalLM`'s forward.
+      Sliding-window attention alternates per layer: even-indexed
+      layers (0, 2, …) get `cfg.sliding_window`, odd-indexed get full
+      causal. `tie_word_embeddings=true` on every Gemma2 checkpoint,
+      handled identically to Llama's tied path. Parity is gated on
+      `ALLSPARK_TEST_PARITY_GEMMA` over `2B` / `9B` / `27B` via
+      `python3 test/fixtures/record_gemma_parity.py <VARIANT>`.
+      Example: `examples/repl_chat_gemma.jl` with a
+      `<start_of_turn>` / `<end_of_turn>` fallback template.
 - [ ] Phi-3.
 - [ ] GPT-2 / GPT-NeoX (encoder-light legacy support, useful for tests and
       embedding workflows).

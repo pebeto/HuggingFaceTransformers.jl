@@ -12,9 +12,12 @@ module Generation
 
 using JSON3
 using Random
-using ..Models: LlamaForCausalLM, MistralForCausalLM, QwenForCausalLM, build_caches
+using ..Models:
+    LlamaForCausalLM, MistralForCausalLM, QwenForCausalLM, GemmaForCausalLM, build_caches
 
-const DecoderLM = Union{LlamaForCausalLM,MistralForCausalLM,QwenForCausalLM}
+const DecoderLM = Union{
+    LlamaForCausalLM,MistralForCausalLM,QwenForCausalLM,GemmaForCausalLM
+}
 using ..Tokenizers: Tokenizer, encode, decode
 
 export generate, ChatTemplate, apply_chat_template

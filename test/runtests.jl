@@ -34,6 +34,10 @@ using Allspark
         include("qwen.jl")
     end
 
+    @testset verbose = true "Gemma" begin
+        include("gemma.jl")
+    end
+
     @testset verbose = true "Generation" begin
         include("generate.jl")
     end
@@ -76,6 +80,12 @@ using Allspark
     if !isempty(get(ENV, "ALLSPARK_TEST_PARITY_QWEN", ""))
         @testset verbose = true "Qwen parity" begin
             include("parity_qwen.jl")
+        end
+    end
+
+    if !isempty(get(ENV, "ALLSPARK_TEST_PARITY_GEMMA", ""))
+        @testset verbose = true "Gemma parity" begin
+            include("parity_gemma.jl")
         end
     end
 end
