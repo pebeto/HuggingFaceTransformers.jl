@@ -42,20 +42,17 @@ end
 @testset "generate — greedy is deterministic across calls" begin
     lm, _ = _tiny_lm()
     ids = [1, 2, 3]
-    @test generate(lm, ids; max_new_tokens=6) ==
-        generate(lm, ids; max_new_tokens=6)
+    @test generate(lm, ids; max_new_tokens=6) == generate(lm, ids; max_new_tokens=6)
 end
 
 @testset "generate — sampling reproducible with same RNG seed" begin
     lm, _ = _tiny_lm()
     ids = [1, 2, 3]
     out1 = generate(
-        lm, ids; max_new_tokens=6, do_sample=true, temperature=0.8,
-        rng=MersenneTwister(123),
+        lm, ids; max_new_tokens=6, do_sample=true, temperature=0.8, rng=MersenneTwister(123)
     )
     out2 = generate(
-        lm, ids; max_new_tokens=6, do_sample=true, temperature=0.8,
-        rng=MersenneTwister(123),
+        lm, ids; max_new_tokens=6, do_sample=true, temperature=0.8, rng=MersenneTwister(123)
     )
     @test out1 == out2
 end
@@ -64,12 +61,10 @@ end
     lm, _ = _tiny_lm()
     ids = [1, 2, 3]
     out1 = generate(
-        lm, ids; max_new_tokens=12, do_sample=true, temperature=2.0,
-        rng=MersenneTwister(1),
+        lm, ids; max_new_tokens=12, do_sample=true, temperature=2.0, rng=MersenneTwister(1)
     )
     out2 = generate(
-        lm, ids; max_new_tokens=12, do_sample=true, temperature=2.0,
-        rng=MersenneTwister(2),
+        lm, ids; max_new_tokens=12, do_sample=true, temperature=2.0, rng=MersenneTwister(2)
     )
     @test out1 != out2
 end
@@ -79,8 +74,7 @@ end
     ids = [1, 2, 3]
     greedy = generate(lm, ids; max_new_tokens=6)
     topk1 = generate(
-        lm, ids; max_new_tokens=6, do_sample=true, top_k=1,
-        rng=MersenneTwister(42),
+        lm, ids; max_new_tokens=6, do_sample=true, top_k=1, rng=MersenneTwister(42)
     )
     @test greedy == topk1
 end
@@ -119,17 +113,13 @@ end
     @test_throws ArgumentError generate(lm, Int[]; max_new_tokens=5)
     @test_throws ArgumentError generate(lm, [1]; max_new_tokens=-1)
     @test_throws ArgumentError generate(
-        lm, [1]; max_new_tokens=5, do_sample=true, temperature=0.0,
+        lm, [1]; max_new_tokens=5, do_sample=true, temperature=0.0
     )
+    @test_throws ArgumentError generate(lm, [1]; max_new_tokens=5, do_sample=true, top_k=0)
     @test_throws ArgumentError generate(
-        lm, [1]; max_new_tokens=5, do_sample=true, top_k=0,
+        lm, [1]; max_new_tokens=5, do_sample=true, top_p=0.0
     )
-    @test_throws ArgumentError generate(
-        lm, [1]; max_new_tokens=5, do_sample=true, top_p=0.0,
-    )
-    @test_throws ArgumentError generate(
-        lm, [1]; max_new_tokens=5, repetition_penalty=0.0,
-    )
+    @test_throws ArgumentError generate(lm, [1]; max_new_tokens=5, repetition_penalty=0.0)
 end
 
 @testset "generate(lm, tokenizer, prompt)" begin

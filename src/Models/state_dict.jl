@@ -64,9 +64,7 @@ function load_into!(
         dst = getfield(container, path[end])
         prepared = _apply_transform(weights[hf_key], transform)
         size(dst) == size(prepared) || throw(
-            DimensionMismatch(
-                "$(hf_key): target $(size(dst)) vs source $(size(prepared))",
-            ),
+            DimensionMismatch("$(hf_key): target $(size(dst)) vs source $(size(prepared))"),
         )
         copyto!(dst, prepared)
     end

@@ -33,7 +33,13 @@ function _split_blocks(source::AbstractString)
             after_open = nextind(source, after_open)
         end
 
-        close_str = best_kind === :expr ? "}}" : best_kind === :stmt ? "%}" : "#}"
+        close_str = if best_kind === :expr
+            "}}"
+        elseif best_kind === :stmt
+            "%}"
+        else
+            "#}"
+        end
         close_r = findnext(close_str, source, after_open)
         isnothing(close_r) &&
             throw(ArgumentError("unclosed template tag starting at byte $(best_pos)"))

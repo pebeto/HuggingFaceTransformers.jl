@@ -386,9 +386,7 @@ end
     @testset "decode-step mask applies when cache exceeds window" begin
         # KV cache with 6 valid slots, window 2. A single-token decode at step 6
         # must mask everything older than position 4 (slots 1..3 of the cache).
-        gqa = GQA(
-            hidden_dim, num_heads_q, num_heads_k, head_dim, rope; window_size=2
-        )
+        gqa = GQA(hidden_dim, num_heads_q, num_heads_k, head_dim, rope; window_size=2)
         cache = KVCache(head_dim, num_heads_k, 10, 1)
         # Prefill 5 tokens.
         x_pref = rand(Float32, hidden_dim, 5, 1)

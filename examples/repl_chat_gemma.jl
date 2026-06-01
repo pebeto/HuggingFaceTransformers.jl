@@ -56,22 +56,21 @@ function load_gemma_config(snapshot_dir::AbstractString)
         nothing
     end
 
-    attn_softcap = if haskey(raw, :attn_logit_softcapping) &&
-        raw.attn_logit_softcapping !== nothing
-        Float64(raw.attn_logit_softcapping)
-    else
-        nothing
-    end
+    attn_softcap =
+        if haskey(raw, :attn_logit_softcapping) && raw.attn_logit_softcapping !== nothing
+            Float64(raw.attn_logit_softcapping)
+        else
+            nothing
+        end
 
-    final_softcap = if haskey(raw, :final_logit_softcapping) &&
-        raw.final_logit_softcapping !== nothing
-        Float64(raw.final_logit_softcapping)
-    else
-        nothing
-    end
+    final_softcap =
+        if haskey(raw, :final_logit_softcapping) && raw.final_logit_softcapping !== nothing
+            Float64(raw.final_logit_softcapping)
+        else
+            nothing
+        end
 
-    qpas = if haskey(raw, :query_pre_attn_scalar) &&
-        raw.query_pre_attn_scalar !== nothing
+    qpas = if haskey(raw, :query_pre_attn_scalar) && raw.query_pre_attn_scalar !== nothing
         Int(raw.query_pre_attn_scalar)
     else
         nothing
@@ -145,14 +144,16 @@ function main(repo_id::AbstractString=DEFAULT_MODEL)
     template = load_chat_template(snapshot_dir)
     eos_ids = load_eos_ids(snapshot_dir)
 
-    softcap_note = if cfg.attn_logit_softcapping !== nothing &&
-        cfg.final_logit_softcapping !== nothing
-        ", softcap=$(cfg.attn_logit_softcapping)/$(cfg.final_logit_softcapping)"
-    else
-        ""
-    end
-    println("Materializing model ($(cfg.num_hidden_layers) layers, " *
-            "$(cfg.hidden_size) hidden$(softcap_note))...")
+    softcap_note =
+        if cfg.attn_logit_softcapping !== nothing && cfg.final_logit_softcapping !== nothing
+            ", softcap=$(cfg.attn_logit_softcapping)/$(cfg.final_logit_softcapping)"
+        else
+            ""
+        end
+    println(
+        "Materializing model ($(cfg.num_hidden_layers) layers, " *
+        "$(cfg.hidden_size) hidden$(softcap_note))...",
+    )
     lm = GemmaForCausalLM(cfg)
 
     println("Loading weights...")

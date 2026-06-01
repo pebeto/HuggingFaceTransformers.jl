@@ -66,9 +66,9 @@ function _run_variant(name::AbstractString, fixture_filename::AbstractString)
     fixture_path = joinpath(FIXTURES_DIR, fixture_filename)
     if !isfile(fixture_path)
         @info "Skipping Mistral-7B-Instruct-$(name) parity: fixture " *
-              "$(fixture_path) not present. Generate it with " *
-              "`python3 test/fixtures/record_mistral_parity.py $(name)`."
-        return
+            "$(fixture_path) not present. Generate it with " *
+            "`python3 test/fixtures/record_mistral_parity.py $(name)`."
+        return nothing
     end
 
     fixture = JSON3.read(read(fixture_path, String))

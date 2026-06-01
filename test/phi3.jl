@@ -20,14 +20,17 @@ function _phi3_synthetic_state_dict(cfg::Phi3Config)
         out["$(p).input_layernorm.weight"] = randn(Float32, cfg.hidden_size)
         out["$(p).post_attention_layernorm.weight"] = randn(Float32, cfg.hidden_size)
         # Fused QKV: shape (n_q + 2*n_kv, hidden_size) — concatenated [Q; K; V].
-        out["$(p).self_attn.qkv_proj.weight"] =
-            randn(Float32, n_q + 2 * n_kv, cfg.hidden_size)
+        out["$(p).self_attn.qkv_proj.weight"] = randn(
+            Float32, n_q + 2 * n_kv, cfg.hidden_size
+        )
         out["$(p).self_attn.o_proj.weight"] = randn(Float32, cfg.hidden_size, n_q)
         # Fused gate-up: shape (2 * intermediate_size, hidden_size) — [gate; up].
-        out["$(p).mlp.gate_up_proj.weight"] =
-            randn(Float32, 2 * cfg.intermediate_size, cfg.hidden_size)
-        out["$(p).mlp.down_proj.weight"] =
-            randn(Float32, cfg.hidden_size, cfg.intermediate_size)
+        out["$(p).mlp.gate_up_proj.weight"] = randn(
+            Float32, 2 * cfg.intermediate_size, cfg.hidden_size
+        )
+        out["$(p).mlp.down_proj.weight"] = randn(
+            Float32, cfg.hidden_size, cfg.intermediate_size
+        )
     end
     return out
 end
@@ -122,7 +125,8 @@ end
     @test lm.model.layers[1].mlp.up_proj.weight == gup_src[(inter + 1):(2 * inter), :]
 
     # And the non-fused entries flowed too.
-    @test lm.model.layers[1].self_attn.wo.weight == sd["model.layers.0.self_attn.o_proj.weight"]
+    @test lm.model.layers[1].self_attn.wo.weight ==
+        sd["model.layers.0.self_attn.o_proj.weight"]
     @test lm.lm_head.weight == sd["lm_head.weight"]
 end
 
@@ -131,8 +135,7 @@ end
     lm = Phi3ForCausalLM(cfg)
     sd = _phi3_synthetic_state_dict(cfg)
     # Corrupt one fused tensor's first dim.
-    sd["model.layers.0.self_attn.qkv_proj.weight"] =
-        randn(Float32, 7, cfg.hidden_size)
+    sd["model.layers.0.self_attn.qkv_proj.weight"] = randn(Float32, 7, cfg.hidden_size)
     @test_throws DimensionMismatch load_state_dict!(lm, sd)
 end
 

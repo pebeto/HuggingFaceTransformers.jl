@@ -15,11 +15,8 @@
 using Allspark
 using Allspark.HFHub: snapshot_download
 using Allspark.Tokenizers: load_tokenizer, encode, decode
-using Allspark.Models: load_weights,
-                       LlamaForCausalLM,
-                       LlamaConfig,
-                       LlamaRopeScaling,
-                       load_state_dict!
+using Allspark.Models:
+    load_weights, LlamaForCausalLM, LlamaConfig, LlamaRopeScaling, load_state_dict!
 using Allspark.Generation: generate, ChatTemplate
 using JSON3
 
@@ -122,8 +119,10 @@ function main(repo_id::AbstractString=DEFAULT_MODEL)
     template, bos_token = load_chat_template(snapshot_dir)
     eos_ids = load_eos_ids(snapshot_dir)
 
-    println("Materializing model ($(cfg.num_hidden_layers) layers, " *
-            "$(cfg.hidden_size) hidden)...")
+    println(
+        "Materializing model ($(cfg.num_hidden_layers) layers, " *
+        "$(cfg.hidden_size) hidden)...",
+    )
     lm = LlamaForCausalLM(cfg)
 
     println("Loading weights...")

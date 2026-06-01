@@ -2,11 +2,8 @@ using Test
 using JSON3
 using Allspark.HFHub: snapshot_download
 using Allspark.Tokenizers: load_tokenizer, encode
-using Allspark.Models: load_weights,
-                       LlamaForCausalLM,
-                       LlamaConfig,
-                       LlamaRopeScaling,
-                       load_state_dict!
+using Allspark.Models:
+    load_weights, LlamaForCausalLM, LlamaConfig, LlamaRopeScaling, load_state_dict!
 
 # Variant label → fixture filename. Each fixture is recorded once via
 # test/fixtures/record_llama_parity.py against an authoritative HF run.
@@ -82,8 +79,8 @@ function _run_variant(name::AbstractString, fixture_filename::AbstractString)
     fixture_path = joinpath(FIXTURES_DIR, fixture_filename)
     if !isfile(fixture_path)
         @info "Skipping Llama-$(name) parity: fixture $(fixture_path) not present. " *
-              "Generate it with `python3 test/fixtures/record_llama_parity.py $(name)`."
-        return
+            "Generate it with `python3 test/fixtures/record_llama_parity.py $(name)`."
+        return nothing
     end
 
     fixture = JSON3.read(read(fixture_path, String))

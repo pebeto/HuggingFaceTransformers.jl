@@ -36,7 +36,7 @@ end
 """
     QwenForCausalLM{C, M, H}
 
-Top-level Qwen container: a `LlamaModel` trunk wrapped in a `Linear`
+Top-level Qwen container: a `DecoderModel` trunk wrapped in a `Linear`
 LM head. Reuses the generic decoder pieces; the family-specific bits
 (Q/K/V bias) live inside `GQA` via the `qkv_bias` constructor flag.
 """
@@ -68,7 +68,7 @@ function QwenForCausalLM(cfg::QwenConfig)
     eps = Float32(cfg.rms_norm_eps)
 
     layers = [
-        LlamaDecoderLayer(
+        DecoderLayer(
             GQA(
                 cfg.hidden_size,
                 cfg.num_attention_heads,
@@ -84,7 +84,7 @@ function QwenForCausalLM(cfg::QwenConfig)
         ) for _ in 1:(cfg.num_hidden_layers)
     ]
 
-    model = LlamaModel(
+    model = DecoderModel(
         TokenEmbedding(cfg.vocab_size, cfg.hidden_size),
         layers,
         RMSNorm(cfg.hidden_size, eps),
@@ -103,9 +103,8 @@ function build_caches(
 )
     cfg = lm.config
     return [
-        KVCache(
-            cfg.head_dim, cfg.num_key_value_heads, max_seq, batch_size; eltype=eltype
-        ) for _ in 1:(cfg.num_hidden_layers)
+        KVCache(cfg.head_dim, cfg.num_key_value_heads, max_seq, batch_size; eltype=eltype)
+        for _ in 1:(cfg.num_hidden_layers)
     ]
 end
 

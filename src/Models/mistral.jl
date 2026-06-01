@@ -31,7 +31,7 @@ end
 """
     MistralForCausalLM{C, M, H}
 
-Top-level Mistral container: a `LlamaModel` trunk (reused as the generic
+Top-level Mistral container: a `DecoderModel` trunk (reused as the generic
 decoder-only transformer body) wrapped in a `Linear` LM head. The
 `config` field is non-trainable metadata; `build_caches` reads it to size
 KV caches.
@@ -64,7 +64,7 @@ function MistralForCausalLM(cfg::MistralConfig)
     eps = Float32(cfg.rms_norm_eps)
 
     layers = [
-        LlamaDecoderLayer(
+        DecoderLayer(
             GQA(
                 cfg.hidden_size,
                 cfg.num_attention_heads,
@@ -79,7 +79,7 @@ function MistralForCausalLM(cfg::MistralConfig)
         ) for _ in 1:(cfg.num_hidden_layers)
     ]
 
-    model = LlamaModel(
+    model = DecoderModel(
         TokenEmbedding(cfg.vocab_size, cfg.hidden_size),
         layers,
         RMSNorm(cfg.hidden_size, eps),
@@ -100,9 +100,8 @@ function build_caches(
 )
     cfg = lm.config
     return [
-        KVCache(
-            cfg.head_dim, cfg.num_key_value_heads, max_seq, batch_size; eltype=eltype
-        ) for _ in 1:(cfg.num_hidden_layers)
+        KVCache(cfg.head_dim, cfg.num_key_value_heads, max_seq, batch_size; eltype=eltype)
+        for _ in 1:(cfg.num_hidden_layers)
     ]
 end
 

@@ -23,12 +23,15 @@ function _mistral_synthetic_state_dict(cfg::MistralConfig)
         out["$(p).self_attn.k_proj.weight"] = randn(Float32, n_kv, cfg.hidden_size)
         out["$(p).self_attn.v_proj.weight"] = randn(Float32, n_kv, cfg.hidden_size)
         out["$(p).self_attn.o_proj.weight"] = randn(Float32, cfg.hidden_size, n_q)
-        out["$(p).mlp.gate_proj.weight"] =
-            randn(Float32, cfg.intermediate_size, cfg.hidden_size)
-        out["$(p).mlp.up_proj.weight"] =
-            randn(Float32, cfg.intermediate_size, cfg.hidden_size)
-        out["$(p).mlp.down_proj.weight"] =
-            randn(Float32, cfg.hidden_size, cfg.intermediate_size)
+        out["$(p).mlp.gate_proj.weight"] = randn(
+            Float32, cfg.intermediate_size, cfg.hidden_size
+        )
+        out["$(p).mlp.up_proj.weight"] = randn(
+            Float32, cfg.intermediate_size, cfg.hidden_size
+        )
+        out["$(p).mlp.down_proj.weight"] = randn(
+            Float32, cfg.hidden_size, cfg.intermediate_size
+        )
     end
     return out
 end
@@ -112,8 +115,10 @@ end
 
     # Spot-check that values flowed end-to-end.
     @test lm.model.norm.weight == sd["model.norm.weight"]
-    @test lm.model.layers[1].self_attn.wq.weight == sd["model.layers.0.self_attn.q_proj.weight"]
-    @test lm.model.layers[2].mlp.down_proj.weight == sd["model.layers.1.mlp.down_proj.weight"]
+    @test lm.model.layers[1].self_attn.wq.weight ==
+        sd["model.layers.0.self_attn.q_proj.weight"]
+    @test lm.model.layers[2].mlp.down_proj.weight ==
+        sd["model.layers.1.mlp.down_proj.weight"]
     @test lm.lm_head.weight == sd["lm_head.weight"]
 end
 

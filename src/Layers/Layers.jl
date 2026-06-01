@@ -14,15 +14,7 @@ using LinearAlgebra
 using Statistics
 
 export KVCache,
-    RMSNorm,
-    GemmaRMSNorm,
-    RoPE,
-    Linear,
-    SiLUGatedMLP,
-    GeluGatedMLP,
-    GQA,
-    softcap,
-    reset!
+    RMSNorm, GemmaRMSNorm, RoPE, Linear, SiLUGatedMLP, GeluGatedMLP, GQA, softcap, reset!
 
 """
     KVCache{T <: AbstractArray}
@@ -64,9 +56,7 @@ Base.size(c::KVCache) = size(c.k)
 
 function Base.show(io::IO, c::KVCache)
     h, k, s, b = size(c.k)
-    return print(
-        io, "KVCache(", h, "×", k, "×", s, "×", b, ", ", eltype(c), ")"
-    )
+    return print(io, "KVCache(", h, "×", k, "×", s, "×", b, ", ", eltype(c), ")")
 end
 
 """
@@ -373,8 +363,7 @@ function GeluGatedMLP(
 end
 
 @inline _gelu_tanh(x) =
-    Float32(0.5) * x *
-    (1 + tanh(sqrt(Float32(2 / pi)) * (x + Float32(0.044715) * x^3)))
+    Float32(0.5) * x * (1 + tanh(sqrt(Float32(2 / pi)) * (x + Float32(0.044715) * x^3)))
 
 function (m::GeluGatedMLP)(x::AbstractArray)
     g = _gelu_tanh.(m.gate_proj(x))
@@ -440,17 +429,7 @@ function GQA(
     sc = isnothing(softcap) ? nothing : Float32(softcap)
     qs = isnothing(query_scale) ? nothing : Float32(query_scale)
     return GQA(
-        wq,
-        wk,
-        wv,
-        wo,
-        rope,
-        Int(num_heads_q),
-        Int(num_heads_k),
-        Int(head_dim),
-        win,
-        sc,
-        qs,
+        wq, wk, wv, wo, rope, Int(num_heads_q), Int(num_heads_k), Int(head_dim), win, sc, qs
     )
 end
 
@@ -465,7 +444,7 @@ function (m::GQA)(x::AbstractArray; cache=nothing, step=nothing, position_ids=no
     if !isnothing(cache) && isnothing(step)
         throw(
             ArgumentError(
-                "GQA was passed a KV-cache without a `step`; pass both or neither.",
+                "GQA was passed a KV-cache without a `step`; pass both or neither."
             ),
         )
     end

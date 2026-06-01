@@ -16,10 +16,7 @@
 using Allspark
 using Allspark.HFHub: snapshot_download
 using Allspark.Tokenizers: load_tokenizer, encode, decode
-using Allspark.Models: load_weights,
-                       QwenForCausalLM,
-                       QwenConfig,
-                       load_state_dict!
+using Allspark.Models: load_weights, QwenForCausalLM, QwenConfig, load_state_dict!
 using Allspark.Generation: generate, ChatTemplate
 using JSON3
 
@@ -52,11 +49,12 @@ function load_qwen_config(snapshot_dir::AbstractString)
     end
 
     use_sw = Bool(get(raw, :use_sliding_window, false))
-    sliding_window = if use_sw && haskey(raw, :sliding_window) && raw.sliding_window !== nothing
-        Int(raw.sliding_window)
-    else
-        nothing
-    end
+    sliding_window =
+        if use_sw && haskey(raw, :sliding_window) && raw.sliding_window !== nothing
+            Int(raw.sliding_window)
+        else
+            nothing
+        end
 
     return QwenConfig(;
         vocab_size=Int(raw.vocab_size),
@@ -123,9 +121,11 @@ function main(repo_id::AbstractString=DEFAULT_MODEL)
     template = load_chat_template(snapshot_dir)
     eos_ids = load_eos_ids(snapshot_dir)
 
-    println("Materializing model ($(cfg.num_hidden_layers) layers, " *
-            "$(cfg.hidden_size) hidden, " *
-            "tied=$(cfg.tie_word_embeddings))...")
+    println(
+        "Materializing model ($(cfg.num_hidden_layers) layers, " *
+        "$(cfg.hidden_size) hidden, " *
+        "tied=$(cfg.tie_word_embeddings))...",
+    )
     lm = QwenForCausalLM(cfg)
 
     println("Loading weights...")

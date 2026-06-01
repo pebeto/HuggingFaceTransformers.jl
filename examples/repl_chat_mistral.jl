@@ -16,10 +16,7 @@
 using Allspark
 using Allspark.HFHub: snapshot_download
 using Allspark.Tokenizers: load_tokenizer, encode, decode
-using Allspark.Models: load_weights,
-                       MistralForCausalLM,
-                       MistralConfig,
-                       load_state_dict!
+using Allspark.Models: load_weights, MistralForCausalLM, MistralConfig, load_state_dict!
 using Allspark.Generation: generate, ChatTemplate
 using JSON3
 
@@ -121,11 +118,12 @@ function main(repo_id::AbstractString=DEFAULT_MODEL)
     template, bos_token, eos_token = load_chat_template(snapshot_dir)
     eos_ids = load_eos_ids(snapshot_dir)
 
-    println("Materializing model ($(cfg.num_hidden_layers) layers, " *
-            "$(cfg.hidden_size) hidden" *
-            (cfg.sliding_window === nothing ?
-             "" : ", sliding_window=$(cfg.sliding_window)") *
-            ")...")
+    println(
+        "Materializing model ($(cfg.num_hidden_layers) layers, " *
+        "$(cfg.hidden_size) hidden" *
+        (cfg.sliding_window === nothing ? "" : ", sliding_window=$(cfg.sliding_window)") *
+        ")...",
+    )
     lm = MistralForCausalLM(cfg)
 
     println("Loading weights...")
@@ -149,10 +147,7 @@ function main(repo_id::AbstractString=DEFAULT_MODEL)
 
         push!(messages, Dict("role" => "user", "content" => String(line)))
         prompt = template(
-            messages;
-            add_generation_prompt=true,
-            bos_token=bos_token,
-            eos_token=eos_token,
+            messages; add_generation_prompt=true, bos_token=bos_token, eos_token=eos_token
         )
         prompt_ids = encode(tokenizer, prompt)
 

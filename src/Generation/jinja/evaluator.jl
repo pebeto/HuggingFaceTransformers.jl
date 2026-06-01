@@ -170,11 +170,7 @@ end
 function eval_expr(e::CallExpr, ctx::AbstractDict)
     args = Any[eval_expr(a, ctx) for a in e.args]
     if e.func == "raise_exception"
-        throw(
-            ArgumentError(
-                "template raised: $(isempty(args) ? "" : _stringify(args[1]))",
-            ),
-        )
+        throw(ArgumentError("template raised: $(isempty(args) ? "" : _stringify(args[1]))"))
     end
     throw(ArgumentError("unsupported function: $(e.func)"))
 end

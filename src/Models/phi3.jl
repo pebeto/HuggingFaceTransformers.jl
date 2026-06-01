@@ -7,7 +7,7 @@ HuggingFace's `config.json` keys (Julianized to snake_case).
 Phi-3 is structurally close to Llama (RMSNorm, SwiGLU MLP, GQA, plain
 RoPE) but ships its weights in two fused tensors per layer:
 `self_attn.qkv_proj.weight` and `mlp.gate_up_proj.weight`. The model
-struct here reuses `LlamaModel` / `LlamaDecoderLayer` / `GQA` /
+struct here reuses `DecoderModel` / `DecoderLayer` / `GQA` /
 `SiLUGatedMLP` unchanged; the slicing happens once in
 [`load_state_dict!`](@ref load_state_dict!(::Phi3ForCausalLM, ::AbstractDict)).
 The future Phase 4 path is to swap in a single fused matmul instead;
@@ -35,7 +35,7 @@ end
 """
     Phi3ForCausalLM{C, M, H}
 
-`LlamaModel` trunk wrapped in a `Linear` LM head — the same shape as
+`DecoderModel` trunk wrapped in a `Linear` LM head — the same shape as
 `LlamaForCausalLM`, distinguished by config type so dispatch picks the
 right loader.
 """
@@ -67,7 +67,7 @@ function Phi3ForCausalLM(cfg::Phi3Config)
     eps = Float32(cfg.rms_norm_eps)
 
     layers = [
-        LlamaDecoderLayer(
+        DecoderLayer(
             GQA(
                 cfg.hidden_size,
                 cfg.num_attention_heads,
@@ -82,7 +82,7 @@ function Phi3ForCausalLM(cfg::Phi3Config)
         ) for _ in 1:(cfg.num_hidden_layers)
     ]
 
-    model = LlamaModel(
+    model = DecoderModel(
         TokenEmbedding(cfg.vocab_size, cfg.hidden_size),
         layers,
         RMSNorm(cfg.hidden_size, eps),
@@ -99,9 +99,8 @@ function build_caches(
 )
     cfg = lm.config
     return [
-        KVCache(
-            cfg.head_dim, cfg.num_key_value_heads, max_seq, batch_size; eltype=eltype
-        ) for _ in 1:(cfg.num_hidden_layers)
+        KVCache(cfg.head_dim, cfg.num_key_value_heads, max_seq, batch_size; eltype=eltype)
+        for _ in 1:(cfg.num_hidden_layers)
     ]
 end
 
@@ -117,21 +116,24 @@ slicing pass in [`load_state_dict!`](@ref).
 function phi3_state_dict_map(cfg::Phi3Config)
     out = Dict{String,Tuple{Tuple,Symbol}}()
 
-    out["model.embed_tokens.weight"] =
-        ((:model, :embed_tokens, :weight), :transpose)
+    out["model.embed_tokens.weight"] = ((:model, :embed_tokens, :weight), :transpose)
 
     for i in 0:(cfg.num_hidden_layers - 1)
         layer_path = (:model, :layers, i + 1)
         hf_prefix = "model.layers.$(i)"
 
-        out["$(hf_prefix).input_layernorm.weight"] =
-            ((layer_path..., :input_layernorm, :weight), :as_is)
-        out["$(hf_prefix).self_attn.o_proj.weight"] =
-            ((layer_path..., :self_attn, :wo, :weight), :as_is)
-        out["$(hf_prefix).post_attention_layernorm.weight"] =
-            ((layer_path..., :post_attention_layernorm, :weight), :as_is)
-        out["$(hf_prefix).mlp.down_proj.weight"] =
-            ((layer_path..., :mlp, :down_proj, :weight), :as_is)
+        out["$(hf_prefix).input_layernorm.weight"] = (
+            (layer_path..., :input_layernorm, :weight), :as_is
+        )
+        out["$(hf_prefix).self_attn.o_proj.weight"] = (
+            (layer_path..., :self_attn, :wo, :weight), :as_is
+        )
+        out["$(hf_prefix).post_attention_layernorm.weight"] = (
+            (layer_path..., :post_attention_layernorm, :weight), :as_is
+        )
+        out["$(hf_prefix).mlp.down_proj.weight"] = (
+            (layer_path..., :mlp, :down_proj, :weight), :as_is
+        )
     end
 
     out["model.norm.weight"] = ((:model, :norm, :weight), :as_is)
@@ -167,8 +169,7 @@ function load_state_dict!(
         attn = layer.self_attn
 
         qkv_key = "model.layers.$(i).self_attn.qkv_proj.weight"
-        haskey(weights, qkv_key) ||
-            throw(KeyError("missing fused QKV weight: $(qkv_key)"))
+        haskey(weights, qkv_key) || throw(KeyError("missing fused QKV weight: $(qkv_key)"))
         qkv = weights[qkv_key]
         size(qkv, 1) == n_q + 2 * n_kv || throw(
             DimensionMismatch(

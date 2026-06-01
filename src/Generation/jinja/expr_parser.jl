@@ -74,7 +74,8 @@ function _parse_compare(p)
             _consume!(p)
             right = _parse_add(p)
             left = BinOpExpr(:in, left, right)
-        elseif _check(p, :keyword, "not") && _peek(p, 1).kind === :keyword &&
+        elseif _check(p, :keyword, "not") &&
+            _peek(p, 1).kind === :keyword &&
             _peek(p, 1).value == "in"
             _consume!(p)
             _consume!(p)
@@ -169,9 +170,8 @@ function _parse_postfix(p)
                 end
             end
             _eat!(p, :rparen)
-            e isa NameExpr || throw(
-                ArgumentError("can only call by name, got $(typeof(e))"),
-            )
+            e isa NameExpr ||
+                throw(ArgumentError("can only call by name, got $(typeof(e))"))
             e = CallExpr(e.name, args)
         else
             break

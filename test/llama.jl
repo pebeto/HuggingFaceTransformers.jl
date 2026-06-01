@@ -24,12 +24,15 @@ function _synthetic_state_dict(cfg::LlamaConfig)
         out["$(p).self_attn.k_proj.weight"] = randn(Float32, n_kv, cfg.hidden_size)
         out["$(p).self_attn.v_proj.weight"] = randn(Float32, n_kv, cfg.hidden_size)
         out["$(p).self_attn.o_proj.weight"] = randn(Float32, cfg.hidden_size, n_q)
-        out["$(p).mlp.gate_proj.weight"] =
-            randn(Float32, cfg.intermediate_size, cfg.hidden_size)
-        out["$(p).mlp.up_proj.weight"] =
-            randn(Float32, cfg.intermediate_size, cfg.hidden_size)
-        out["$(p).mlp.down_proj.weight"] =
-            randn(Float32, cfg.hidden_size, cfg.intermediate_size)
+        out["$(p).mlp.gate_proj.weight"] = randn(
+            Float32, cfg.intermediate_size, cfg.hidden_size
+        )
+        out["$(p).mlp.up_proj.weight"] = randn(
+            Float32, cfg.intermediate_size, cfg.hidden_size
+        )
+        out["$(p).mlp.down_proj.weight"] = randn(
+            Float32, cfg.hidden_size, cfg.intermediate_size
+        )
     end
     return out
 end
@@ -172,7 +175,8 @@ end
     load_state_dict!(lm, sd)
 
     # Embed weight is the HF tensor transposed.
-    @test lm.model.embed_tokens.weight == permutedims(sd["model.embed_tokens.weight"], (2, 1))
+    @test lm.model.embed_tokens.weight ==
+        permutedims(sd["model.embed_tokens.weight"], (2, 1))
     @test lm.model.norm.weight == sd["model.norm.weight"]
     @test lm.lm_head.weight == sd["lm_head.weight"]
 

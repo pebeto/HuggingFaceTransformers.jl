@@ -141,7 +141,7 @@ decoder LLMs, since that's where demand lives.
       changing code. Fixtures are recorded once by
       `python3 test/fixtures/record_llama_parity.py <VARIANT>`.
 - [x] Mistral. `MistralConfig` + `MistralForCausalLM` in
-      `src/Models/mistral.jl` reuse `LlamaDecoderLayer` / `LlamaModel`
+      `src/Models/mistral.jl` reuse `DecoderLayer` / `DecoderModel`
       (the generic decoder pieces) and thread `cfg.sliding_window`
       into `GQA`. `GQA` grew a `window_size::Union{Nothing,Int}` field
       and a corresponding mask branch that fires both during prefill
@@ -153,7 +153,7 @@ decoder LLMs, since that's where demand lives.
       and covers v0.2 (sliding_window=4096) and v0.3 (no sliding) via
       `python3 test/fixtures/record_mistral_parity.py <VARIANT>`.
 - [x] Qwen2 / Qwen2.5. `QwenConfig` + `QwenForCausalLM` in
-      `src/Models/qwen.jl` reuse `LlamaDecoderLayer` / `LlamaModel`.
+      `src/Models/qwen.jl` reuse `DecoderLayer` / `DecoderModel`.
       The architectural deltas vs Llama/Mistral that landed here:
       `Linear` now carries an optional bias (dispatched on the type
       parameter so the no-bias path stays branch-free); `GQA` takes
@@ -189,7 +189,7 @@ decoder LLMs, since that's where demand lives.
       `<start_of_turn>` / `<end_of_turn>` fallback template.
 - [x] Phi-3. The fifth model — and the trigger for the
       Refactor checkpoint below. `Phi3Config` + `Phi3ForCausalLM` in
-      `src/Models/phi3.jl` reuse `LlamaModel` / `LlamaDecoderLayer` /
+      `src/Models/phi3.jl` reuse `DecoderModel` / `DecoderLayer` /
       `GQA` / `SiLUGatedMLP` unchanged. The interesting part is the
       state-dict loader: Phi-3 ships `self_attn.qkv_proj.weight`
       (concatenated `[Q; K; V]`) and `mlp.gate_up_proj.weight`
@@ -208,8 +208,18 @@ decoder LLMs, since that's where demand lives.
 - [ ] GPT-2 / GPT-NeoX (encoder-light legacy support, useful for tests and
       embedding workflows).
 - [ ] BERT / RoBERTa — encoder path, for embeddings & classification.
-- [ ] **Refactor checkpoint.** Once five models exist, factor out the common
-      `DecoderBlock` shape. Not before.
+- [x] **Refactor checkpoint.** With five models in place (Llama,
+      Mistral, Qwen, Gemma2, Phi-3), the shared decoder shape was
+      lifted into `src/Models/decoder.jl`: `LlamaDecoderLayer` →
+      `DecoderLayer`, `LlamaModel` → `DecoderModel`,
+      `_decoder_state_dict_map` and `TokenEmbedding` moved alongside.
+      `llama.jl` now contains only Llama-specific code (config,
+      `LlamaForCausalLM`, factory, state-dict map delegate, loader).
+      `mistral.jl` / `qwen.jl` / `phi3.jl` reference the new names
+      verbatim. `gemma.jl` is unchanged — Gemma2's four-norm decoder
+      block stays separate as its own `GemmaDecoderLayer` /
+      `GemmaModel`. All 258 model + 79 layer + tokenizer/generation/
+      hub/aqua/JET tests still pass after the rename.
 - [ ] Mixtral / MoE — deferred until a routing abstraction has at least one
       consumer.
 

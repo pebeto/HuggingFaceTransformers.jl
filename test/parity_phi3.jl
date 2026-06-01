@@ -36,12 +36,12 @@ function _load_phi3_config(snapshot_dir::AbstractString)
     prf = get(raw, :partial_rotary_factor, 1.0)
     Float64(prf) == 1.0 || error(
         "partial_rotary_factor=$(prf) not supported yet (only 1.0 is). " *
-        "This is a Phi-3.5 / Phi-3 128k variant; needs partial RoPE work."
+        "This is a Phi-3.5 / Phi-3 128k variant; needs partial RoPE work.",
     )
     rope_scaling = get(raw, :rope_scaling, nothing)
     isnothing(rope_scaling) || error(
         "Phi-3 rope_scaling=$(rope_scaling) not supported (longrope and " *
-        "friends need their own implementation). Use a 4k variant."
+        "friends need their own implementation). Use a 4k variant.",
     )
 
     head_dim = if haskey(raw, :head_dim)
@@ -76,9 +76,9 @@ function _run_variant(name::AbstractString, fixture_filename::AbstractString)
     fixture_path = joinpath(FIXTURES_DIR, fixture_filename)
     if !isfile(fixture_path)
         @info "Skipping Phi-3-$(name) parity: fixture $(fixture_path) " *
-              "not present. Generate it with " *
-              "`python3 test/fixtures/record_phi3_parity.py $(name)`."
-        return
+            "not present. Generate it with " *
+            "`python3 test/fixtures/record_phi3_parity.py $(name)`."
+        return nothing
     end
 
     fixture = JSON3.read(read(fixture_path, String))

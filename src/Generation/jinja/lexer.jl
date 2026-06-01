@@ -4,18 +4,7 @@ struct ExprToken
 end
 
 const _EXPR_KEYWORDS = Set([
-    "and",
-    "or",
-    "not",
-    "in",
-    "is",
-    "true",
-    "True",
-    "false",
-    "False",
-    "none",
-    "None",
-    "null",
+    "and", "or", "not", "in", "is", "true", "True", "false", "False", "none", "None", "null"
 ])
 
 function _tokenize_expr(s::AbstractString)
@@ -37,13 +26,21 @@ function _tokenize_expr(s::AbstractString)
                     esc = s[nxt]
                     print(
                         buf,
-                        esc == 'n' ? '\n' :
-                        esc == 't' ? '\t' :
-                        esc == 'r' ? '\r' :
-                        esc == '\\' ? '\\' :
-                        esc == '\'' ? '\'' :
-                        esc == '"' ? '"' :
-                        esc,
+                        if esc == 'n'
+                            '\n'
+                        elseif esc == 't'
+                            '\t'
+                        elseif esc == 'r'
+                            '\r'
+                        elseif esc == '\\'
+                            '\\'
+                        elseif esc == '\''
+                            '\''
+                        elseif esc == '"'
+                            '"'
+                        else
+                            esc
+                        end,
                     )
                     j = nextind(s, nxt)
                 else

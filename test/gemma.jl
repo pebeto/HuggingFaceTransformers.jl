@@ -25,12 +25,15 @@ function _gemma_synthetic_state_dict(cfg::GemmaConfig)
         out["$(p).self_attn.k_proj.weight"] = randn(Float32, n_kv, cfg.hidden_size)
         out["$(p).self_attn.v_proj.weight"] = randn(Float32, n_kv, cfg.hidden_size)
         out["$(p).self_attn.o_proj.weight"] = randn(Float32, cfg.hidden_size, n_q)
-        out["$(p).mlp.gate_proj.weight"] =
-            randn(Float32, cfg.intermediate_size, cfg.hidden_size)
-        out["$(p).mlp.up_proj.weight"] =
-            randn(Float32, cfg.intermediate_size, cfg.hidden_size)
-        out["$(p).mlp.down_proj.weight"] =
-            randn(Float32, cfg.hidden_size, cfg.intermediate_size)
+        out["$(p).mlp.gate_proj.weight"] = randn(
+            Float32, cfg.intermediate_size, cfg.hidden_size
+        )
+        out["$(p).mlp.up_proj.weight"] = randn(
+            Float32, cfg.intermediate_size, cfg.hidden_size
+        )
+        out["$(p).mlp.down_proj.weight"] = randn(
+            Float32, cfg.hidden_size, cfg.intermediate_size
+        )
     end
     return out
 end
@@ -62,9 +65,7 @@ end
 
 @testset verbose = true "GemmaForCausalLM" begin
     Random.seed!(0x1234)
-    cfg = _tiny_gemma_config(;
-        sliding_window=3, attn_softcap=50.0, final_softcap=30.0
-    )
+    cfg = _tiny_gemma_config(; sliding_window=3, attn_softcap=50.0, final_softcap=30.0)
     lm = GemmaForCausalLM(cfg)
 
     @test lm.config === cfg
@@ -149,7 +150,8 @@ end
 
     load_state_dict!(lm, sd)
 
-    @test lm.model.layers[1].self_attn.wq.weight == sd["model.layers.0.self_attn.q_proj.weight"]
+    @test lm.model.layers[1].self_attn.wq.weight ==
+        sd["model.layers.0.self_attn.q_proj.weight"]
     @test lm.model.layers[2].pre_feedforward_layernorm.weight ==
         sd["model.layers.1.pre_feedforward_layernorm.weight"]
     @test lm.model.layers[3].post_feedforward_layernorm.weight ==

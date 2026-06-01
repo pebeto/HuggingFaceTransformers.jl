@@ -41,11 +41,12 @@ function _load_qwen_config(snapshot_dir::AbstractString)
 
     # Qwen2 honors sliding_window only when use_sliding_window is true.
     use_sw = Bool(get(raw, :use_sliding_window, false))
-    sliding_window = if use_sw && haskey(raw, :sliding_window) && raw.sliding_window !== nothing
-        Int(raw.sliding_window)
-    else
-        nothing
-    end
+    sliding_window =
+        if use_sw && haskey(raw, :sliding_window) && raw.sliding_window !== nothing
+            Int(raw.sliding_window)
+        else
+            nothing
+        end
 
     return QwenConfig(;
         vocab_size=Int(raw.vocab_size),
@@ -67,9 +68,9 @@ function _run_variant(name::AbstractString, fixture_filename::AbstractString)
     fixture_path = joinpath(FIXTURES_DIR, fixture_filename)
     if !isfile(fixture_path)
         @info "Skipping Qwen2.5-$(name) parity: fixture $(fixture_path) " *
-              "not present. Generate it with " *
-              "`python3 test/fixtures/record_qwen_parity.py $(name)`."
-        return
+            "not present. Generate it with " *
+            "`python3 test/fixtures/record_qwen_parity.py $(name)`."
+        return nothing
     end
 
     fixture = JSON3.read(read(fixture_path, String))

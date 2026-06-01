@@ -21,11 +21,7 @@ using ..Models:
     build_caches
 
 const DecoderLM = Union{
-    LlamaForCausalLM,
-    MistralForCausalLM,
-    QwenForCausalLM,
-    GemmaForCausalLM,
-    Phi3ForCausalLM,
+    LlamaForCausalLM,MistralForCausalLM,QwenForCausalLM,GemmaForCausalLM,Phi3ForCausalLM
 }
 using ..Tokenizers: Tokenizer, encode, decode
 
@@ -46,9 +42,7 @@ function _softmax(x::AbstractVector{T}) where {T<:AbstractFloat}
     return e ./ sum(e)
 end
 
-function _apply_repetition_penalty!(
-    logits::AbstractVector, ids_seen, penalty::Real
-)
+function _apply_repetition_penalty!(logits::AbstractVector, ids_seen, penalty::Real)
     penalty == 1 && return logits
     penalty > 0 || throw(ArgumentError("repetition_penalty must be > 0"))
     for id in ids_seen
@@ -66,9 +60,7 @@ end
 function _apply_temperature!(logits::AbstractVector, t::Real)
     t == 1 && return logits
     t > 0 || throw(
-        ArgumentError(
-            "temperature must be > 0 (set do_sample=false for greedy decoding)"
-        ),
+        ArgumentError("temperature must be > 0 (set do_sample=false for greedy decoding)"),
     )
     logits ./= t
     return logits
@@ -226,12 +218,7 @@ end
 
 Tokenize → generate → detokenize. The REPL-friendly entry point.
 """
-function generate(
-    lm::DecoderLM,
-    tokenizer::Tokenizer,
-    prompt::AbstractString;
-    kwargs...,
-)
+function generate(lm::DecoderLM, tokenizer::Tokenizer, prompt::AbstractString; kwargs...)
     ids = encode(tokenizer, prompt)
     out_ids = generate(lm, ids; kwargs...)
     return decode(tokenizer, out_ids)

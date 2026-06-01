@@ -87,10 +87,7 @@ struct GemmaModel{E,L,N}
 end
 
 function (m::GemmaModel)(
-    input_ids::AbstractMatrix{<:Integer};
-    caches=nothing,
-    step=nothing,
-    position_ids=nothing,
+    input_ids::AbstractMatrix{<:Integer}; caches=nothing, step=nothing, position_ids=nothing
 )
     h = m.embed_tokens(input_ids)
     # Gemma scales token embeddings by sqrt(hidden_size). This is the only
@@ -148,8 +145,11 @@ function GemmaForCausalLM(cfg::GemmaConfig)
     rope = RoPE(cfg.head_dim; base=cfg.rope_theta)
     eps = Float32(cfg.rms_norm_eps)
 
-    query_scale = isnothing(cfg.query_pre_attn_scalar) ? nothing :
-                  sqrt(Float32(cfg.query_pre_attn_scalar))
+    query_scale = if isnothing(cfg.query_pre_attn_scalar)
+        nothing
+    else
+        sqrt(Float32(cfg.query_pre_attn_scalar))
+    end
 
     layers = [
         GemmaDecoderLayer(
@@ -189,9 +189,8 @@ function build_caches(
 )
     cfg = lm.config
     return [
-        KVCache(
-            cfg.head_dim, cfg.num_key_value_heads, max_seq, batch_size; eltype=eltype
-        ) for _ in 1:(cfg.num_hidden_layers)
+        KVCache(cfg.head_dim, cfg.num_key_value_heads, max_seq, batch_size; eltype=eltype)
+        for _ in 1:(cfg.num_hidden_layers)
     ]
 end
 
@@ -205,35 +204,45 @@ own implementation rather than a delegation.
 function gemma_state_dict_map(cfg::GemmaConfig)
     out = Dict{String,Tuple{Tuple,Symbol}}()
 
-    out["model.embed_tokens.weight"] =
-        ((:model, :embed_tokens, :weight), :transpose)
+    out["model.embed_tokens.weight"] = ((:model, :embed_tokens, :weight), :transpose)
 
     for i in 0:(cfg.num_hidden_layers - 1)
         layer_path = (:model, :layers, i + 1)
         hf_prefix = "model.layers.$(i)"
 
-        out["$(hf_prefix).input_layernorm.weight"] =
-            ((layer_path..., :input_layernorm, :weight), :as_is)
-        out["$(hf_prefix).self_attn.q_proj.weight"] =
-            ((layer_path..., :self_attn, :wq, :weight), :as_is)
-        out["$(hf_prefix).self_attn.k_proj.weight"] =
-            ((layer_path..., :self_attn, :wk, :weight), :as_is)
-        out["$(hf_prefix).self_attn.v_proj.weight"] =
-            ((layer_path..., :self_attn, :wv, :weight), :as_is)
-        out["$(hf_prefix).self_attn.o_proj.weight"] =
-            ((layer_path..., :self_attn, :wo, :weight), :as_is)
-        out["$(hf_prefix).post_attention_layernorm.weight"] =
-            ((layer_path..., :post_attention_layernorm, :weight), :as_is)
-        out["$(hf_prefix).pre_feedforward_layernorm.weight"] =
-            ((layer_path..., :pre_feedforward_layernorm, :weight), :as_is)
-        out["$(hf_prefix).post_feedforward_layernorm.weight"] =
-            ((layer_path..., :post_feedforward_layernorm, :weight), :as_is)
-        out["$(hf_prefix).mlp.gate_proj.weight"] =
-            ((layer_path..., :mlp, :gate_proj, :weight), :as_is)
-        out["$(hf_prefix).mlp.up_proj.weight"] =
-            ((layer_path..., :mlp, :up_proj, :weight), :as_is)
-        out["$(hf_prefix).mlp.down_proj.weight"] =
-            ((layer_path..., :mlp, :down_proj, :weight), :as_is)
+        out["$(hf_prefix).input_layernorm.weight"] = (
+            (layer_path..., :input_layernorm, :weight), :as_is
+        )
+        out["$(hf_prefix).self_attn.q_proj.weight"] = (
+            (layer_path..., :self_attn, :wq, :weight), :as_is
+        )
+        out["$(hf_prefix).self_attn.k_proj.weight"] = (
+            (layer_path..., :self_attn, :wk, :weight), :as_is
+        )
+        out["$(hf_prefix).self_attn.v_proj.weight"] = (
+            (layer_path..., :self_attn, :wv, :weight), :as_is
+        )
+        out["$(hf_prefix).self_attn.o_proj.weight"] = (
+            (layer_path..., :self_attn, :wo, :weight), :as_is
+        )
+        out["$(hf_prefix).post_attention_layernorm.weight"] = (
+            (layer_path..., :post_attention_layernorm, :weight), :as_is
+        )
+        out["$(hf_prefix).pre_feedforward_layernorm.weight"] = (
+            (layer_path..., :pre_feedforward_layernorm, :weight), :as_is
+        )
+        out["$(hf_prefix).post_feedforward_layernorm.weight"] = (
+            (layer_path..., :post_feedforward_layernorm, :weight), :as_is
+        )
+        out["$(hf_prefix).mlp.gate_proj.weight"] = (
+            (layer_path..., :mlp, :gate_proj, :weight), :as_is
+        )
+        out["$(hf_prefix).mlp.up_proj.weight"] = (
+            (layer_path..., :mlp, :up_proj, :weight), :as_is
+        )
+        out["$(hf_prefix).mlp.down_proj.weight"] = (
+            (layer_path..., :mlp, :down_proj, :weight), :as_is
+        )
     end
 
     out["model.norm.weight"] = ((:model, :norm, :weight), :as_is)

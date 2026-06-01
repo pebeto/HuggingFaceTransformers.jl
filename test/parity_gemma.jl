@@ -41,22 +41,21 @@ function _load_gemma_config(snapshot_dir::AbstractString)
         nothing
     end
 
-    attn_softcap = if haskey(raw, :attn_logit_softcapping) &&
-        raw.attn_logit_softcapping !== nothing
-        Float64(raw.attn_logit_softcapping)
-    else
-        nothing
-    end
+    attn_softcap =
+        if haskey(raw, :attn_logit_softcapping) && raw.attn_logit_softcapping !== nothing
+            Float64(raw.attn_logit_softcapping)
+        else
+            nothing
+        end
 
-    final_softcap = if haskey(raw, :final_logit_softcapping) &&
-        raw.final_logit_softcapping !== nothing
-        Float64(raw.final_logit_softcapping)
-    else
-        nothing
-    end
+    final_softcap =
+        if haskey(raw, :final_logit_softcapping) && raw.final_logit_softcapping !== nothing
+            Float64(raw.final_logit_softcapping)
+        else
+            nothing
+        end
 
-    qpas = if haskey(raw, :query_pre_attn_scalar) &&
-        raw.query_pre_attn_scalar !== nothing
+    qpas = if haskey(raw, :query_pre_attn_scalar) && raw.query_pre_attn_scalar !== nothing
         Int(raw.query_pre_attn_scalar)
     else
         nothing
@@ -85,9 +84,9 @@ function _run_variant(name::AbstractString, fixture_filename::AbstractString)
     fixture_path = joinpath(FIXTURES_DIR, fixture_filename)
     if !isfile(fixture_path)
         @info "Skipping Gemma2-$(name) parity: fixture $(fixture_path) " *
-              "not present. Generate it with " *
-              "`python3 test/fixtures/record_gemma_parity.py $(name)`."
-        return
+            "not present. Generate it with " *
+            "`python3 test/fixtures/record_gemma_parity.py $(name)`."
+        return nothing
     end
 
     fixture = JSON3.read(read(fixture_path, String))

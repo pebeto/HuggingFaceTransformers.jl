@@ -42,11 +42,11 @@ function load_phi3_config(snapshot_dir::AbstractString)
     prf = get(raw, :partial_rotary_factor, 1.0)
     Float64(prf) == 1.0 || error(
         "partial_rotary_factor=$(prf) not supported (only 1.0). " *
-        "Try a Phi-3 4k variant — 128k and 3.5 need partial RoPE work."
+        "Try a Phi-3 4k variant — 128k and 3.5 need partial RoPE work.",
     )
     isnothing(get(raw, :rope_scaling, nothing)) || error(
         "rope_scaling present (longrope or similar) — not supported yet. " *
-        "Use a 4k variant."
+        "Use a 4k variant.",
     )
 
     head_dim = if haskey(raw, :head_dim)
@@ -126,10 +126,12 @@ function main(repo_id::AbstractString=DEFAULT_MODEL)
     template = load_chat_template(snapshot_dir)
     eos_ids = load_eos_ids(snapshot_dir)
 
-    window_note = cfg.sliding_window === nothing ?
-                  "" : ", sliding_window=$(cfg.sliding_window)"
-    println("Materializing model ($(cfg.num_hidden_layers) layers, " *
-            "$(cfg.hidden_size) hidden$(window_note))...")
+    window_note =
+        cfg.sliding_window === nothing ? "" : ", sliding_window=$(cfg.sliding_window)"
+    println(
+        "Materializing model ($(cfg.num_hidden_layers) layers, " *
+        "$(cfg.hidden_size) hidden$(window_note))...",
+    )
     lm = Phi3ForCausalLM(cfg)
 
     println("Loading weights (slicing fused QKV and gate-up)...")
