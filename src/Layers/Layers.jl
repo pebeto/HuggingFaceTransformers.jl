@@ -14,7 +14,17 @@ using LinearAlgebra
 using Statistics
 
 export KVCache,
-    RMSNorm, GemmaRMSNorm, RoPE, Linear, SiLUGatedMLP, GeluGatedMLP, GQA, softcap, reset!
+    RMSNorm,
+    GemmaRMSNorm,
+    LayerNorm,
+    RoPE,
+    Linear,
+    SiLUGatedMLP,
+    GeluGatedMLP,
+    GeluMLP,
+    GQA,
+    softcap,
+    reset!
 
 """
     KVCache{T <: AbstractArray}
@@ -144,6 +154,42 @@ end
 
 Flux.@layer GemmaRMSNorm
 Flux.Optimisers.trainable(m::GemmaRMSNorm) = (; weight=m.weight)
+
+"""
+    LayerNorm{W, B, T}
+
+Standard pre-activation Layer Normalization: subtract the per-token mean,
+divide by the per-token standard deviation, then scale by `weight` and
+shift by `bias`. Used by GPT-2, GPT-NeoX, BERT-family, and anything else
+that predates the RMSNorm convention.
+"""
+struct LayerNorm{W,B,T}
+    weight::W
+    bias::B
+    eps::T
+end
+
+"""
+    LayerNorm(dim::Integer, eps::Real = 1f-5)
+
+Construct a `LayerNorm` layer of dimension `dim`. Weight initializes to
+ones, bias to zeros — the identity at load time, matching how HF stores
+checkpoints.
+"""
+function LayerNorm(dim::Integer, eps::Real=1.0f-5)
+    weight = ones(Float32, dim)
+    bias = zeros(Float32, dim)
+    return LayerNorm(weight, bias, Float32(eps))
+end
+
+function (m::LayerNorm)(x::AbstractArray)
+    μ = mean(x; dims=1)
+    σ² = sum((x .- μ) .^ 2; dims=1) ./ size(x, 1)
+    return ((x .- μ) ./ sqrt.(σ² .+ m.eps)) .* m.weight .+ m.bias
+end
+
+Flux.@layer LayerNorm
+Flux.Optimisers.trainable(m::LayerNorm) = (; weight=m.weight, bias=m.bias)
 
 """
     softcap(x, cap)
@@ -377,6 +423,38 @@ function Flux.Optimisers.trainable(m::GeluGatedMLP)
 end
 
 """
+    GeluMLP{F, P}
+
+Standard (non-gated) two-layer FFN used by GPT-2 and friends:
+`c_proj(gelu(c_fc(x)))`. Both linears carry bias. GELU uses the tanh
+approximation since that's what HF's GPT-2 ships with — switching to
+exact GELU would drift the logits.
+"""
+struct GeluMLP{F,P}
+    c_fc::F
+    c_proj::P
+end
+
+"""
+    GeluMLP(hidden::Integer, intermediate::Integer; init = Flux.glorot_uniform)
+
+Construct a `GeluMLP` with `Linear(hidden, intermediate; bias=true)` →
+`gelu_tanh` → `Linear(intermediate, hidden; bias=true)`.
+"""
+function GeluMLP(hidden::Integer, intermediate::Integer; init=Flux.glorot_uniform)
+    c_fc = Linear(hidden, intermediate; bias=true, init=init)
+    c_proj = Linear(intermediate, hidden; bias=true, init=init)
+    return GeluMLP(c_fc, c_proj)
+end
+
+function (m::GeluMLP)(x::AbstractArray)
+    return m.c_proj(_gelu_tanh.(m.c_fc(x)))
+end
+
+Flux.@layer GeluMLP
+Flux.Optimisers.trainable(m::GeluMLP) = (; c_fc=m.c_fc, c_proj=m.c_proj)
+
+"""
     GQA{Q, K, V, O, R}
 
 Grouped-Query Attention (GQA) layer. Partitions queries into groups sharing key/value heads.
@@ -401,22 +479,29 @@ struct GQA{Q,K,V,O,R}
 end
 
 """
-    GQA(hidden_dim::Integer, num_heads_q::Integer, num_heads_k::Integer, head_dim::Integer, rope::RoPE; window_size=nothing, qkv_bias=false, init = Flux.glorot_uniform)
+    GQA(hidden_dim::Integer, num_heads_q::Integer, num_heads_k::Integer, head_dim::Integer, rope; window_size=nothing, qkv_bias=false, init = Flux.glorot_uniform)
 
 Construct a `GQA` layer with key/value caching and RoPE integration.
 
+`rope` is either a `RoPE` instance (applied to Q and K before the score
+matmul) or `nothing` for architectures with no rotary embeddings
+(GPT-2, BERT-style attention with learned positions handled upstream).
+
 `qkv_bias=true` adds an additive bias to the Q/K/V projections (matching
 Qwen2/2.5 and other architectures that bias QKV but not the output
-projection). `wo` never carries a bias.
+projection). `wo_bias=true` additionally biases the output projection
+(GPT-2 does this; the Llama family doesn't). The two flags are
+independent because Qwen2 wants `qkv_bias=true, wo_bias=false`.
 """
 function GQA(
     hidden_dim::Integer,
     num_heads_q::Integer,
     num_heads_k::Integer,
     head_dim::Integer,
-    rope::RoPE;
+    rope::Union{Nothing,RoPE};
     window_size::Union{Nothing,Integer}=nothing,
     qkv_bias::Bool=false,
+    wo_bias::Bool=false,
     softcap::Union{Nothing,Real}=nothing,
     query_scale::Union{Nothing,Real}=nothing,
     init=Flux.glorot_uniform,
@@ -424,7 +509,7 @@ function GQA(
     wq = Linear(hidden_dim, num_heads_q * head_dim; bias=qkv_bias, init=init)
     wk = Linear(hidden_dim, num_heads_k * head_dim; bias=qkv_bias, init=init)
     wv = Linear(hidden_dim, num_heads_k * head_dim; bias=qkv_bias, init=init)
-    wo = Linear(num_heads_q * head_dim, hidden_dim; init=init)
+    wo = Linear(num_heads_q * head_dim, hidden_dim; bias=wo_bias, init=init)
     win = isnothing(window_size) ? nothing : Int(window_size)
     sc = isnothing(softcap) ? nothing : Float32(softcap)
     qs = isnothing(query_scale) ? nothing : Float32(query_scale)
@@ -469,9 +554,15 @@ function (m::GQA)(x::AbstractArray; cache=nothing, step=nothing, position_ids=no
         position_ids = collect(start_pos:(start_pos + seq_len - 1))
     end
 
-    # Apply RoPE
-    q_rotated = m.rope(q, position_ids)
-    k_rotated = m.rope(k, position_ids)
+    # Apply RoPE (skipped when m.rope === nothing, e.g. GPT-2 / BERT where
+    # positional information is already in the input embedding).
+    if isnothing(m.rope)
+        q_rotated = q
+        k_rotated = k
+    else
+        q_rotated = m.rope(q, position_ids)
+        k_rotated = m.rope(k, position_ids)
+    end
 
     # Handle KV cache updates/retrievals (no permutedims — cache layout matches k_rotated).
     if !isnothing(cache)

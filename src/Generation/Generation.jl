@@ -18,10 +18,16 @@ using ..Models:
     QwenForCausalLM,
     GemmaForCausalLM,
     Phi3ForCausalLM,
+    GPT2ForCausalLM,
     build_caches
 
 const DecoderLM = Union{
-    LlamaForCausalLM,MistralForCausalLM,QwenForCausalLM,GemmaForCausalLM,Phi3ForCausalLM
+    LlamaForCausalLM,
+    MistralForCausalLM,
+    QwenForCausalLM,
+    GemmaForCausalLM,
+    Phi3ForCausalLM,
+    GPT2ForCausalLM,
 }
 using ..Tokenizers: Tokenizer, encode, decode
 

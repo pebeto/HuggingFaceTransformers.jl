@@ -11,7 +11,16 @@ module Models
 using Flux
 using SafeTensors: load_safetensors, load_sharded_safetensors
 using ..Layers:
-    RMSNorm, GemmaRMSNorm, RoPE, Linear, SiLUGatedMLP, GeluGatedMLP, GQA, KVCache
+    RMSNorm,
+    GemmaRMSNorm,
+    LayerNorm,
+    RoPE,
+    Linear,
+    SiLUGatedMLP,
+    GeluGatedMLP,
+    GeluMLP,
+    GQA,
+    KVCache
 
 export load_weights, load_into!
 export TokenEmbedding, DecoderLayer, DecoderModel, build_caches, load_state_dict!
@@ -20,6 +29,7 @@ export MistralConfig, MistralForCausalLM, mistral_state_dict_map
 export QwenConfig, QwenForCausalLM, qwen_state_dict_map
 export GemmaConfig, GemmaDecoderLayer, GemmaModel, GemmaForCausalLM, gemma_state_dict_map
 export Phi3Config, Phi3ForCausalLM, phi3_state_dict_map
+export GPT2Config, GPT2Model, GPT2ForCausalLM, gpt2_state_dict_map
 
 include("weights.jl")
 include("state_dict.jl")
@@ -29,5 +39,6 @@ include("mistral.jl")
 include("qwen.jl")
 include("gemma.jl")
 include("phi3.jl")
+include("gpt2.jl")
 
 end # module Models

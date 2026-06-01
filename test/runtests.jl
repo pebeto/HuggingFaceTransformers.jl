@@ -42,6 +42,10 @@ using Allspark
         include("phi3.jl")
     end
 
+    @testset verbose = true "GPT2" begin
+        include("gpt2.jl")
+    end
+
     @testset verbose = true "Generation" begin
         include("generate.jl")
     end
@@ -96,6 +100,12 @@ using Allspark
     if !isempty(get(ENV, "ALLSPARK_TEST_PARITY_PHI3", ""))
         @testset verbose = true "Phi3 parity" begin
             include("parity_phi3.jl")
+        end
+    end
+
+    if !isempty(get(ENV, "ALLSPARK_TEST_PARITY_GPT2", ""))
+        @testset verbose = true "GPT2 parity" begin
+            include("parity_gpt2.jl")
         end
     end
 end

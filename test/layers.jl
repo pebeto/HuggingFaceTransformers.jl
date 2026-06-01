@@ -1,6 +1,9 @@
 using Test
 using Random
 using Allspark.Layers
+# Flux exports its own `LayerNorm`; pull in Allspark's explicitly so the
+# `LayerNorm` testset binds the right one.
+using Allspark.Layers: LayerNorm
 using Flux
 using NNlib
 using Statistics
@@ -211,6 +214,65 @@ end
         expected = 2 .* (x ./ sqrt.(sum(x .^ 2; dims=1) ./ dim .+ rms.eps))
         @test out ≈ expected
     end
+end
+
+@testset verbose = true "LayerNorm" begin
+    dim = 8
+
+    @testset "default initialization is identity scale + zero shift" begin
+        ln = LayerNorm(dim)
+        @test ln.weight == ones(Float32, dim)
+        @test ln.bias == zeros(Float32, dim)
+
+        x = randn(Float32, dim, 3, 2)
+        out = ln(x)
+        μ = sum(x; dims=1) ./ dim
+        σ² = sum((x .- μ) .^ 2; dims=1) ./ dim
+        expected = (x .- μ) ./ sqrt.(σ² .+ ln.eps)
+        @test out ≈ expected
+    end
+
+    @testset "weight and bias affect output linearly" begin
+        ln = LayerNorm(dim)
+        # Set weight to 2, bias to a known vector.
+        ln.weight .= 2.0f0
+        ln.bias .= Float32.(collect(1:dim))
+        x = randn(Float32, dim, 3, 2)
+        out = ln(x)
+        μ = sum(x; dims=1) ./ dim
+        σ² = sum((x .- μ) .^ 2; dims=1) ./ dim
+        normalized = (x .- μ) ./ sqrt.(σ² .+ ln.eps)
+        expected = 2 .* normalized .+ Float32.(collect(1:dim))
+        @test out ≈ expected
+    end
+
+    @testset "gradients flow" begin
+        ln = LayerNorm(dim)
+        x = randn(Float32, dim, 4, 1)
+        grads = Flux.gradient(m -> sum(m(x)), ln)
+        @test grads[1] !== nothing
+        @test grads[1].weight !== nothing
+        @test grads[1].bias !== nothing
+    end
+end
+
+@testset verbose = true "GeluMLP" begin
+    mlp = GeluMLP(4, 16)
+    @test mlp.c_fc.bias isa AbstractVector
+    @test mlp.c_proj.bias isa AbstractVector
+
+    x = rand(Float32, 4, 5, 2)
+    y = mlp(x)
+    @test size(y) == (4, 5, 2)
+
+    grads = Flux.gradient(m -> sum(m(x)), mlp)
+    @test grads[1] !== nothing
+    @test keys(Flux.Optimisers.trainable(mlp)) == (:c_fc, :c_proj)
+
+    # Sanity: it's not the gated form. With the same internal projections,
+    # GeluMLP and GeluGatedMLP must produce different outputs.
+    gated = GeluGatedMLP(4, 16)
+    @test !(mlp(x) ≈ gated(x))
 end
 
 @testset verbose = true "softcap" begin

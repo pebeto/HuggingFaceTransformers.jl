@@ -205,8 +205,32 @@ decoder LLMs, since that's where demand lives.
       `python3 test/fixtures/record_phi3_parity.py <VARIANT>`.
       Example: `examples/repl_chat_phi3.jl` with a
       `<|user|>` / `<|assistant|>` / `<|end|>` fallback template.
-- [ ] GPT-2 / GPT-NeoX (encoder-light legacy support, useful for tests and
-      embedding workflows).
+- [x] GPT-2. First non-Llama-family architecture (`src/Models/gpt2.jl`):
+      `LayerNorm` instead of `RMSNorm` (added to the layer kit with
+      weight + bias), learned absolute position embeddings added to
+      token embeddings in the trunk (no RoPE in the attention layer —
+      `GQA`'s `rope` field was relaxed to `Union{Nothing,RoPE}`),
+      `GeluMLP` for the non-gated FFN with tanh-approximation GELU.
+      `GQA` grew `wo_bias::Bool=false` so GPT-2 can keep its `c_proj`
+      bias while the Llama family stays bias-less. The state-dict
+      loader handles HF's GPT-2 quirks: HF stores linear weights in
+      Conv1D orientation `(in, out)` so the loader transposes them,
+      and `c_attn.weight` / `c_attn.bias` are fused tensors sliced
+      into `wq` / `wk` / `wv` (à la Phi-3). `GPT2Model` is its own
+      struct (not `DecoderModel`) because the trunk adds position
+      embeddings into token embeddings before the layer stack; the
+      layers themselves reuse `DecoderLayer`. `tie_word_embeddings=true`
+      is always honored. Parity is gated on `ALLSPARK_TEST_PARITY_GPT2`
+      across 124M / 355M / 774M / 1558M via
+      `python3 test/fixtures/record_gpt2_parity.py <VARIANT>`. Example:
+      `examples/completion_gpt2.jl` (text completion rather than chat
+      — GPT-2 isn't instruction-tuned).
+- [ ] GPT-NeoX. Reuses `LayerNorm` and most of `GQA`, but introduces
+      parallel-residual decoder blocks (`x + attn(ln(x)) + mlp(ln(x))`,
+      not the sequential `x + attn → x + mlp` shape) and a different
+      fused QKV layout (interleaved per-head rather than concatenated
+      Q;K;V). Needs its own `NeoXDecoderLayer` + a small extension to
+      the fused-QKV slicing path.
 - [ ] BERT / RoBERTa — encoder path, for embeddings & classification.
 - [x] **Refactor checkpoint.** With five models in place (Llama,
       Mistral, Qwen, Gemma2, Phi-3), the shared decoder shape was
