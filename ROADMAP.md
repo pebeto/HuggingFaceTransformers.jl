@@ -187,7 +187,24 @@ decoder LLMs, since that's where demand lives.
       `python3 test/fixtures/record_gemma_parity.py <VARIANT>`.
       Example: `examples/repl_chat_gemma.jl` with a
       `<start_of_turn>` / `<end_of_turn>` fallback template.
-- [ ] Phi-3.
+- [x] Phi-3. The fifth model — and the trigger for the
+      Refactor checkpoint below. `Phi3Config` + `Phi3ForCausalLM` in
+      `src/Models/phi3.jl` reuse `LlamaModel` / `LlamaDecoderLayer` /
+      `GQA` / `SiLUGatedMLP` unchanged. The interesting part is the
+      state-dict loader: Phi-3 ships `self_attn.qkv_proj.weight`
+      (concatenated `[Q; K; V]`) and `mlp.gate_up_proj.weight`
+      (concatenated `[gate; up]`) as single fused tensors. Rather than
+      introducing fused-projection layer variants, `load_state_dict!`
+      slices each fused tensor into the standard `wq`/`wk`/`wv` and
+      `gate_proj`/`up_proj` at load time. (The single-fused-matmul
+      perf path is Phase 4 territory.) Only `partial_rotary_factor =
+      1.0` is supported; the loader rejects other values with a clear
+      error since `longrope` scaling and partial RoPE need their own
+      implementation. Parity is gated on `ALLSPARK_TEST_PARITY_PHI3`
+      and covers `mini-4k` (3.8B) and `medium-4k` (14B) via
+      `python3 test/fixtures/record_phi3_parity.py <VARIANT>`.
+      Example: `examples/repl_chat_phi3.jl` with a
+      `<|user|>` / `<|assistant|>` / `<|end|>` fallback template.
 - [ ] GPT-2 / GPT-NeoX (encoder-light legacy support, useful for tests and
       embedding workflows).
 - [ ] BERT / RoBERTa — encoder path, for embeddings & classification.

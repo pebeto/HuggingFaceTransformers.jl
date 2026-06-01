@@ -13,10 +13,19 @@ module Generation
 using JSON3
 using Random
 using ..Models:
-    LlamaForCausalLM, MistralForCausalLM, QwenForCausalLM, GemmaForCausalLM, build_caches
+    LlamaForCausalLM,
+    MistralForCausalLM,
+    QwenForCausalLM,
+    GemmaForCausalLM,
+    Phi3ForCausalLM,
+    build_caches
 
 const DecoderLM = Union{
-    LlamaForCausalLM,MistralForCausalLM,QwenForCausalLM,GemmaForCausalLM
+    LlamaForCausalLM,
+    MistralForCausalLM,
+    QwenForCausalLM,
+    GemmaForCausalLM,
+    Phi3ForCausalLM,
 }
 using ..Tokenizers: Tokenizer, encode, decode
 

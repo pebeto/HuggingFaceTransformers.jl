@@ -33,6 +33,7 @@ export LlamaConfig,
 export MistralConfig, MistralForCausalLM, mistral_state_dict_map
 export QwenConfig, QwenForCausalLM, qwen_state_dict_map
 export GemmaConfig, GemmaDecoderLayer, GemmaModel, GemmaForCausalLM, gemma_state_dict_map
+export Phi3Config, Phi3ForCausalLM, phi3_state_dict_map
 
 include("weights.jl")
 include("state_dict.jl")
@@ -40,5 +41,6 @@ include("llama.jl")
 include("mistral.jl")
 include("qwen.jl")
 include("gemma.jl")
+include("phi3.jl")
 
 end # module Models
