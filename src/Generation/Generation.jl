@@ -19,6 +19,7 @@ using ..Models:
     GemmaForCausalLM,
     Phi3ForCausalLM,
     GPT2ForCausalLM,
+    NeoXForCausalLM,
     build_caches
 
 const DecoderLM = Union{
@@ -28,6 +29,7 @@ const DecoderLM = Union{
     GemmaForCausalLM,
     Phi3ForCausalLM,
     GPT2ForCausalLM,
+    NeoXForCausalLM,
 }
 using ..Tokenizers: Tokenizer, encode, decode
 

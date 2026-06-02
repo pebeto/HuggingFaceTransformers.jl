@@ -30,6 +30,7 @@ export QwenConfig, QwenForCausalLM, qwen_state_dict_map
 export GemmaConfig, GemmaDecoderLayer, GemmaModel, GemmaForCausalLM, gemma_state_dict_map
 export Phi3Config, Phi3ForCausalLM, phi3_state_dict_map
 export GPT2Config, GPT2Model, GPT2ForCausalLM, gpt2_state_dict_map
+export NeoXConfig, NeoXDecoderLayer, NeoXForCausalLM, neox_state_dict_map
 
 include("weights.jl")
 include("state_dict.jl")
@@ -40,5 +41,6 @@ include("qwen.jl")
 include("gemma.jl")
 include("phi3.jl")
 include("gpt2.jl")
+include("neox.jl")
 
 end # module Models

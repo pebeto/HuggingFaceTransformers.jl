@@ -225,12 +225,30 @@ decoder LLMs, since that's where demand lives.
       `python3 test/fixtures/record_gpt2_parity.py <VARIANT>`. Example:
       `examples/completion_gpt2.jl` (text completion rather than chat
       — GPT-2 isn't instruction-tuned).
-- [ ] GPT-NeoX. Reuses `LayerNorm` and most of `GQA`, but introduces
-      parallel-residual decoder blocks (`x + attn(ln(x)) + mlp(ln(x))`,
-      not the sequential `x + attn → x + mlp` shape) and a different
-      fused QKV layout (interleaved per-head rather than concatenated
-      Q;K;V). Needs its own `NeoXDecoderLayer` + a small extension to
-      the fused-QKV slicing path.
+- [x] GPT-NeoX / Pythia (`src/Models/neox.jl`). Three new things on
+      top of GPT-2's primitives: (1) **partial RoPE** — `RoPE` grew a
+      `rotary_dim::Union{Nothing,Int}` field so only the first
+      `floor(head_dim * partial_rotary_factor)` channels of each head
+      get rotated; the tail passes through unchanged. Pythia and
+      GPT-NeoX-20B both use `rotary_pct=0.25`. (2) **parallel-residual
+      decoder block** — `NeoXDecoderLayer` reads `x` once and adds
+      both branch outputs back: `x = x + attn(ln_a(x)) + mlp(ln_m(x))`.
+      `DecoderModel` is reused since its forward doesn't care about
+      layer type. (3) **interleaved per-head fused QKV** —
+      `query_key_value.weight` is laid out as
+      `[Q_h; K_h; V_h; Q_{h+1}; …]` (not GPT-2's concatenated
+      `[Q; K; V]`), so the loader walks heads and copies each
+      `(hd, hidden)` slice into the right rows of `wq` / `wk` / `wv`.
+      NeoX uses `nn.Linear` (not Conv1D), so no transpose for
+      `attention.dense`, `dense_h_to_4h`, `dense_4h_to_h`. The LM head
+      `embed_out.weight` lives outside the `gpt_neox.` namespace and
+      is loaded as-is (no transpose). The constructor rejects
+      odd-valued rotated dims since the rotation operates on pairs.
+      Parity is gated on `ALLSPARK_TEST_PARITY_NEOX` across
+      pythia-70m / 410m / 1b / 6.9b via
+      `python3 test/fixtures/record_neox_parity.py <VARIANT>`.
+      Example: `examples/completion_neox.jl` (Pythia is a base LM,
+      not chat-tuned).
 - [ ] BERT / RoBERTa — encoder path, for embeddings & classification.
 - [x] **Refactor checkpoint.** With five models in place (Llama,
       Mistral, Qwen, Gemma2, Phi-3), the shared decoder shape was

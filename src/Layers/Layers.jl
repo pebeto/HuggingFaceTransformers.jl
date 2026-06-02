@@ -211,24 +211,36 @@ Supports Llama 3 scaling/wavelength-interpolation if constructed with the approp
 """
 struct RoPE{F}
     inv_freq::F
+    rotary_dim::Union{Nothing,Int}
 end
 
 """
-    RoPE(dim::Integer; base::Real = 500000.0, scaling_factor = nothing, low_freq_factor = nothing, high_freq_factor = nothing, old_context_len = nothing)
+    RoPE(dim::Integer; base::Real = 500000.0, rotary_dim = nothing, scaling_factor = nothing, low_freq_factor = nothing, high_freq_factor = nothing, old_context_len = nothing)
 
-Construct a `RoPE` layer for a head dimension of size `dim`.
-If scaling parameters are provided, applies Llama 3 NTK-style frequency scaling.
+Construct a `RoPE` layer. `dim` is the full attention `head_dim`.
+
+`rotary_dim` controls partial rotary embeddings: when set (e.g. 16 for
+Pythia/GPT-NeoX with `rotary_pct=0.25` over a 64-dim head), only the
+first `rotary_dim` channels of each head are rotated and the rest pass
+through. When `nothing` (the default) the full head is rotated.
+
+If scaling parameters are provided, applies Llama 3 NTK-style frequency
+scaling.
 """
 function RoPE(
     dim::Integer;
     base::Real=500000.0,
+    rotary_dim::Union{Nothing,Integer}=nothing,
     scaling_factor::Union{Nothing,Real}=nothing,
     low_freq_factor::Union{Nothing,Real}=nothing,
     high_freq_factor::Union{Nothing,Real}=nothing,
     old_context_len::Union{Nothing,Integer}=nothing,
 )
-    indices = 0:2:(dim - 2)
-    inv_freq = 1.0 ./ (base .^ (indices ./ dim))
+    # Compute inv_freq against the rotated portion only — partial RoPE
+    # keeps the unrotated tail unchanged, so its frequencies don't matter.
+    rdim = isnothing(rotary_dim) ? Int(dim) : Int(rotary_dim)
+    indices = 0:2:(rdim - 2)
+    inv_freq = 1.0 ./ (base .^ (indices ./ rdim))
 
     # Apply Llama 3/3.1 RoPE frequency scaling if all scaling parameters are provided
     if !isnothing(scaling_factor) &&
@@ -255,12 +267,15 @@ function RoPE(
         inv_freq = inv_freq_scaled
     end
 
-    return RoPE(Float32.(inv_freq))
+    stored_rdim = isnothing(rotary_dim) ? nothing : Int(rotary_dim)
+    return RoPE(Float32.(inv_freq), stored_rdim)
 end
 
-function (m::RoPE)(x::AbstractArray, position_ids::AbstractVector)
+# Core rotation: assumes inv_freq matches `size(x, 1)`. Pulled out so
+# partial-rotary mode can call it on a slice of the input.
+function _rope_rotate(inv_freq::AbstractVector, x::AbstractArray, position_ids::AbstractVector)
     # Compute rotation angles: thetas of shape (half_dim, seq_len)
-    thetas = m.inv_freq * reshape(position_ids, 1, :)
+    thetas = inv_freq * reshape(position_ids, 1, :)
     cos_half = cos.(thetas)
     sin_half = sin.(thetas)
 
@@ -287,6 +302,21 @@ function (m::RoPE)(x::AbstractArray, position_ids::AbstractVector)
     x_rotated = vcat(-x2, x1)
 
     return (x .* cos_emb) .+ (x_rotated .* sin_emb)
+end
+
+function (m::RoPE)(x::AbstractArray, position_ids::AbstractVector)
+    # Full rotation path: either rotary_dim is unset, or it equals head_dim.
+    if isnothing(m.rotary_dim) || m.rotary_dim == size(x, 1)
+        return _rope_rotate(m.inv_freq, x, position_ids)
+    end
+
+    # Partial RoPE (GPT-NeoX / Pythia): rotate the first rotary_dim
+    # channels of each head, pass the remaining channels through.
+    rdim = m.rotary_dim
+    x_rot = Array(selectdim(x, 1, 1:rdim))
+    x_pass = Array(selectdim(x, 1, (rdim + 1):size(x, 1)))
+    rotated = _rope_rotate(m.inv_freq, x_rot, position_ids)
+    return cat(rotated, x_pass; dims=1)
 end
 
 Flux.@layer RoPE

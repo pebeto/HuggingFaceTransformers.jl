@@ -46,6 +46,10 @@ using Allspark
         include("gpt2.jl")
     end
 
+    @testset verbose = true "NeoX" begin
+        include("neox.jl")
+    end
+
     @testset verbose = true "Generation" begin
         include("generate.jl")
     end
@@ -106,6 +110,12 @@ using Allspark
     if !isempty(get(ENV, "ALLSPARK_TEST_PARITY_GPT2", ""))
         @testset verbose = true "GPT2 parity" begin
             include("parity_gpt2.jl")
+        end
+    end
+
+    if !isempty(get(ENV, "ALLSPARK_TEST_PARITY_NEOX", ""))
+        @testset verbose = true "NeoX parity" begin
+            include("parity_neox.jl")
         end
     end
 end

@@ -78,6 +78,41 @@ end
     @test Flux.Optimisers.trainable(rope) == (;)
 end
 
+@testset verbose = true "RoPE partial rotation" begin
+    @testset "rotary_dim == head_dim is identical to default" begin
+        # Constructing with explicit rotary_dim=head_dim must match the
+        # full-rotation default exactly.
+        dim = 8
+        rope_full = RoPE(dim; base=10000.0)
+        rope_explicit = RoPE(dim; base=10000.0, rotary_dim=dim)
+        x = randn(Float32, dim, 4, 1)
+        @test rope_full(x, collect(0:3)) ≈ rope_explicit(x, collect(0:3))
+    end
+
+    @testset "partial rotation leaves the tail untouched" begin
+        # GPT-NeoX shape: head_dim=8, rotary_dim=4 (50%). The first 4
+        # channels rotate; channels 5..8 must come through unchanged.
+        rope = RoPE(8; base=10000.0, rotary_dim=4)
+        @test length(rope.inv_freq) == 2          # rotary_dim/2 freqs
+        @test rope.rotary_dim == 4
+
+        x = randn(Float32, 8, 3, 1)
+        out = rope(x, collect(0:2))
+        # Tail (channels 5..8) is byte-identical to the input.
+        @test out[5:8, :, :] == x[5:8, :, :]
+        # Rotated head (channels 1..4) is NOT equal to the input (unless we got
+        # unlucky with values near zero).
+        @test !(out[1:4, :, :] ≈ x[1:4, :, :])
+    end
+
+    @testset "partial RoPE at position 0 is identity on the rotated portion" begin
+        rope = RoPE(8; base=10000.0, rotary_dim=4)
+        x = randn(Float32, 8, 1, 1)
+        out = rope(x, [0])
+        @test out ≈ x atol = 1e-5    # position 0 rotates by 0
+    end
+end
+
 @testset verbose = true "Linear" begin
     @testset "no bias (default)" begin
         lin = Linear(4, 3)
