@@ -249,7 +249,29 @@ decoder LLMs, since that's where demand lives.
       `python3 test/fixtures/record_neox_parity.py <VARIANT>`.
       Example: `examples/completion_neox.jl` (Pythia is a base LM,
       not chat-tuned).
-- [ ] BERT / RoBERTa — encoder path, for embeddings & classification.
+- [x] BERT / RoBERTa (`src/Models/bert.jl`). First encoder-only model
+      — the biggest architectural delta in Phase 2. Bidirectional
+      attention (`GQA` grew `causal::Bool=true`; BERT passes `false`),
+      post-norm encoder block (`BertEncoderLayer`: norm AFTER each
+      residual add), three summed embeddings (token + position +
+      token-type) followed by a LayerNorm in `BertEmbeddings`, and a
+      MaskedLM head with `dense → gelu → LayerNorm → tied_decoder + bias`.
+      Exact GELU is wired through `GeluMLP`'s new `approx::Bool` flag
+      (default `true` for GPT-2 compat; `false` for BERT, RoBERTa, and
+      — correctness fix — GPT-NeoX, which had been using the tanh
+      approximation by inheritance). `BertConfig` is shared between
+      BERT and RoBERTa; `hf_prefix` selects the state-dict namespace
+      (`bert.` or `roberta.`), `head_prefix` selects the head naming
+      (`cls.predictions.…` or `lm_head.…`), and
+      `position_embedding_offset` accounts for RoBERTa's
+      `padding_idx + 1` convention. Parity is gated on
+      `ALLSPARK_TEST_PARITY_BERT` over RoBERTa-base / RoBERTa-large
+      via `python3 test/fixtures/record_bert_parity.py <VARIANT>`;
+      the fixture records logits at an explicit `<mask>` position.
+      BERT proper is **not** in parity coverage yet: it uses
+      WordPiece tokenization, which is Phase 3 work. Example:
+      `examples/mask_fill_roberta.jl` (top-K predictions for a user
+      `<mask>`-containing sentence).
 - [x] **Refactor checkpoint.** With five models in place (Llama,
       Mistral, Qwen, Gemma2, Phi-3), the shared decoder shape was
       lifted into `src/Models/decoder.jl`: `LlamaDecoderLayer` →

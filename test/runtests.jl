@@ -50,6 +50,10 @@ using Allspark
         include("neox.jl")
     end
 
+    @testset verbose = true "Bert" begin
+        include("bert.jl")
+    end
+
     @testset verbose = true "Generation" begin
         include("generate.jl")
     end
@@ -116,6 +120,12 @@ using Allspark
     if !isempty(get(ENV, "ALLSPARK_TEST_PARITY_NEOX", ""))
         @testset verbose = true "NeoX parity" begin
             include("parity_neox.jl")
+        end
+    end
+
+    if !isempty(get(ENV, "ALLSPARK_TEST_PARITY_BERT", ""))
+        @testset verbose = true "Bert parity" begin
+            include("parity_bert.jl")
         end
     end
 end

@@ -20,7 +20,8 @@ using ..Layers:
     GeluGatedMLP,
     GeluMLP,
     GQA,
-    KVCache
+    KVCache,
+    _gelu_exact
 
 export load_weights, load_into!
 export TokenEmbedding, DecoderLayer, DecoderModel, build_caches, load_state_dict!
@@ -31,6 +32,14 @@ export GemmaConfig, GemmaDecoderLayer, GemmaModel, GemmaForCausalLM, gemma_state
 export Phi3Config, Phi3ForCausalLM, phi3_state_dict_map
 export GPT2Config, GPT2Model, GPT2ForCausalLM, gpt2_state_dict_map
 export NeoXConfig, NeoXDecoderLayer, NeoXForCausalLM, neox_state_dict_map
+export BertConfig,
+    BertEmbeddings,
+    BertEncoderLayer,
+    BertEncoder,
+    BertModel,
+    BertLMHead,
+    BertForMaskedLM,
+    bert_state_dict_map
 
 include("weights.jl")
 include("state_dict.jl")
@@ -42,5 +51,6 @@ include("gemma.jl")
 include("phi3.jl")
 include("gpt2.jl")
 include("neox.jl")
+include("bert.jl")
 
 end # module Models

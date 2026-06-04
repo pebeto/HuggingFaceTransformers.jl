@@ -273,7 +273,9 @@ end
 
 # Core rotation: assumes inv_freq matches `size(x, 1)`. Pulled out so
 # partial-rotary mode can call it on a slice of the input.
-function _rope_rotate(inv_freq::AbstractVector, x::AbstractArray, position_ids::AbstractVector)
+function _rope_rotate(
+    inv_freq::AbstractVector, x::AbstractArray, position_ids::AbstractVector
+)
     # Compute rotation angles: thetas of shape (half_dim, seq_len)
     thetas = inv_freq * reshape(position_ids, 1, :)
     cos_half = cos.(thetas)
@@ -441,6 +443,11 @@ end
 @inline _gelu_tanh(x) =
     Float32(0.5) * x * (1 + tanh(sqrt(Float32(2 / pi)) * (x + Float32(0.044715) * x^3)))
 
+# Exact GELU, via the NNlib implementation (uses erf under the hood).
+# BERT, RoBERTa, and GPT-NeoX / Pythia all use this rather than the tanh
+# approximation that GPT-2 uses.
+@inline _gelu_exact(x) = NNlib.gelu(x)
+
 function (m::GeluGatedMLP)(x::AbstractArray)
     g = _gelu_tanh.(m.gate_proj(x))
     u = m.up_proj(x)
@@ -455,30 +462,41 @@ end
 """
     GeluMLP{F, P}
 
-Standard (non-gated) two-layer FFN used by GPT-2 and friends:
-`c_proj(gelu(c_fc(x)))`. Both linears carry bias. GELU uses the tanh
-approximation since that's what HF's GPT-2 ships with — switching to
-exact GELU would drift the logits.
+Standard (non-gated) two-layer FFN: `c_proj(gelu(c_fc(x)))`. Both
+linears carry bias.
+
+`approx` selects the GELU form: `true` uses the tanh approximation
+(what HF ships for GPT-2), `false` uses exact GELU via NNlib's
+erf-based implementation (what BERT, RoBERTa, and GPT-NeoX/Pythia
+ship). The choice is parity-critical — the two agree to ~1e-3 on
+typical activations.
 """
 struct GeluMLP{F,P}
     c_fc::F
     c_proj::P
+    approx::Bool
 end
 
 """
-    GeluMLP(hidden::Integer, intermediate::Integer; init = Flux.glorot_uniform)
+    GeluMLP(hidden::Integer, intermediate::Integer; approx=true, init = Flux.glorot_uniform)
 
 Construct a `GeluMLP` with `Linear(hidden, intermediate; bias=true)` →
-`gelu_tanh` → `Linear(intermediate, hidden; bias=true)`.
+GELU → `Linear(intermediate, hidden; bias=true)`. `approx=true` (the
+default, matching GPT-2) uses the tanh form; `approx=false` uses
+exact GELU.
 """
-function GeluMLP(hidden::Integer, intermediate::Integer; init=Flux.glorot_uniform)
+function GeluMLP(
+    hidden::Integer, intermediate::Integer; approx::Bool=true, init=Flux.glorot_uniform
+)
     c_fc = Linear(hidden, intermediate; bias=true, init=init)
     c_proj = Linear(intermediate, hidden; bias=true, init=init)
-    return GeluMLP(c_fc, c_proj)
+    return GeluMLP(c_fc, c_proj, approx)
 end
 
 function (m::GeluMLP)(x::AbstractArray)
-    return m.c_proj(_gelu_tanh.(m.c_fc(x)))
+    h = m.c_fc(x)
+    activated = m.approx ? _gelu_tanh.(h) : _gelu_exact.(h)
+    return m.c_proj(activated)
 end
 
 Flux.@layer GeluMLP
@@ -506,6 +524,7 @@ struct GQA{Q,K,V,O,R}
     window_size::Union{Nothing,Int}
     softcap::Union{Nothing,Float32}      # Attention-score softcap (Gemma2).
     query_scale::Union{Nothing,Float32}  # Override for the `sqrt(head_dim)` divisor.
+    causal::Bool                         # false for BERT-style bidirectional attention.
 end
 
 """
@@ -522,6 +541,10 @@ Qwen2/2.5 and other architectures that bias QKV but not the output
 projection). `wo_bias=true` additionally biases the output projection
 (GPT-2 does this; the Llama family doesn't). The two flags are
 independent because Qwen2 wants `qkv_bias=true, wo_bias=false`.
+
+`causal=false` (default `true`) disables the causal mask — every query
+sees every key. Used by encoder-only models (BERT, RoBERTa) where
+attention is bidirectional.
 """
 function GQA(
     hidden_dim::Integer,
@@ -534,6 +557,7 @@ function GQA(
     wo_bias::Bool=false,
     softcap::Union{Nothing,Real}=nothing,
     query_scale::Union{Nothing,Real}=nothing,
+    causal::Bool=true,
     init=Flux.glorot_uniform,
 )
     wq = Linear(hidden_dim, num_heads_q * head_dim; bias=qkv_bias, init=init)
@@ -544,7 +568,18 @@ function GQA(
     sc = isnothing(softcap) ? nothing : Float32(softcap)
     qs = isnothing(query_scale) ? nothing : Float32(query_scale)
     return GQA(
-        wq, wk, wv, wo, rope, Int(num_heads_q), Int(num_heads_k), Int(head_dim), win, sc, qs
+        wq,
+        wk,
+        wv,
+        wo,
+        rope,
+        Int(num_heads_q),
+        Int(num_heads_k),
+        Int(head_dim),
+        win,
+        sc,
+        qs,
+        causal,
     )
 end
 
@@ -632,21 +667,27 @@ function (m::GQA)(x::AbstractArray; cache=nothing, step=nothing, position_ids=no
 
     # Mask construction. Key at array index `j` is at absolute position `j - 1`
     # (0-indexed); query `i` is at `position_ids[i]`. Mask iff:
-    #   - causal:   key_pos > query_pos, or
+    #   - causal:   key_pos > query_pos (when m.causal), or
     #   - sliding:  query_pos - key_pos >= window_size (when set).
     # The seq_len==1 fast path holds for plain causal (single query never sees a
     # future key), but a sliding window of size W still needs masking once the
-    # KV cache exceeds W entries — hence the second branch of `needs_mask`.
+    # KV cache exceeds W entries. With m.causal=false (BERT-style bidirectional
+    # attention) neither predicate applies and we skip the mask entirely.
     has_window = !isnothing(m.window_size)
-    needs_mask = seq_len > 1 || (has_window && seq_len_kv > m.window_size)
+    needs_causal_mask = m.causal && seq_len > 1
+    needs_window_mask = has_window && seq_len_kv > m.window_size
+    needs_mask = needs_causal_mask || needs_window_mask
     if needs_mask
-        mask = if has_window
+        mask = if has_window && m.causal
             w = m.window_size
             [
                 (j - 1) > position_ids[i] || position_ids[i] - (j - 1) >= w for
                 i in 1:seq_len, j in 1:seq_len_kv
             ]
-        else
+        elseif has_window   # bidirectional + sliding (rare combo)
+            w = m.window_size
+            [abs(position_ids[i] - (j - 1)) >= w for i in 1:seq_len, j in 1:seq_len_kv]
+        else                # causal only
             [(j - 1) > position_ids[i] for i in 1:seq_len, j in 1:seq_len_kv]
         end
         mask_val = mask .* Float32(-1e9)

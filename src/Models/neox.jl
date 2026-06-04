@@ -58,9 +58,7 @@ function (layer::NeoXDecoderLayer)(
     x::AbstractArray; cache=nothing, step=nothing, position_ids=nothing
 )
     h_attn = layer.input_layernorm(x)
-    h_attn = layer.self_attn(
-        h_attn; cache=cache, step=step, position_ids=position_ids
-    )
+    h_attn = layer.self_attn(h_attn; cache=cache, step=step, position_ids=position_ids)
     h_mlp = layer.post_attention_layernorm(x)
     h_mlp = layer.mlp(h_mlp)
     return x .+ h_attn .+ h_mlp
@@ -107,7 +105,7 @@ function NeoXForCausalLM(cfg::NeoXConfig)
     iseven(rotary_dim) || throw(
         ArgumentError(
             "partial RoPE dim $(rotary_dim) (= head_dim * partial_rotary_factor) " *
-            "must be even"
+            "must be even",
         ),
     )
 
@@ -126,7 +124,7 @@ function NeoXForCausalLM(cfg::NeoXConfig)
             ),
             LayerNorm(cfg.hidden_size, eps),
             LayerNorm(cfg.hidden_size, eps),
-            GeluMLP(cfg.hidden_size, cfg.intermediate_size),
+            GeluMLP(cfg.hidden_size, cfg.intermediate_size; approx=false),
         ) for _ in 1:(cfg.num_hidden_layers)
     ]
 
@@ -147,9 +145,8 @@ function build_caches(
 )
     cfg = lm.config
     return [
-        KVCache(
-            cfg.head_dim, cfg.num_attention_heads, max_seq, batch_size; eltype=eltype
-        ) for _ in 1:(cfg.num_hidden_layers)
+        KVCache(cfg.head_dim, cfg.num_attention_heads, max_seq, batch_size; eltype=eltype)
+        for _ in 1:(cfg.num_hidden_layers)
     ]
 end
 
@@ -167,37 +164,46 @@ function neox_state_dict_map(cfg::NeoXConfig)
     out = Dict{String,Tuple{Tuple,Symbol}}()
 
     # HF stores embeddings as (vocab, hidden); we want (hidden, vocab).
-    out["gpt_neox.embed_in.weight"] =
-        ((:model, :embed_tokens, :weight), :transpose)
+    out["gpt_neox.embed_in.weight"] = ((:model, :embed_tokens, :weight), :transpose)
 
     for i in 0:(cfg.num_hidden_layers - 1)
         layer_path = (:model, :layers, i + 1)
         hf_prefix = "gpt_neox.layers.$(i)"
 
-        out["$(hf_prefix).input_layernorm.weight"] =
-            ((layer_path..., :input_layernorm, :weight), :as_is)
-        out["$(hf_prefix).input_layernorm.bias"] =
-            ((layer_path..., :input_layernorm, :bias), :as_is)
-        out["$(hf_prefix).post_attention_layernorm.weight"] =
-            ((layer_path..., :post_attention_layernorm, :weight), :as_is)
-        out["$(hf_prefix).post_attention_layernorm.bias"] =
-            ((layer_path..., :post_attention_layernorm, :bias), :as_is)
+        out["$(hf_prefix).input_layernorm.weight"] = (
+            (layer_path..., :input_layernorm, :weight), :as_is
+        )
+        out["$(hf_prefix).input_layernorm.bias"] = (
+            (layer_path..., :input_layernorm, :bias), :as_is
+        )
+        out["$(hf_prefix).post_attention_layernorm.weight"] = (
+            (layer_path..., :post_attention_layernorm, :weight), :as_is
+        )
+        out["$(hf_prefix).post_attention_layernorm.bias"] = (
+            (layer_path..., :post_attention_layernorm, :bias), :as_is
+        )
 
         # NeoX uses `nn.Linear` (not Conv1D); weights are already in
         # (out, in) orientation, so no transpose needed for these.
-        out["$(hf_prefix).attention.dense.weight"] =
-            ((layer_path..., :self_attn, :wo, :weight), :as_is)
-        out["$(hf_prefix).attention.dense.bias"] =
-            ((layer_path..., :self_attn, :wo, :bias), :as_is)
+        out["$(hf_prefix).attention.dense.weight"] = (
+            (layer_path..., :self_attn, :wo, :weight), :as_is
+        )
+        out["$(hf_prefix).attention.dense.bias"] = (
+            (layer_path..., :self_attn, :wo, :bias), :as_is
+        )
 
-        out["$(hf_prefix).mlp.dense_h_to_4h.weight"] =
-            ((layer_path..., :mlp, :c_fc, :weight), :as_is)
-        out["$(hf_prefix).mlp.dense_h_to_4h.bias"] =
-            ((layer_path..., :mlp, :c_fc, :bias), :as_is)
-        out["$(hf_prefix).mlp.dense_4h_to_h.weight"] =
-            ((layer_path..., :mlp, :c_proj, :weight), :as_is)
-        out["$(hf_prefix).mlp.dense_4h_to_h.bias"] =
-            ((layer_path..., :mlp, :c_proj, :bias), :as_is)
+        out["$(hf_prefix).mlp.dense_h_to_4h.weight"] = (
+            (layer_path..., :mlp, :c_fc, :weight), :as_is
+        )
+        out["$(hf_prefix).mlp.dense_h_to_4h.bias"] = (
+            (layer_path..., :mlp, :c_fc, :bias), :as_is
+        )
+        out["$(hf_prefix).mlp.dense_4h_to_h.weight"] = (
+            (layer_path..., :mlp, :c_proj, :weight), :as_is
+        )
+        out["$(hf_prefix).mlp.dense_4h_to_h.bias"] = (
+            (layer_path..., :mlp, :c_proj, :bias), :as_is
+        )
     end
 
     out["gpt_neox.final_layer_norm.weight"] = ((:model, :norm, :weight), :as_is)
@@ -256,7 +262,7 @@ function load_state_dict!(
         qkv_b = weights[qkv_b_key]
         length(qkv_b) == expected_rows || throw(
             DimensionMismatch(
-                "$(qkv_b_key) length is $(length(qkv_b)), expected $(expected_rows)",
+                "$(qkv_b_key) length is $(length(qkv_b)), expected $(expected_rows)"
             ),
         )
 

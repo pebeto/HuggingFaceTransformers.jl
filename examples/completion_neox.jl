@@ -70,9 +70,11 @@ function main(repo_id::AbstractString=DEFAULT_MODEL)
     tokenizer = load_tokenizer(snapshot_dir)
     eos_ids = load_eos_ids(snapshot_dir)
 
-    println("Materializing model ($(cfg.num_hidden_layers) layers, " *
-            "$(cfg.hidden_size) hidden, " *
-            "rotary_pct=$(cfg.partial_rotary_factor))...")
+    println(
+        "Materializing model ($(cfg.num_hidden_layers) layers, " *
+        "$(cfg.hidden_size) hidden, " *
+        "rotary_pct=$(cfg.partial_rotary_factor))...",
+    )
     lm = NeoXForCausalLM(cfg)
 
     println("Loading weights (slicing per-head interleaved QKV)...")

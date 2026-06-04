@@ -371,6 +371,7 @@ end
             nothing,           # window_size
             5.0f0,             # softcap
             nothing,           # query_scale
+            true,              # causal
         )
         x = randn(Float32, hidden_dim, 4, 1) .* 10   # large inputs → big scores
         out_raw = gqa_raw(x)
@@ -395,6 +396,7 @@ end
             nothing,
             nothing,
             Float32(sqrt(head_dim)),
+            true,              # causal
         )
         x = randn(Float32, hidden_dim, 4, 1)
         @test gqa_default(x) ≈ gqa_match(x)
@@ -412,6 +414,7 @@ end
             nothing,
             nothing,
             Float32(2.0 * sqrt(head_dim)),
+            true,              # causal
         )
         @test !(gqa_default(x) ≈ gqa_other(x))
     end
@@ -446,6 +449,7 @@ end
             10,                          # window > seq_len
             nothing,                     # softcap
             nothing,                     # query_scale
+            true,                        # causal
         )
 
         x = rand(Float32, hidden_dim, 5, 1)
@@ -467,6 +471,7 @@ end
             2,                           # window of 2 (self + 1 past)
             nothing,                     # softcap
             nothing,                     # query_scale
+            true,                        # causal
         )
 
         x = rand(Float32, hidden_dim, 5, 1)

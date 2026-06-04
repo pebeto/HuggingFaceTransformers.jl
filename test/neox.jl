@@ -26,8 +26,7 @@ function _neox_synthetic_state_dict(cfg::NeoXConfig)
         out["$(p).post_attention_layernorm.bias"] = randn(Float32, h)
 
         # Fused QKV: (3*n_heads*hd, hidden), per-head interleaved.
-        out["$(p).attention.query_key_value.weight"] =
-            randn(Float32, 3 * n_heads * hd, h)
+        out["$(p).attention.query_key_value.weight"] = randn(Float32, 3 * n_heads * hd, h)
         out["$(p).attention.query_key_value.bias"] = randn(Float32, 3 * n_heads * hd)
 
         # Output projection (already in standard (out, in) — NeoX uses nn.Linear,
@@ -154,7 +153,8 @@ end
     load_state_dict!(lm, sd)
 
     # Spot-check 1:1 entries flowed.
-    @test lm.model.embed_tokens.weight == permutedims(sd["gpt_neox.embed_in.weight"], (2, 1))
+    @test lm.model.embed_tokens.weight ==
+        permutedims(sd["gpt_neox.embed_in.weight"], (2, 1))
     @test lm.model.norm.bias == sd["gpt_neox.final_layer_norm.bias"]
     @test lm.model.layers[1].self_attn.wo.weight ==
         sd["gpt_neox.layers.0.attention.dense.weight"]
@@ -188,8 +188,9 @@ end
     cfg = _tiny_neox_config()
     lm = NeoXForCausalLM(cfg)
     sd = _neox_synthetic_state_dict(cfg)
-    sd["gpt_neox.layers.0.attention.query_key_value.weight"] =
-        randn(Float32, 5, cfg.hidden_size)   # wrong first dim
+    sd["gpt_neox.layers.0.attention.query_key_value.weight"] = randn(
+        Float32, 5, cfg.hidden_size
+    )   # wrong first dim
     @test_throws DimensionMismatch load_state_dict!(lm, sd)
 end
 
