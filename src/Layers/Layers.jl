@@ -22,6 +22,7 @@ export KVCache,
     SiLUGatedMLP,
     GeluGatedMLP,
     GeluMLP,
+    MoEMLP,
     GQA,
     softcap,
     reset!
@@ -410,6 +411,123 @@ Flux.@layer SiLUGatedMLP
 function Flux.Optimisers.trainable(m::SiLUGatedMLP)
     (; gate_proj=m.gate_proj, up_proj=m.up_proj, down_proj=m.down_proj)
 end
+
+"""
+    MoEMLP{G, E}
+
+Mixture-of-Experts MLP block (Mixtral-style). A bias-less `gate`
+projection scores each token over `num_experts` experts; the per-token
+top-`top_k` experts are softmaxed and renormalized, and the result is
+the weighted sum of those experts' outputs.
+
+Each expert is a `SiLUGatedMLP` (SwiGLU) with the standard
+`gate_proj` / `up_proj` / `down_proj` field names. The router output
+is computed in the model's working dtype (typically Float32 in this
+release).
+
+The forward pass is correctness-first: it batches tokens per expert
+(so each expert is called once with its assigned slice of tokens
+rather than once per token), but doesn't yet pipeline router-to-expert
+or fuse the expert matmuls. Phase 4 will revisit.
+"""
+struct MoEMLP{G,E}
+    gate::G
+    experts::E
+    num_experts::Int
+    top_k::Int
+    function MoEMLP(
+        gate::Linear, experts::AbstractVector, num_experts::Integer, top_k::Integer
+    )
+        return new{typeof(gate),typeof(experts)}(gate, experts, Int(num_experts), Int(top_k))
+    end
+end
+
+"""
+    MoEMLP(hidden::Integer, intermediate::Integer, num_experts::Integer, top_k::Integer; init = Flux.glorot_uniform)
+
+Construct a fresh MoE block: a bias-less `Linear(hidden, num_experts)`
+gate plus `num_experts` independent `SiLUGatedMLP(hidden, intermediate)`
+experts.
+"""
+function MoEMLP(
+    hidden::Integer,
+    intermediate::Integer,
+    num_experts::Integer,
+    top_k::Integer;
+    init=Flux.glorot_uniform,
+)
+    top_k > 0 || throw(ArgumentError("top_k must be > 0"))
+    top_k <= num_experts || throw(
+        ArgumentError("top_k ($(top_k)) cannot exceed num_experts ($(num_experts))"),
+    )
+    gate = Linear(hidden, num_experts; init=init)
+    experts = [SiLUGatedMLP(hidden, intermediate; init=init) for _ in 1:num_experts]
+    return MoEMLP(gate, experts, Int(num_experts), Int(top_k))
+end
+
+function (m::MoEMLP)(x::AbstractArray)
+    # x: (hidden, seq, batch). Flatten the trailing dims to one "token" axis.
+    hidden = size(x, 1)
+    trailing = size(x)[2:end]
+    n_tokens = prod(trailing)
+    flat = reshape(x, hidden, n_tokens)
+
+    # Router scores → softmax probabilities (n_experts, n_tokens).
+    router_logits = m.gate(flat)
+    probs = NNlib.softmax(router_logits; dims=1)
+
+    # Per-token: pick top-K experts and renormalize their probabilities.
+    n_experts = m.num_experts
+    top_k = m.top_k
+    T = eltype(probs)
+
+    selected = Matrix{Int}(undef, top_k, n_tokens)
+    weights = Matrix{T}(undef, top_k, n_tokens)
+    for i in 1:n_tokens
+        col = view(probs, :, i)
+        topk_idx = partialsortperm(col, 1:top_k; rev=true)
+        w = T[col[k] for k in topk_idx]
+        w ./= sum(w)
+        @inbounds for k in 1:top_k
+            selected[k, i] = topk_idx[k]
+            weights[k, i] = w[k]
+        end
+    end
+
+    out = zeros(T, hidden, n_tokens)
+
+    # For each expert: gather tokens that chose it, run, scatter back with weights.
+    for expert_idx in 1:n_experts
+        # Collect (token, slot) pairs where this expert was selected.
+        token_idxs = Int[]
+        slot_idxs = Int[]
+        @inbounds for i in 1:n_tokens, k in 1:top_k
+            if selected[k, i] == expert_idx
+                push!(token_idxs, i)
+                push!(slot_idxs, k)
+            end
+        end
+        isempty(token_idxs) && continue
+
+        # Run the expert on the gathered slice.
+        input_subset = flat[:, token_idxs]
+        expert_out = m.experts[expert_idx](input_subset)   # (hidden, n_assigned)
+
+        # Scatter-add weighted outputs.
+        @inbounds for j in eachindex(token_idxs)
+            ti = token_idxs[j]
+            w = weights[slot_idxs[j], ti]
+            for h in 1:hidden
+                out[h, ti] += w * expert_out[h, j]
+            end
+        end
+    end
+
+    return reshape(out, hidden, trailing...)
+end
+
+Flux.@layer MoEMLP
+Flux.Optimisers.trainable(m::MoEMLP) = (; gate=m.gate, experts=m.experts)
 
 """
     GeluGatedMLP{G, U, D}

@@ -20,6 +20,7 @@ using ..Models:
     Phi3ForCausalLM,
     GPT2ForCausalLM,
     NeoXForCausalLM,
+    MixtralForCausalLM,
     build_caches
 
 const DecoderLM = Union{
@@ -30,6 +31,7 @@ const DecoderLM = Union{
     Phi3ForCausalLM,
     GPT2ForCausalLM,
     NeoXForCausalLM,
+    MixtralForCausalLM,
 }
 using ..Tokenizers: Tokenizer, encode, decode
 

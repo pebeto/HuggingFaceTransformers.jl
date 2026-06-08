@@ -19,6 +19,7 @@ using ..Layers:
     SiLUGatedMLP,
     GeluGatedMLP,
     GeluMLP,
+    MoEMLP,
     GQA,
     KVCache,
     _gelu_exact
@@ -40,6 +41,7 @@ export BertConfig,
     BertLMHead,
     BertForMaskedLM,
     bert_state_dict_map
+export MixtralConfig, MixtralForCausalLM, mixtral_state_dict_map
 
 include("weights.jl")
 include("state_dict.jl")
@@ -52,5 +54,6 @@ include("phi3.jl")
 include("gpt2.jl")
 include("neox.jl")
 include("bert.jl")
+include("mixtral.jl")
 
 end # module Models

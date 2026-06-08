@@ -284,8 +284,27 @@ decoder LLMs, since that's where demand lives.
       block stays separate as its own `GemmaDecoderLayer` /
       `GemmaModel`. All 258 model + 79 layer + tokenizer/generation/
       hub/aqua/JET tests still pass after the rename.
-- [ ] Mixtral / MoE — deferred until a routing abstraction has at least one
-      consumer.
+- [x] Mixtral / MoE (`src/Models/mixtral.jl`). Sparse
+      Mixture-of-Experts decoder. The decoder block shape is Mistral's
+      exactly — RMSNorm + GQA + RoPE + optional sliding window — so
+      `DecoderLayer` is reused unchanged. The only new piece is the
+      `MoEMLP` layer primitive: a bias-less `Linear(hidden,
+      num_experts)` gate scores each token, the per-token top-K
+      experts are softmax-renormalized, and the output is the
+      weighted sum of those experts' `SiLUGatedMLP` outputs. The
+      forward batches tokens per expert (each expert runs once with
+      its assigned slice) but doesn't fuse the expert matmuls — Phase 4.
+      State-dict naming follows HF's `block_sparse_moe.gate.weight`
+      and `block_sparse_moe.experts.{i}.{w1,w2,w3}.weight`, where
+      Mixtral's `w1`/`w2`/`w3` map to our standard
+      `gate_proj`/`down_proj`/`up_proj` (yes, `w2` is the
+      down-projection — non-obvious). `tie_word_embeddings=false` on
+      every shipped Mixtral checkpoint. Parity is gated on
+      `ALLSPARK_TEST_PARITY_MIXTRAL` over `8x7b` / `8x22b` via
+      `python3 test/fixtures/record_mixtral_parity.py <VARIANT>` —
+      both are server-class in fp32 (~90 GB / ~280 GB). Example:
+      `examples/repl_chat_mixtral.jl` (uses Mistral's `[INST]` chat
+      template since Mixtral shares the format).
 
 ## Phase 3 — Tokenizer breadth
 

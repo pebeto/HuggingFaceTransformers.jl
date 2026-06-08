@@ -54,6 +54,10 @@ using Allspark
         include("bert.jl")
     end
 
+    @testset verbose = true "Mixtral" begin
+        include("mixtral_model.jl")
+    end
+
     @testset verbose = true "Generation" begin
         include("generate.jl")
     end
@@ -126,6 +130,12 @@ using Allspark
     if !isempty(get(ENV, "ALLSPARK_TEST_PARITY_BERT", ""))
         @testset verbose = true "Bert parity" begin
             include("parity_bert.jl")
+        end
+    end
+
+    if !isempty(get(ENV, "ALLSPARK_TEST_PARITY_MIXTRAL", ""))
+        @testset verbose = true "Mixtral parity" begin
+            include("parity_mixtral.jl")
         end
     end
 end
