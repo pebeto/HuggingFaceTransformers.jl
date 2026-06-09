@@ -18,6 +18,23 @@ struct SplitPreTokenizer <: PreTokenizer
     behavior::Symbol
 end
 
+"""
+    MetaspacePreTokenizer
+
+SentencePiece-style pretokenizer. Replaces every ASCII space in the
+input with `replacement` (typically `▁`, U+2581). With
+`prepend_scheme == :always`, a `replacement` is also prepended to the
+input; `:first` prepends only when the input is the first chunk in a
+sequence; `:never` skips prepending entirely. This implementation
+treats all chunks the same way (`:first` and `:always` behave
+identically) since we don't track inter-chunk context — that matches
+the HF default for the Gemma / T5 family.
+"""
+struct MetaspacePreTokenizer <: PreTokenizer
+    replacement::String
+    prepend_scheme::Symbol     # :always | :first | :never
+end
+
 apply_pre(::IdentityPreTokenizer, ts::Vector{String}) = ts
 
 function apply_pre(p::SequencePreTokenizer, ts::Vector{String})
@@ -67,6 +84,18 @@ function apply_pre(p::ByteLevelPreTokenizer, ts::Vector{String})
     return out
 end
 
+function apply_pre(p::MetaspacePreTokenizer, ts::Vector{String})
+    out = String[]
+    for t in ts
+        s = replace(t, ' ' => p.replacement)
+        if p.prepend_scheme !== :never && !startswith(s, p.replacement)
+            s = p.replacement * s
+        end
+        push!(out, s)
+    end
+    return out
+end
+
 abstract type Decoder end
 
 struct ByteLevelDecoder <: Decoder end
@@ -82,4 +111,118 @@ function apply_dec(d::SequenceDecoder, s::AbstractString)
         s = apply_dec(step, s)
     end
     return s
+end
+
+"""
+    ReplaceDecoder
+
+Literal string replacement, e.g. `▁` → " " for SentencePiece decoders.
+"""
+struct ReplaceDecoder <: Decoder
+    pattern::String
+    content::String
+end
+
+apply_dec(d::ReplaceDecoder, s::AbstractString) = replace(s, d.pattern => d.content)
+
+"""
+    ByteFallbackDecoder
+
+Collapses runs of SentencePiece byte-fallback tokens (`<0xHH>`) back into
+the bytes they represent. Tokens that aren't byte-fallback markers pass
+through verbatim.
+"""
+struct ByteFallbackDecoder <: Decoder end
+
+const _BYTE_FALLBACK_REGEX = r"<0x([0-9A-Fa-f]{2})>"
+
+function apply_dec(::ByteFallbackDecoder, s::AbstractString)
+    # Coalesce a contiguous run of `<0xHH>` markers and decode the
+    # collected bytes as UTF-8; isolated markers (the common case) just
+    # decode that single byte.
+    out = IOBuffer()
+    buf = UInt8[]
+    function flush_buf!()
+        isempty(buf) && return
+        try
+            print(out, String(copy(buf)))
+        catch
+            # Invalid UTF-8 run — fall back to emitting bytes verbatim
+            # as Latin-1 so we don't lose data.
+            for b in buf
+                write(out, b)
+            end
+        end
+        empty!(buf)
+    end
+
+    i = firstindex(s)
+    n = lastindex(s)
+    while i <= n
+        m = match(_BYTE_FALLBACK_REGEX, s, i)
+        if m === nothing || m.offset != i
+            flush_buf!()
+            if m === nothing
+                print(out, SubString(s, i))
+                break
+            end
+            print(out, SubString(s, i, prevind(s, m.offset)))
+            i = m.offset
+        end
+        # Match begins exactly at i — consume one byte.
+        push!(buf, parse(UInt8, m.captures[1]::AbstractString; base=16))
+        i = m.offset + ncodeunits(m.match)
+    end
+    flush_buf!()
+    return String(take!(out))
+end
+
+"""
+    FuseDecoder
+
+No-op concatenation marker. HF's tokenizer pipeline uses `Fuse` to
+indicate that prior steps' outputs should be joined into a single
+string; in Allspark every decoder already operates on the joined
+string, so this is the identity.
+"""
+struct FuseDecoder <: Decoder end
+
+apply_dec(::FuseDecoder, s::AbstractString) = String(s)
+
+"""
+    StripDecoder
+
+Removes `start` characters from the beginning and `stop` from the end.
+Used by SentencePiece decoders to undo the `▁` prepended by the
+Metaspace pretokenizer.
+"""
+struct StripDecoder <: Decoder
+    content::String
+    start::Int
+    stop::Int
+end
+
+function apply_dec(d::StripDecoder, s::AbstractString)
+    str = String(s)
+    pat = d.content
+    pat_bytes = ncodeunits(pat)
+    pat_bytes > 0 || return str
+
+    # Left strip: pat's end always falls on a char boundary, so SubString
+    # from `pat_bytes + 1` is safe.
+    for _ in 1:d.start
+        startswith(str, pat) || break
+        str = String(SubString(str, pat_bytes + 1))
+    end
+
+    # Right strip: walk to the char boundary just before where pat starts.
+    # `prevind` skips over continuation bytes for multi-byte chars.
+    for _ in 1:d.stop
+        endswith(str, pat) || break
+        pat_start = ncodeunits(str) - pat_bytes + 1
+        cut_end = prevind(str, pat_start)
+        str = cut_end < 1 ? "" : String(SubString(str, 1, cut_end))
+    end
+
+    return str
 end

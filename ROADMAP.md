@@ -311,9 +311,25 @@ decoder LLMs, since that's where demand lives.
 `tokenizer.json` covers most modern models, but a few still need
 SentencePiece or WordPiece directly.
 
-- [ ] SentencePiece path for Gemma/T5-family. Either bind to
-      `sentencepiece` via JLL or port a minimal Unigram decoder. Prefer the
-      latter to keep deps lean if feasible.
+- [x] SentencePiece path for Gemma/T5-family. Ported a minimal
+      Unigram tokenizer in-tree (no `sentencepiece` JLL dependency).
+      `src/Tokenizers/unigram.jl` builds a byte-keyed trie from the
+      vocab and runs best-segmentation Viterbi to find the
+      highest-log-probability tokenization. `byte_fallback=true`
+      (Gemma's default) adds 256 single-byte fallback transitions
+      using the `<0xHH>` tokens for out-of-vocab characters
+      (multi-byte UTF-8 chars split into per-byte tokens). The
+      Metaspace pretokenizer (space → `▁`, optional prepend) and the
+      Replace / ByteFallback / Fuse / Strip decoders are all wired into
+      the `tokenizer.json` parser, so a Gemma `tokenizer.json` loads
+      and round-trips end-to-end. `Tokenizer` is now parameterized on
+      the model type (`Tokenizer{M}`) and `encode_word(model, …)`
+      dispatches between BPE and Unigram; existing BPE callsites are
+      backward-compatible. Tested in `test/tokenizers.jl` (Viterbi
+      best-path correctness, byte fallback on out-of-vocab and
+      multi-byte UTF-8, Metaspace prepend rules, full Gemma-shape
+      decoder sequence round-trip including `café` byte-fallback
+      reassembly).
 - [ ] WordPiece path for legacy BERT checkpoints that ship `vocab.txt`
       instead of `tokenizer.json`.
 - [ ] Tokenizer parity test harness: random sample of `tokenizer_config.json`

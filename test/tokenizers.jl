@@ -3,7 +3,9 @@ using JSON3
 using Allspark.Tokenizers
 using Allspark.Tokenizers:
     BPEModel,
+    UnigramModel,
     bpe_encode_word,
+    encode_word,
     token_ids,
     bytes_to_string,
     string_to_bytes,
@@ -15,7 +17,13 @@ using Allspark.Tokenizers:
     SplitPreTokenizer,
     SequencePreTokenizer,
     IdentityPreTokenizer,
+    MetaspacePreTokenizer,
     ByteLevelDecoder,
+    ReplaceDecoder,
+    ByteFallbackDecoder,
+    FuseDecoder,
+    StripDecoder,
+    SequenceDecoder,
     apply_pre,
     apply_dec
 
@@ -242,4 +250,146 @@ end
 
 @testset "decoder building blocks" begin
     @test apply_dec(ByteLevelDecoder(), "helloĠworld") == "hello world"
+end
+
+# ---------------------------------------------------------------------
+# Unigram (SentencePiece) — used by Gemma, T5, …
+# ---------------------------------------------------------------------
+
+@testset verbose = true "Unigram model (no byte fallback)" begin
+    # Tiny vocab: chars + a few likely bigrams. Scores hand-picked so the
+    # best segmentation is unambiguous.
+    vocab = Tuple{String,Float32}[
+        ("<unk>", -100.0f0),
+        ("▁", -2.0f0),
+        ("a", -3.0f0),
+        ("b", -3.0f0),
+        ("c", -3.0f0),
+        ("ab", -2.5f0),     # higher than 'a' + 'b' = -6.0
+        ("▁ab", -2.0f0),    # higher than '▁' + 'ab' = -4.5
+        ("bc", -2.5f0),
+    ]
+    model = UnigramModel(vocab; unk_id=0, byte_fallback=false)
+
+    @testset "vocab + scores indexed by HF id" begin
+        @test model.vocab["▁"] == 1
+        @test model.vocab["▁ab"] == 6
+        @test model.id_to_token[6] == "▁ab"
+        @test model.scores[7] == -2.0f0     # 1-based: ids 0..7 → 1..8
+    end
+
+    @testset "Viterbi picks the highest-score segmentation" begin
+        # "▁abc" → best is "▁ab" + "c" (= -2 + -3 = -5)
+        #         not "▁" + "a" + "b" + "c" (= -2 - 3 - 3 - 3 = -11)
+        #         not "▁" + "ab" + "c"      (= -2 - 2.5 - 3 = -7.5)
+        ids = encode_word(model, "▁abc")
+        @test ids == [6, 4]
+        @test model.id_to_token[6] == "▁ab"
+        @test model.id_to_token[4] == "c"
+    end
+
+    @testset "no path → unk" begin
+        # Character not in vocab. Without byte_fallback, no path; returns unk.
+        ids = encode_word(model, "z")
+        @test ids == [0]                    # unk_id
+    end
+end
+
+@testset verbose = true "Unigram model (byte fallback)" begin
+    # Vocab includes some printable chars + the full 256 `<0xHH>` byte tokens,
+    # so any UTF-8 input is encodable.
+    vocab = Tuple{String,Float32}[("<unk>", -100.0f0), ("a", -1.0f0)]
+    for b in 0x00:0xff
+        tok = "<0x" * uppercase(string(b; base=16, pad=2)) * ">"
+        push!(vocab, (tok, -5.0f0))
+    end
+    model = UnigramModel(vocab; unk_id=0, byte_fallback=true)
+
+    @testset "byte_to_id is populated" begin
+        @test model.byte_to_id[Int('a') + 1] !== nothing   # via the byte token
+        @test model.byte_to_id[Int('z') + 1] !== nothing   # also via byte token
+        @test count(!isnothing, model.byte_to_id) == 256
+    end
+
+    @testset "vocab tokens beat byte fallback when their score is higher" begin
+        # 'a' as a vocab token (-1) beats '<0x61>' as a byte fallback (-5).
+        ids = encode_word(model, "a")
+        @test ids == [1]                   # the 'a' vocab token
+    end
+
+    @testset "out-of-vocab character routes through byte fallback" begin
+        # 'z' isn't in the vocab; byte fallback emits '<0x7A>'.
+        ids = encode_word(model, "z")
+        @test length(ids) == 1
+        @test model.id_to_token[ids[1]] == "<0x7A>"
+    end
+
+    @testset "multi-byte UTF-8 emits one byte token per UTF-8 byte" begin
+        # 'é' is C3 A9 in UTF-8 → two byte tokens.
+        ids = encode_word(model, "é")
+        @test length(ids) == 2
+        @test model.id_to_token[ids[1]] == "<0xC3>"
+        @test model.id_to_token[ids[2]] == "<0xA9>"
+    end
+end
+
+@testset verbose = true "MetaspacePreTokenizer" begin
+    @testset "replaces spaces and prepends by default" begin
+        pre = MetaspacePreTokenizer("▁", :always)
+        out = apply_pre(pre, ["hello world"])
+        @test out == ["▁hello▁world"]
+    end
+
+    @testset "prepend_scheme=:never skips the leading replacement" begin
+        pre = MetaspacePreTokenizer("▁", :never)
+        out = apply_pre(pre, ["hello world"])
+        @test out == ["hello▁world"]
+    end
+
+    @testset "no double-prepend when input already starts with replacement" begin
+        pre = MetaspacePreTokenizer("▁", :always)
+        out = apply_pre(pre, ["▁hello"])
+        @test out == ["▁hello"]
+    end
+end
+
+@testset verbose = true "SentencePiece-style decoders" begin
+    @testset "ReplaceDecoder swaps the literal pattern" begin
+        @test apply_dec(ReplaceDecoder("▁", " "), "▁hello▁world") == " hello world"
+    end
+
+    @testset "ByteFallbackDecoder collapses runs of <0xHH>" begin
+        # "é" (C3 A9) split across two byte tokens, then decoded.
+        @test apply_dec(ByteFallbackDecoder(), "<0xC3><0xA9>") == "é"
+        # Mixed with literal text.
+        @test apply_dec(ByteFallbackDecoder(), "hi<0xC3><0xA9>!") == "hié!"
+        # No-op when no byte tokens are present.
+        @test apply_dec(ByteFallbackDecoder(), "hello") == "hello"
+    end
+
+    @testset "FuseDecoder is identity" begin
+        @test apply_dec(FuseDecoder(), "anything") == "anything"
+    end
+
+    @testset "StripDecoder strips counted occurrences" begin
+        @test apply_dec(StripDecoder(" ", 1, 0), " hello") == "hello"
+        @test apply_dec(StripDecoder(" ", 1, 0), "hello") == "hello"
+        @test apply_dec(StripDecoder(" ", 0, 1), "hello ") == "hello"
+        @test apply_dec(StripDecoder(" ", 1, 1), " hello ") == "hello"
+    end
+
+    @testset "Gemma-shape decoder sequence round-trips Metaspace output" begin
+        # Mirrors Gemma's tokenizer.json: Replace ▁→" ", ByteFallback, Fuse,
+        # Strip 1 leading " ".
+        gemma_decoder = SequenceDecoder([
+            ReplaceDecoder("▁", " "),
+            ByteFallbackDecoder(),
+            FuseDecoder(),
+            StripDecoder(" ", 1, 0),
+        ])
+        # Pretokenizer would produce "▁hello▁world"; decoder must undo it.
+        @test apply_dec(gemma_decoder, "▁hello▁world") == "hello world"
+        # With a byte-fallback fragment inside.
+        @test apply_dec(gemma_decoder, "▁caf<0xC3><0xA9>") == "café"
+    end
 end

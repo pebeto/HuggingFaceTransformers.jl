@@ -75,3 +75,13 @@ function token_ids(model::BPEModel, tokens::Vector{String})
     end
     return out
 end
+
+"""
+    encode_word(model::BPEModel, word) -> Vector{Int}
+
+Run BPE on `word` and resolve the resulting tokens to 0-indexed IDs.
+Mirrors the `encode_word(::UnigramModel, …)` signature so the top-level
+`encode` doesn't care which model family it's looking at.
+"""
+encode_word(model::BPEModel, word::AbstractString) =
+    token_ids(model, bpe_encode_word(model, word))

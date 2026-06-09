@@ -14,6 +14,7 @@ export Tokenizer, AddedToken, load_tokenizer, encode, decode
 
 include("byte_level.jl")
 include("bpe.jl")
+include("unigram.jl")
 include("pretokenizer.jl")
 
 struct AddedToken
@@ -22,8 +23,15 @@ struct AddedToken
     special::Bool
 end
 
-struct Tokenizer
-    model::BPEModel
+"""
+    Tokenizer{M}
+
+A loaded HuggingFace tokenizer. `M` is the model type — currently
+either `BPEModel` (GPT-2 / Llama-3 / Mistral / Qwen / Phi-3 / NeoX /
+RoBERTa) or `UnigramModel` (SentencePiece — Gemma, T5).
+"""
+struct Tokenizer{M}
+    model::M
     pre_tokenizer::PreTokenizer
     decoder::Decoder
     added_tokens::Vector{AddedToken}
@@ -52,20 +60,37 @@ end
 
 function _parse_model(m::JSON3.Object)
     typ = String(m[:type]::AbstractString)
-    typ == "BPE" || throw(
-        ArgumentError(
-            "unsupported tokenizer model: $(typ); only BPE is supported in this release"
-        ),
-    )
-    vocab_raw = m[:vocab]::JSON3.Object
-    vocab = Dict{String,Int}()
-    for (k, v) in pairs(vocab_raw)
-        vocab[String(k)] = Int(v::Integer)
+    if typ == "BPE"
+        vocab_raw = m[:vocab]::JSON3.Object
+        vocab = Dict{String,Int}()
+        for (k, v) in pairs(vocab_raw)
+            vocab[String(k)] = Int(v::Integer)
+        end
+        merges = _parse_merges(m[:merges]::JSON3.Array)
+        unk_raw = get(m, :unk_token, nothing)
+        unk = unk_raw isa AbstractString ? String(unk_raw) : nothing
+        return BPEModel(vocab, merges, unk)
+    elseif typ == "Unigram"
+        vocab_raw = m[:vocab]::JSON3.Array
+        vocab = Tuple{String,Float32}[]
+        for entry in vocab_raw
+            arr = entry::JSON3.Array
+            length(arr) == 2 || throw(
+                ArgumentError("Unigram vocab entry must be [token, score]: $(arr)"),
+            )
+            push!(vocab, (String(arr[1]::AbstractString), Float32(arr[2]::Real)))
+        end
+        unk_id_raw = get(m, :unk_id, nothing)
+        unk_id = unk_id_raw isa Integer ? Int(unk_id_raw) : nothing
+        byte_fallback = Bool(get(m, :byte_fallback, false)::Bool)
+        return UnigramModel(vocab; unk_id=unk_id, byte_fallback=byte_fallback)
+    else
+        throw(
+            ArgumentError(
+                "unsupported tokenizer model: $(typ); supported: BPE, Unigram"
+            ),
+        )
     end
-    merges = _parse_merges(m[:merges]::JSON3.Array)
-    unk_raw = get(m, :unk_token, nothing)
-    unk = unk_raw isa AbstractString ? String(unk_raw) : nothing
-    return BPEModel(vocab, merges, unk)
 end
 
 function _parse_pre_tokenizer(p::JSON3.Object)
@@ -100,6 +125,19 @@ function _parse_pre_tokenizer(p::JSON3.Object)
             )
         end
         return SplitPreTokenizer(Regex(regex_str), behavior)
+    elseif typ == "Metaspace"
+        replacement = String(get(p, :replacement, "▁")::AbstractString)
+        scheme_raw = get(p, :prepend_scheme, "always")
+        # HF tokenizers historically also used the bool flag `add_prefix_space`;
+        # honor either form.
+        scheme = if scheme_raw isa AbstractString
+            s = String(scheme_raw)
+            s == "always" ? :always : s == "first" ? :first : s == "never" ? :never :
+            throw(ArgumentError("unknown Metaspace prepend_scheme: $(s)"))
+        else
+            Bool(get(p, :add_prefix_space, true)::Bool) ? :always : :never
+        end
+        return MetaspacePreTokenizer(replacement, scheme)
     else
         throw(ArgumentError("unsupported pre_tokenizer type: $(typ)"))
     end
@@ -116,6 +154,30 @@ function _parse_decoder(d::JSON3.Object)
             push!(steps, _parse_decoder(child::JSON3.Object))
         end
         return SequenceDecoder(steps)
+    elseif typ == "Replace"
+        pat = d[:pattern]::JSON3.Object
+        haskey(pat, :String) || throw(
+            ArgumentError("Replace decoder only supports literal-string patterns"),
+        )
+        return ReplaceDecoder(
+            String(pat[:String]::AbstractString),
+            String(d[:content]::AbstractString),
+        )
+    elseif typ == "ByteFallback"
+        return ByteFallbackDecoder()
+    elseif typ == "Fuse"
+        return FuseDecoder()
+    elseif typ == "Strip"
+        return StripDecoder(
+            String(d[:content]::AbstractString),
+            Int(get(d, :start, 0)::Integer),
+            Int(get(d, :stop, 0)::Integer),
+        )
+    elseif typ == "Metaspace"
+        # Some HF tokenizer JSONs also list Metaspace as a decoder; treat it
+        # as Replace(replacement → " ").
+        replacement = String(get(d, :replacement, "▁")::AbstractString)
+        return ReplaceDecoder(replacement, " ")
     else
         throw(ArgumentError("unsupported decoder type: $(typ)"))
     end
@@ -128,8 +190,9 @@ Load a HuggingFace `tokenizer.json`. `path` may be the JSON file itself or
 a directory containing one.
 
 Supports BPE models with ByteLevel pre-tokenization (the GPT-2 / Llama-3 /
-Qwen2 family). Unigram (SentencePiece) and WordPiece models are not yet
-implemented.
+Qwen2 / RoBERTa family) and Unigram models with Metaspace pre-tokenization
+(SentencePiece — Gemma, T5, …). WordPiece is not yet implemented; classic
+BERT checkpoints still need it.
 """
 function load_tokenizer(path::AbstractString)
     file = isdir(path) ? joinpath(path, "tokenizer.json") : path
@@ -226,7 +289,7 @@ function encode(tk::Tokenizer, text::AbstractString)
         else
             isempty(chunk) && continue
             for pt in apply_pre(tk.pre_tokenizer, [chunk])
-                append!(ids, token_ids(tk.model, bpe_encode_word(tk.model, pt)))
+                append!(ids, encode_word(tk.model, pt))
             end
         end
     end
