@@ -330,8 +330,33 @@ SentencePiece or WordPiece directly.
       multi-byte UTF-8, Metaspace prepend rules, full Gemma-shape
       decoder sequence round-trip including `café` byte-fallback
       reassembly).
-- [ ] WordPiece path for legacy BERT checkpoints that ship `vocab.txt`
-      instead of `tokenizer.json`.
+- [x] WordPiece path for the BERT family. `src/Tokenizers/wordpiece.jl`
+      implements greedy longest-prefix-match `encode_word` with the
+      `##` continuing-subword convention, falling back to `[UNK]` for
+      unmatchable words or words longer than `max_input_chars_per_word`.
+      Three new pieces land alongside: `BertPreTokenizer` (whitespace
+      + punctuation split, matching BERT's `BasicTokenizer`),
+      `WordPieceDecoder` (strip `##`, fold punctuation spacing,
+      handle the `n't` / `'s` contractions), and a `Normalizer`
+      abstraction with `BertNormalizer` (NFD-decompose + drop
+      combining marks via `\\p{Mn}`, lowercase, CJK char padding,
+      control-char cleanup) wired into `Tokenizer` as a new
+      `normalizer` field that runs before pretokenization. `decode`
+      grew a per-decoder token separator (`""` for ByteLevel-style
+      pipelines, `" "` for WordPiece) so the WordPiece decoder can
+      see the `" ##"` joins. `load_wordpiece_from_vocab_txt(path;
+      lowercase, strip_accents)` is the legacy entry point for
+      checkpoints that ship `vocab.txt` only — line number is the
+      0-indexed token ID, and the loader builds a BERT-shaped
+      tokenizer with sensible defaults. The `tokenizer.json` parser
+      now recognizes `"WordPiece"` model + decoder, `"BertNormalizer"`
+      (including the `Sequence`-of-normalizers wrapper), and
+      `"BertPreTokenizer"`. Added `Unicode` to `Project.toml` for
+      `Unicode.normalize`. Tests cover greedy longest-match,
+      continuing-prefix lookup, max-length UNK fallback, normalizer
+      lower+accent combinations, control-char cleanup, CJK padding,
+      decoder cleanup of `don ' t` → `don't` and `do n't` → `don't`,
+      and an end-to-end vocab.txt round-trip.
 - [ ] Tokenizer parity test harness: random sample of `tokenizer_config.json`
       fixtures, asserted against `transformers` Python output.
 

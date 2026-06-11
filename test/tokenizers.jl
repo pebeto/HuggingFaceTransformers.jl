@@ -4,6 +4,7 @@ using Allspark.Tokenizers
 using Allspark.Tokenizers:
     BPEModel,
     UnigramModel,
+    WordPieceModel,
     bpe_encode_word,
     encode_word,
     token_ids,
@@ -13,19 +14,26 @@ using Allspark.Tokenizers:
     UNICODE_TO_BYTES,
     PreTokenizer,
     Decoder,
+    Normalizer,
     ByteLevelPreTokenizer,
     SplitPreTokenizer,
     SequencePreTokenizer,
     IdentityPreTokenizer,
     MetaspacePreTokenizer,
+    BertPreTokenizer,
     ByteLevelDecoder,
     ReplaceDecoder,
     ByteFallbackDecoder,
     FuseDecoder,
     StripDecoder,
     SequenceDecoder,
+    WordPieceDecoder,
+    IdentityNormalizer,
+    BertNormalizer,
     apply_pre,
-    apply_dec
+    apply_dec,
+    apply_norm,
+    load_wordpiece_from_vocab_txt
 
 @testset verbose = true "byte-level mapping" begin
     @testset "bijective over all 256 bytes" begin
@@ -391,5 +399,170 @@ end
         @test apply_dec(gemma_decoder, "▁hello▁world") == "hello world"
         # With a byte-fallback fragment inside.
         @test apply_dec(gemma_decoder, "▁caf<0xC3><0xA9>") == "café"
+    end
+end
+
+# ---------------------------------------------------------------------
+# WordPiece (BERT family)
+# ---------------------------------------------------------------------
+
+@testset verbose = true "WordPieceModel" begin
+    # Tiny vocab. Continuation prefix is "##" by convention.
+    vocab = Dict{String,Int}(
+        "[UNK]" => 0,
+        "the" => 1,
+        "un" => 2,
+        "##able" => 3,
+        "##s" => 4,
+        "thing" => 5,
+        "##ing" => 6,
+        "a" => 7,
+        "b" => 8,
+        "c" => 9,
+        "##bc" => 10,
+    )
+    model = WordPieceModel(vocab; unk_token="[UNK]")
+
+    @testset "greedy longest-match for a multi-piece word" begin
+        # "unable" → "un" + "##able"  (greedy from the left).
+        @test encode_word(model, "unable") == [2, 3]
+        # "things" → "thing" + "##s" (longest-first beats single chars).
+        @test encode_word(model, "things") == [5, 4]
+    end
+
+    @testset "single-piece word resolves directly" begin
+        @test encode_word(model, "the") == [1]
+    end
+
+    @testset "unmatchable word collapses to UNK" begin
+        # 'z' isn't in the vocab — whole word → UNK.
+        @test encode_word(model, "zzz") == [0]
+    end
+
+    @testset "continuing-prefix lookup uses ## form" begin
+        # "abc": first piece is "a" (id 7), then "##bc" must match
+        # (not "##b" which doesn't exist).
+        @test encode_word(model, "abc") == [7, 10]
+    end
+
+    @testset "max_input_chars_per_word triggers UNK" begin
+        short_model = WordPieceModel(
+            vocab; unk_token="[UNK]", max_input_chars_per_word=3
+        )
+        @test encode_word(short_model, "things") == [0]
+    end
+end
+
+@testset verbose = true "BertPreTokenizer" begin
+    pre = BertPreTokenizer()
+
+    @testset "splits on whitespace" begin
+        @test apply_pre(pre, ["hello world"]) == ["hello", "world"]
+    end
+
+    @testset "isolates punctuation" begin
+        @test apply_pre(pre, ["don't!"]) == ["don", "'", "t", "!"]
+        @test apply_pre(pre, ["hi, there."]) == ["hi", ",", "there", "."]
+    end
+
+    @testset "drops empty fragments from consecutive separators" begin
+        @test apply_pre(pre, ["  a  b  "]) == ["a", "b"]
+    end
+end
+
+@testset verbose = true "BertNormalizer" begin
+    @testset "lowercase + strip_accents combined" begin
+        n = BertNormalizer(;
+            clean_text=false,
+            handle_chinese_chars=false,
+            strip_accents=true,
+            lowercase=true,
+        )
+        # café → cafe (accent stripped → lowercased; both 'C' and 'é').
+        @test apply_norm(n, "Café") == "cafe"
+        # ñ decomposes to n + combining tilde; combining mark drops.
+        @test apply_norm(n, "Mañana") == "manana"
+    end
+
+    @testset "clean_text replaces control characters with spaces" begin
+        n = BertNormalizer(;
+            clean_text=true,
+            handle_chinese_chars=false,
+            strip_accents=false,
+            lowercase=false,
+        )
+        @test apply_norm(n, "a\x07b") == "a b"
+        # Tabs/newlines/cr are preserved.
+        @test apply_norm(n, "a\tb\n") == "a\tb\n"
+    end
+
+    @testset "handle_chinese_chars pads CJK with spaces" begin
+        n = BertNormalizer(;
+            clean_text=false,
+            handle_chinese_chars=true,
+            strip_accents=false,
+            lowercase=false,
+        )
+        # 你 is at U+4F60 (CJK Unified Ideographs range).
+        @test apply_norm(n, "你好") == " 你  好 "
+    end
+
+    @testset "IdentityNormalizer is a no-op" begin
+        @test apply_norm(IdentityNormalizer(), "Anything") == "Anything"
+    end
+end
+
+@testset verbose = true "WordPieceDecoder" begin
+    @testset "removes ## continuing prefix and the leading space" begin
+        @test apply_dec(WordPieceDecoder("##", false), "un ##able") == "unable"
+        @test apply_dec(WordPieceDecoder("##", false), "thing ##s") == "things"
+    end
+
+    @testset "cleanup folds spaces around punctuation" begin
+        @test apply_dec(WordPieceDecoder("##", true), "hi , world .") == "hi, world."
+        @test apply_dec(WordPieceDecoder("##", true), "don ' t") == "don't"
+        @test apply_dec(WordPieceDecoder("##", true), "do n't") == "don't"
+    end
+end
+
+@testset verbose = true "load_wordpiece_from_vocab_txt + encode/decode" begin
+    @testset "round-trip a tiny BERT-shaped vocab" begin
+        mktempdir() do dir
+            path = joinpath(dir, "vocab.txt")
+            open(path, "w") do io
+                # IDs are 0-indexed line numbers.
+                println(io, "[UNK]")           # 0
+                println(io, "[CLS]")           # 1
+                println(io, "[SEP]")           # 2
+                println(io, "the")             # 3
+                println(io, "quick")           # 4
+                println(io, "fox")             # 5
+                println(io, ".")               # 6
+                println(io, "br")              # 7
+                println(io, "##own")           # 8
+            end
+            tk = load_wordpiece_from_vocab_txt(path)
+            ids = encode(tk, "The Quick Brown Fox.")
+            @test ids == [3, 4, 7, 8, 5, 6]
+            # Decode round-trips (lowercased due to BertNormalizer).
+            @test decode(tk, ids) == "the quick brown fox."
+        end
+    end
+
+    @testset "directory form picks up vocab.txt" begin
+        mktempdir() do dir
+            open(joinpath(dir, "vocab.txt"), "w") do io
+                println(io, "[UNK]")
+                println(io, "hi")
+            end
+            tk = load_wordpiece_from_vocab_txt(dir)
+            @test encode(tk, "Hi") == [1]
+        end
+    end
+
+    @testset "missing vocab.txt errors" begin
+        mktempdir() do dir
+            @test_throws ArgumentError load_wordpiece_from_vocab_txt(dir)
+        end
     end
 end

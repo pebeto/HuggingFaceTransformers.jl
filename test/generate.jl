@@ -130,6 +130,7 @@ end
     end
     tk = Tokenizer(
         BPEModel(vocab, Tuple{String,String}[]),
+        Allspark.Tokenizers.IdentityNormalizer(),
         ByteLevelPreTokenizer(false, true),
         ByteLevelDecoder(),
         AddedToken[],

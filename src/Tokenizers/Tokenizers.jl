@@ -10,11 +10,13 @@ module Tokenizers
 
 using JSON3
 
-export Tokenizer, AddedToken, load_tokenizer, encode, decode
+export Tokenizer, AddedToken, load_tokenizer, load_wordpiece_from_vocab_txt, encode, decode
 
 include("byte_level.jl")
 include("bpe.jl")
 include("unigram.jl")
+include("wordpiece.jl")
+include("normalizer.jl")
 include("pretokenizer.jl")
 
 struct AddedToken
@@ -32,6 +34,7 @@ RoBERTa) or `UnigramModel` (SentencePiece — Gemma, T5).
 """
 struct Tokenizer{M}
     model::M
+    normalizer::Normalizer
     pre_tokenizer::PreTokenizer
     decoder::Decoder
     added_tokens::Vector{AddedToken}
@@ -84,12 +87,57 @@ function _parse_model(m::JSON3.Object)
         unk_id = unk_id_raw isa Integer ? Int(unk_id_raw) : nothing
         byte_fallback = Bool(get(m, :byte_fallback, false)::Bool)
         return UnigramModel(vocab; unk_id=unk_id, byte_fallback=byte_fallback)
+    elseif typ == "WordPiece"
+        vocab_raw = m[:vocab]::JSON3.Object
+        vocab = Dict{String,Int}()
+        for (k, v) in pairs(vocab_raw)
+            vocab[String(k)] = Int(v::Integer)
+        end
+        unk = String(get(m, :unk_token, "[UNK]")::AbstractString)
+        prefix = String(get(m, :continuing_subword_prefix, "##")::AbstractString)
+        max_chars = Int(get(m, :max_input_chars_per_word, 100)::Integer)
+        return WordPieceModel(
+            vocab;
+            unk_token=unk,
+            continuing_subword_prefix=prefix,
+            max_input_chars_per_word=max_chars,
+        )
     else
         throw(
             ArgumentError(
-                "unsupported tokenizer model: $(typ); supported: BPE, Unigram"
+                "unsupported tokenizer model: $(typ); supported: BPE, Unigram, WordPiece"
             ),
         )
+    end
+end
+
+function _parse_normalizer(n::Union{Nothing,JSON3.Object})
+    n === nothing && return IdentityNormalizer()
+    typ = String(n[:type]::AbstractString)
+    if typ == "BertNormalizer"
+        return BertNormalizer(;
+            clean_text=Bool(get(n, :clean_text, true)::Bool),
+            handle_chinese_chars=Bool(get(n, :handle_chinese_chars, true)::Bool),
+            strip_accents=Bool(get(n, :strip_accents, true)::Bool),
+            lowercase=Bool(get(n, :lowercase, true)::Bool),
+        )
+    elseif typ == "Sequence"
+        # Tokenizers JSON allows a stack of normalizers; for our purposes a
+        # single Bert-shaped normalizer is enough — pick the first
+        # `BertNormalizer` in the sequence if present, else identity.
+        children = n[:normalizers]::JSON3.Array
+        for child in children
+            obj = child::JSON3.Object
+            if String(obj[:type]::AbstractString) == "BertNormalizer"
+                return _parse_normalizer(obj)
+            end
+        end
+        return IdentityNormalizer()
+    else
+        # Unknown normalizers (NFC, NFD, Lowercase, Replace, …) fall back
+        # to identity. Inputs that need them won't get byte-perfect parity
+        # but the model still runs.
+        return IdentityNormalizer()
     end
 end
 
@@ -138,6 +186,8 @@ function _parse_pre_tokenizer(p::JSON3.Object)
             Bool(get(p, :add_prefix_space, true)::Bool) ? :always : :never
         end
         return MetaspacePreTokenizer(replacement, scheme)
+    elseif typ == "BertPreTokenizer"
+        return BertPreTokenizer()
     else
         throw(ArgumentError("unsupported pre_tokenizer type: $(typ)"))
     end
@@ -178,6 +228,11 @@ function _parse_decoder(d::JSON3.Object)
         # as Replace(replacement → " ").
         replacement = String(get(d, :replacement, "▁")::AbstractString)
         return ReplaceDecoder(replacement, " ")
+    elseif typ == "WordPiece"
+        return WordPieceDecoder(
+            String(get(d, :prefix, "##")::AbstractString),
+            Bool(get(d, :cleanup, true)::Bool),
+        )
     else
         throw(ArgumentError("unsupported decoder type: $(typ)"))
     end
@@ -201,6 +256,9 @@ function load_tokenizer(path::AbstractString)
     parsed = JSON3.read(read(file, String))::JSON3.Object
 
     model = _parse_model(parsed[:model]::JSON3.Object)
+
+    norm_raw = get(parsed, :normalizer, nothing)
+    norm = norm_raw isa JSON3.Object ? _parse_normalizer(norm_raw) : IdentityNormalizer()
 
     pre_raw = get(parsed, :pre_tokenizer, nothing)
     pre = pre_raw isa JSON3.Object ? _parse_pre_tokenizer(pre_raw) : IdentityPreTokenizer()
@@ -235,7 +293,7 @@ function load_tokenizer(path::AbstractString)
         end
     end
 
-    return Tokenizer(model, pre, dec, added, added_lookup, id_lookup)
+    return Tokenizer(model, norm, pre, dec, added, added_lookup, id_lookup)
 end
 
 function _split_on_added(tk::Tokenizer, text::AbstractString)
@@ -288,7 +346,8 @@ function encode(tk::Tokenizer, text::AbstractString)
             push!(ids, special_id)
         else
             isempty(chunk) && continue
-            for pt in apply_pre(tk.pre_tokenizer, [chunk])
+            normalized = apply_norm(tk.normalizer, chunk)
+            for pt in apply_pre(tk.pre_tokenizer, [normalized])
                 append!(ids, encode_word(tk.model, pt))
             end
         end
@@ -297,10 +356,69 @@ function encode(tk::Tokenizer, text::AbstractString)
 end
 
 """
+    load_wordpiece_from_vocab_txt(path; lowercase=true, strip_accents=true, unk_token="[UNK]") -> Tokenizer
+
+Legacy loader for BERT checkpoints that ship a `vocab.txt` instead of a
+`tokenizer.json`. Each non-empty line of the file becomes a vocab entry
+keyed on its 0-indexed line number. Constructs a `WordPieceModel` +
+`BertNormalizer` (lowercase + accent strip by default) +
+`BertPreTokenizer` + `WordPieceDecoder` matching the BERT-base convention.
+`path` may be the `vocab.txt` file itself or a directory containing one.
+"""
+function load_wordpiece_from_vocab_txt(
+    path::AbstractString;
+    lowercase::Bool=true,
+    strip_accents::Bool=true,
+    unk_token::AbstractString="[UNK]",
+)
+    file = isdir(path) ? joinpath(path, "vocab.txt") : path
+    isfile(file) || throw(ArgumentError("vocab.txt not found at $(file)"))
+
+    vocab = Dict{String,Int}()
+    open(file) do io
+        for (i, line) in enumerate(eachline(io))
+            tok = strip(line, '\n')
+            vocab[String(tok)] = i - 1
+        end
+    end
+
+    model = WordPieceModel(vocab; unk_token=unk_token)
+    normalizer = BertNormalizer(;
+        clean_text=true,
+        handle_chinese_chars=true,
+        strip_accents=strip_accents,
+        lowercase=lowercase,
+    )
+    pre = BertPreTokenizer()
+    decoder = WordPieceDecoder("##", true)
+
+    return Tokenizer(
+        model,
+        normalizer,
+        pre,
+        decoder,
+        AddedToken[],
+        Dict{String,Int}(),
+        Dict{Int,String}(),
+    )
+end
+
+# Separator inserted between regular tokens before the decoder sees the
+# concatenated stream. ByteLevel decoders expect tokens jammed together
+# (the `Ġ` prefix already marks word boundaries); WordPiece decoders
+# expect them space-separated so they can strip the `" ##"` join.
+_token_separator(::Decoder) = ""
+_token_separator(::WordPieceDecoder) = " "
+function _token_separator(d::SequenceDecoder)
+    isempty(d.steps) ? "" : _token_separator(d.steps[1])
+end
+
+"""
     decode(tk, ids; skip_special_tokens=false) -> String
 
-Reverse [`encode`](@ref). Consecutive BPE tokens are concatenated and
-byte-decoded together; added tokens are rendered verbatim. With
+Reverse [`encode`](@ref). Regular tokens are accumulated and joined
+with the decoder-specific separator before being passed through the
+decoder pipeline; added tokens are rendered verbatim. With
 `skip_special_tokens=true`, added tokens marked `special` are omitted.
 """
 function decode(
@@ -308,11 +426,14 @@ function decode(
 )
     special_ids = Set{Int}(at.id for at in tk.added_tokens if at.special)
     out = IOBuffer()
-    buffer = IOBuffer()
+    buffer = String[]
+    sep = _token_separator(tk.decoder)
 
     function flush!()
-        s = String(take!(buffer))
-        isempty(s) || print(out, apply_dec(tk.decoder, s))
+        isempty(buffer) && return
+        joined = join(buffer, sep)
+        print(out, apply_dec(tk.decoder, joined))
+        empty!(buffer)
     end
 
     for id in ids
@@ -323,7 +444,7 @@ function decode(
         else
             tok = get(tk.model.id_to_token, id, nothing)
             tok === nothing && throw(KeyError(id))
-            print(buffer, tok)
+            push!(buffer, tok)
         end
     end
     flush!()

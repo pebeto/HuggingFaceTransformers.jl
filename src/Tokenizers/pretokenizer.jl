@@ -35,6 +35,16 @@ struct MetaspacePreTokenizer <: PreTokenizer
     prepend_scheme::Symbol     # :always | :first | :never
 end
 
+"""
+    BertPreTokenizer
+
+BERT's `BasicTokenizer`-style splitter: break on whitespace, and
+isolate every punctuation character into its own token. Matches the
+HF `BertPreTokenizer` (no parameters in the JSON schema; behavior is
+fixed).
+"""
+struct BertPreTokenizer <: PreTokenizer end
+
 apply_pre(::IdentityPreTokenizer, ts::Vector{String}) = ts
 
 function apply_pre(p::SequencePreTokenizer, ts::Vector{String})
@@ -92,6 +102,41 @@ function apply_pre(p::MetaspacePreTokenizer, ts::Vector{String})
             s = p.replacement * s
         end
         push!(out, s)
+    end
+    return out
+end
+
+# BERT's punctuation set: every ASCII punctuation plus any Unicode
+# punctuation. Matches the HF reference; ASCII non-letter non-digit
+# non-space characters in the ranges 33..47, 58..64, 91..96, 123..126
+# always count as punctuation.
+@inline _is_bert_punct(c::Char) =
+    let cp = UInt32(c)
+        (33 <= cp <= 47) ||
+            (58 <= cp <= 64) ||
+            (91 <= cp <= 96) ||
+            (123 <= cp <= 126) ||
+            ispunct(c)
+    end
+
+function apply_pre(::BertPreTokenizer, ts::Vector{String})
+    out = String[]
+    for t in ts
+        buf = IOBuffer()
+        for c in t
+            if isspace(c)
+                s = String(take!(buf))
+                isempty(s) || push!(out, s)
+            elseif _is_bert_punct(c)
+                s = String(take!(buf))
+                isempty(s) || push!(out, s)
+                push!(out, string(c))
+            else
+                print(buf, c)
+            end
+        end
+        s = String(take!(buf))
+        isempty(s) || push!(out, s)
     end
     return out
 end
@@ -188,6 +233,34 @@ string, so this is the identity.
 struct FuseDecoder <: Decoder end
 
 apply_dec(::FuseDecoder, s::AbstractString) = String(s)
+
+"""
+    WordPieceDecoder
+
+Reverse a WordPiece tokenization. Tokens come into `apply_dec` already
+joined with single spaces (the `decode` driver concatenates everything
+through the model's `id_to_token`). This decoder removes the
+`continuing_subword_prefix` along with the space that precedes it (so
+`"un ##able"` becomes `"unable"`), and when `cleanup=true` collapses
+the space-before-punctuation that BERT's pre-tokenizer introduced.
+"""
+struct WordPieceDecoder <: Decoder
+    prefix::String
+    cleanup::Bool
+end
+
+function apply_dec(d::WordPieceDecoder, s::AbstractString)
+    str = replace(String(s), " " * d.prefix => "")
+    if d.cleanup
+        # Drop the space that BertPreTokenizer left before ASCII punctuation,
+        # plus the textbook contractions ("don ' t" → "don't").
+        str = replace(str, r" ([.,!?;:)\]}])" => s"\1")
+        str = replace(str, r"([([{]) " => s"\1")
+        str = replace(str, " ' " => "'")
+        str = replace(str, " n't" => "n't")
+    end
+    return str
+end
 
 """
     StripDecoder
