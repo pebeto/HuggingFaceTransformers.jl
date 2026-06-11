@@ -357,8 +357,27 @@ SentencePiece or WordPiece directly.
       lower+accent combinations, control-char cleanup, CJK padding,
       decoder cleanup of `don ' t` → `don't` and `do n't` → `don't`,
       and an end-to-end vocab.txt round-trip.
-- [ ] Tokenizer parity test harness: random sample of `tokenizer_config.json`
-      fixtures, asserted against `transformers` Python output.
+- [x] Tokenizer parity test harness. `test/parity_tokenizer.jl` is a
+      family-agnostic gate that walks a `VARIANTS` table of 10
+      tokenizers spanning all three families: byte-level BPE (gpt2,
+      roberta, qwen2.5, pythia, phi-3, llama3.2, mistral-v0.2),
+      SentencePiece-Unigram with byte fallback (gemma-2), and
+      WordPiece (bert-base-uncased, bert-base-cased). Each variant
+      reads a fixture recorded once by
+      `test/fixtures/record_tokenizer_parity.py`, which captures HF's
+      `encode(text, add_special_tokens=False)` IDs *and* the round-trip
+      decoded string for 17 prompts per tokenizer (ASCII, accents, CJK,
+      Korean, emoji, whitespace edges, punctuation salad, contractions,
+      empty string, single char). The Julia side downloads the
+      tokenizer via `snapshot_download`, loads it with `load_tokenizer`,
+      and asserts both `encode(tk, text) == expected_ids` and
+      `decode(tk, expected_ids) == expected_decoded`. Gated on
+      `ALLSPARK_TEST_PARITY_TOKENIZER` (`all` / comma-separated subset
+      / single label); unknown variants fail loud with the full valid
+      list. Missing fixtures skip cleanly with the exact recorder
+      command. The harness pairs naturally with the existing model
+      parity tests — together they verify both stages of the
+      tokenize→model pipeline match HF byte-for-byte.
 
 ## Phase 4 — Performance & deployment
 

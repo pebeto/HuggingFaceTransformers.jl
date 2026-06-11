@@ -138,4 +138,14 @@ using Allspark
             include("parity_mixtral.jl")
         end
     end
+
+    # Tokenizer parity is family-agnostic: a generic harness over recorded
+    # (prompt, ids, decoded) tuples from HuggingFace's `transformers`.
+    #   ALLSPARK_TEST_PARITY_TOKENIZER=gpt2,bert-uncased  # subset
+    #   ALLSPARK_TEST_PARITY_TOKENIZER=all                # every fixture present
+    if !isempty(get(ENV, "ALLSPARK_TEST_PARITY_TOKENIZER", ""))
+        @testset verbose = true "Tokenizer parity" begin
+            include("parity_tokenizer.jl")
+        end
+    end
 end
