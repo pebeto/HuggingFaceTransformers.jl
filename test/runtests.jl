@@ -58,6 +58,10 @@ using Allspark
         include("mixtral_model.jl")
     end
 
+    @testset verbose = true "Dtype" begin
+        include("dtype.jl")
+    end
+
     @testset verbose = true "Generation" begin
         include("generate.jl")
     end
@@ -74,8 +78,13 @@ using Allspark
         include("aqua.jl")
     end
 
-    @testset "JET smoke" begin
-        include("jet.jl")
+    # JET smoke pass: gated because JET 0.11+ currently fails to precompile
+    # on Julia 1.12 (upstream LoweredCodeUtils method-signature drift).
+    # Set ALLSPARK_TEST_JET=1 once a compatible JET tag exists.
+    if get(ENV, "ALLSPARK_TEST_JET", "0") == "1"
+        @testset "JET smoke" begin
+            include("jet.jl")
+        end
     end
 
     # Integration parity tests: each variant needs an HF model download +

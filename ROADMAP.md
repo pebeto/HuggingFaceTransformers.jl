@@ -381,7 +381,33 @@ SentencePiece or WordPiece directly.
 
 ## Phase 4 — Performance & deployment
 
-- [ ] fp16 / bf16 inference with documented numerical tolerance per model.
+- [x] fp16 / bf16 inference. `src/Models/dtype.jl` adds
+      `convert_eltype(model, T)` which walks the model with
+      `Flux.fmap` and converts every Float-array and Float-scalar leaf
+      (so `RMSNorm.eps`, `RoPE.inv_freq`, every weight, every bias)
+      to the target element type. `fp16` / `bf16` / `fp32` are
+      one-liner wrappers; the conversion is pure-functional (the
+      input model is unchanged). Allocate matching KV caches with
+      `build_caches(lm, max_seq, batch; eltype=Float16)` etc.
+      Added `BFloat16s` to `Project.toml` since BFloat16 isn't in
+      Base. The docstring on `convert_eltype` documents the per-dtype
+      tolerance band: `Float32 < 1e-3` (the recorded reference),
+      `BFloat16 ≈ 1e-1` to `5e-1`, `Float16 ≈ 5e-2` to `5e-1`. Deeper
+      models accumulate more error. Per-model fp16/bf16 parity is
+      empirical — re-record a fixture with `torch_dtype=torch.float16`
+      and compare against an `fp16(model)` run. Known limitation: the
+      `Float32(-1e9)` mask constant and the Gemma softcap divisor in
+      GQA promote attention activations back to Float32 transiently
+      even when weights are lower precision; inference is correct but
+      doesn't realize the full throughput advantage of pure fp16. A
+      Phase 4 perf pass will widen those constants to be
+      eltype-aware.
+
+      Also: JET smoke is gated on `ALLSPARK_TEST_JET=1`. JET 0.11+
+      currently fails to precompile on Julia 1.12.6 (upstream
+      LoweredCodeUtils method-signature drift); the test is preserved
+      for when a compatible JET tag lands but won't fail
+      `Pkg.test()` in the meantime.
 - [ ] FlashAttention kernel path (CUDA via `CUDA.jl` extension; ROCm via
       `AMDGPU.jl` extension). Fall back to fused-softmax-of-matmul on CPU.
 - [ ] Int8 weight-only quantization on load.

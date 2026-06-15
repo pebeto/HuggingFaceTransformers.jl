@@ -9,6 +9,7 @@ A new model adds: config struct, layer wiring, state-dict map. That's it.
 module Models
 
 using Flux
+using BFloat16s: BFloat16
 using SafeTensors: load_safetensors, load_sharded_safetensors
 using ..Layers:
     RMSNorm,
@@ -42,6 +43,7 @@ export BertConfig,
     BertForMaskedLM,
     bert_state_dict_map
 export MixtralConfig, MixtralForCausalLM, mixtral_state_dict_map
+export convert_eltype, fp16, bf16, fp32
 
 include("weights.jl")
 include("state_dict.jl")
@@ -55,5 +57,6 @@ include("gpt2.jl")
 include("neox.jl")
 include("bert.jl")
 include("mixtral.jl")
+include("dtype.jl")
 
 end # module Models
