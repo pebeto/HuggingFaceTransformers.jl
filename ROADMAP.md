@@ -408,8 +408,36 @@ SentencePiece or WordPiece directly.
       LoweredCodeUtils method-signature drift); the test is preserved
       for when a compatible JET tag lands but won't fail
       `Pkg.test()` in the meantime.
-- [ ] FlashAttention kernel path (CUDA via `CUDA.jl` extension; ROCm via
-      `AMDGPU.jl` extension). Fall back to fused-softmax-of-matmul on CPU.
+- [x] FlashAttention kernel path. `sdpa(q, k_t, v; scale, softcap, drop)`
+      in `src/Layers/Layers.jl` holds the attention core that used to live
+      inline in `GQA`, and acts as the dispatch boundary. Its default
+      method materializes the `(seq_q, seq_kv)` score block and fuses
+      softmax with the value matmul. That method is the CPU fallback and
+      the reference the model parity tests pin, so lifting it out changed
+      no results. `flash_sdpa` implements the FlashAttention forward: a
+      tiled online-softmax recurrence (running max, running denominator,
+      running weighted-value accumulator) that streams the KV sequence in
+      `block_size` chunks. The full score matrix never exists at once, so
+      peak extra memory drops from `O(seq_q · seq_kv)` to
+      `O(seq_q · block_size)`. Allocations go through `similar` and the
+      accumulator runs in `Float32`, so the same code runs on CPU and on
+      device arrays. CPU tests check it against the materialized path
+      within `~1e-4` on causal, sliding-window, softcap, and multi-block
+      inputs, confirm finite zeros (not NaN) for a fully-masked query, and
+      confirm fp16-in gives fp16-out. The CUDA (`AllsparkCUDAExt`), AMDGPU
+      (`AllsparkAMDGPUExt`), and Metal (`AllsparkMetalExt`) extensions live
+      under `ext/` (matching the `[extensions]` block in `Project.toml`,
+      which had no files until now). Each adds an `sdpa` method on its
+      device array type that moves the host-built drop mask to the device
+      and calls `flash_sdpa`. Verified on an RTX 5090 (Blackwell, sm_120,
+      CUDA.jl auto-resolved a compatible runtime): `test/gpu_attention.jl`
+      runs the extension dispatch on real `CuArray`s and matches the CPU
+      path within `1e-3` across no-mask, causal, and softcap+sliding-window
+      cases. Scope stops at the algorithm plus the dispatch plumbing; a
+      hand-fused single-CUDA-kernel flash (the reference CUTLASS-style
+      kernel) is future work. The device speedup here comes from on-GPU
+      `batched_mul`/`softmax` and the tiling's memory bound, not a custom
+      kernel.
 - [ ] Int8 weight-only quantization on load.
 - [ ] **GGUF read support.** This single feature opens the entire local-LLM
       ecosystem (llama.cpp checkpoints, community quantizations).

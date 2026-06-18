@@ -74,6 +74,10 @@ using Allspark
         include("layers.jl")
     end
 
+    @testset verbose = true "Attention" begin
+        include("attention.jl")
+    end
+
     @testset "Aqua" begin
         include("aqua.jl")
     end

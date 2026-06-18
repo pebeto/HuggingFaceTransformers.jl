@@ -12,6 +12,7 @@ using Flux
 using NNlib
 using LinearAlgebra
 using Statistics
+using ChainRulesCore: @ignore_derivatives
 
 export KVCache,
     RMSNorm,
@@ -24,6 +25,8 @@ export KVCache,
     GeluMLP,
     MoEMLP,
     GQA,
+    sdpa,
+    flash_sdpa,
     softcap,
     reset!
 
@@ -621,6 +624,99 @@ Flux.@layer GeluMLP
 Flux.Optimisers.trainable(m::GeluMLP) = (; c_fc=m.c_fc, c_proj=m.c_proj)
 
 """
+    sdpa(q, k_t, v; scale, softcap=nothing, drop=nothing)
+
+Scaled dot-product attention over `GQA`'s batch-flattened head layout:
+`q` `(seq_q, head_dim, heads*batch)`, `k_t` `(head_dim, seq_kv, heads*batch)`,
+`v` `(seq_kv, head_dim, heads*batch)`. `drop` is an optional `(seq_q, seq_kv)`
+`Bool` mask. The default method materializes the score block; the GPU
+extensions specialize it for device arrays and route to [`flash_sdpa`](@ref).
+"""
+function sdpa(
+    q::AbstractArray, k_t::AbstractArray, v::AbstractArray;
+    scale, softcap=nothing, drop=nothing,
+)
+    return _sdpa_materialized(q, k_t, v; scale=scale, softcap=softcap, drop=drop)
+end
+
+function _sdpa_materialized(q, k_t, v; scale, softcap, drop)
+    scores = batched_mul(q, k_t) ./ scale
+    if !isnothing(softcap)
+        cap = softcap
+        scores = cap .* tanh.(scores ./ cap)
+    end
+    if !isnothing(drop)
+        sq, skv = size(drop)
+        # Multiply the Bool mask directly; keeping it Bool stops Zygote
+        # differentiating back into the mask.
+        scores = scores .+ reshape(drop .* Float32(-1e9), sq, skv, 1)
+    end
+    probs = NNlib.softmax(scores; dims=2)
+    return batched_mul(probs, v)
+end
+
+"""
+    flash_sdpa(q, k_t, v; scale, softcap=nothing, drop=nothing, block_size=128)
+
+Tiled FlashAttention forward: same arguments and result as [`sdpa`](@ref),
+but streams the key/value sequence in `block_size` chunks via the
+online-softmax recurrence, so the full `(seq_q, seq_kv)` score matrix is
+never materialized. Accumulates in `Float32` and casts back to `eltype(q)`;
+fully-masked queries return zeros. Device-agnostic (allocates via `similar`).
+"""
+function flash_sdpa(
+    q::AbstractArray, k_t::AbstractArray, v::AbstractArray;
+    scale, softcap=nothing, drop=nothing, block_size::Integer=128,
+)
+    sq, d, batch = size(q, 1), size(q, 2), size(q, 3)
+    skv = size(k_t, 2)
+    Tin = eltype(q)
+    T = promote_type(Tin, Float32)
+
+    qT = T.(q)
+    scale_T = T(scale)
+    cap_T = isnothing(softcap) ? nothing : T(softcap)
+
+    m_run = fill!(similar(qT, T, sq, 1, batch), T(-Inf))
+    l_run = fill!(similar(qT, T, sq, 1, batch), zero(T))
+    acc = fill!(similar(qT, T, sq, d, batch), zero(T))
+
+    kv0 = 1
+    while kv0 <= skv
+        kv1 = min(kv0 + block_size - 1, skv)
+        blk = kv1 - kv0 + 1
+        kb = T.(k_t[:, kv0:kv1, :])          # (d, blk, batch)
+        vb = T.(v[kv0:kv1, :, :])            # (blk, d, batch)
+
+        s = batched_mul(qT, kb) ./ scale_T   # (sq, blk, batch)
+        if cap_T !== nothing
+            s = cap_T .* tanh.(s ./ cap_T)
+        end
+        if !isnothing(drop)
+            dblk = reshape(drop[:, kv0:kv1], sq, blk, 1)
+            s = ifelse.(dblk, T(-Inf), s)
+        end
+
+        m_blk = maximum(s; dims=2)           # (sq, 1, batch)
+        m_new = max.(m_run, m_blk)
+        # Guard the -Inf case (fully-masked block, nothing seen yet) → NaN.
+        finite = isfinite.(m_new)
+        corr = ifelse.(finite, exp.(m_run .- m_new), zero(T))
+        p = exp.(s .- m_new)
+        p = ifelse.(isfinite.(p), p, zero(T))   # masked / degenerate → 0
+
+        l_run = l_run .* corr .+ sum(p; dims=2)
+        acc = acc .* corr .+ batched_mul(p, vb)
+        m_run = m_new
+        kv0 = kv1 + 1
+    end
+
+    safe_l = ifelse.(l_run .== zero(T), one(T), l_run)
+    out = acc ./ safe_l
+    return Tin <: AbstractFloat ? Tin.(out) : out
+end
+
+"""
     GQA{Q, K, V, O, R}
 
 Grouped-Query Attention (GQA) layer. Partitions queries into groups sharing key/value heads.
@@ -766,58 +862,43 @@ function (m::GQA)(x::AbstractArray; cache=nothing, step=nothing, position_ids=no
     k_rep = repeat_kv(k_full, group_size)
     v_rep = repeat_kv(v_full, group_size)
 
-    # Scaled dot-product attention
+    # Reshape into the (seq, head_dim, heads*batch) layout `sdpa` expects.
     q_perm = permutedims(q_rotated, (3, 1, 2, 4))
     k_perm = permutedims(k_rep, (3, 1, 2, 4))
+    v_perm = permutedims(v_rep, (3, 1, 2, 4))
 
     q_flat = reshape(q_perm, seq_len, m.head_dim, m.num_heads_q * batch_size)
     k_flat = reshape(k_perm, seq_len_kv, m.head_dim, m.num_heads_q * batch_size)
     k_flat_t = permutedims(k_flat, (2, 1, 3))
+    v_flat = reshape(v_perm, seq_len_kv, m.head_dim, m.num_heads_q * batch_size)
 
     scale = isnothing(m.query_scale) ? sqrt(Float32(m.head_dim)) : m.query_scale
-    scores = batched_mul(q_flat, k_flat_t) ./ scale
 
-    # Gemma2 caps attention scores before mask + softmax: `cap * tanh(s / cap)`.
-    if !isnothing(m.softcap)
-        cap = m.softcap
-        scores = cap .* tanh.(scores ./ cap)
-    end
-
-    # Mask construction. Key at array index `j` is at absolute position `j - 1`
-    # (0-indexed); query `i` is at `position_ids[i]`. Mask iff:
-    #   - causal:   key_pos > query_pos (when m.causal), or
-    #   - sliding:  query_pos - key_pos >= window_size (when set).
-    # The seq_len==1 fast path holds for plain causal (single query never sees a
-    # future key), but a sliding window of size W still needs masking once the
-    # KV cache exceeds W entries. With m.causal=false (BERT-style bidirectional
-    # attention) neither predicate applies and we skip the mask entirely.
+    # Boolean drop mask: key `j` is at position `j - 1`, query `i` at
+    # `position_ids[i]`. Drop a future key (causal) or one outside the window
+    # (sliding); `nothing` for bidirectional attention. `@ignore_derivatives`
+    # keeps the comprehension off Zygote's tape (it's data, not a parameter).
     has_window = !isnothing(m.window_size)
     needs_causal_mask = m.causal && seq_len > 1
     needs_window_mask = has_window && seq_len_kv > m.window_size
-    needs_mask = needs_causal_mask || needs_window_mask
-    if needs_mask
-        mask = if has_window && m.causal
+    drop = @ignore_derivatives if needs_causal_mask || needs_window_mask
+        if has_window && m.causal
             w = m.window_size
-            [
+            Bool[
                 (j - 1) > position_ids[i] || position_ids[i] - (j - 1) >= w for
                 i in 1:seq_len, j in 1:seq_len_kv
             ]
         elseif has_window   # bidirectional + sliding (rare combo)
             w = m.window_size
-            [abs(position_ids[i] - (j - 1)) >= w for i in 1:seq_len, j in 1:seq_len_kv]
+            Bool[abs(position_ids[i] - (j - 1)) >= w for i in 1:seq_len, j in 1:seq_len_kv]
         else                # causal only
-            [(j - 1) > position_ids[i] for i in 1:seq_len, j in 1:seq_len_kv]
+            Bool[(j - 1) > position_ids[i] for i in 1:seq_len, j in 1:seq_len_kv]
         end
-        mask_val = mask .* Float32(-1e9)
-        scores = scores .+ reshape(mask_val, seq_len, seq_len_kv, 1)
+    else
+        nothing
     end
 
-    probs = NNlib.softmax(scores; dims=2)
-
-    v_perm = permutedims(v_rep, (3, 1, 2, 4))
-    v_flat = reshape(v_perm, seq_len_kv, m.head_dim, m.num_heads_q * batch_size)
-
-    out_flat = batched_mul(probs, v_flat)
+    out_flat = sdpa(q_flat, k_flat_t, v_flat; scale=scale, softcap=m.softcap, drop=drop)
 
     out_perm = reshape(out_flat, seq_len, m.head_dim, m.num_heads_q, batch_size)
     out = permutedims(out_perm, (2, 3, 1, 4))
