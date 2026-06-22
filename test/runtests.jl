@@ -62,6 +62,10 @@ using Allspark
         include("dtype.jl")
     end
 
+    @testset verbose = true "Quantize" begin
+        include("quantize.jl")
+    end
+
     @testset verbose = true "Generation" begin
         include("generate.jl")
     end

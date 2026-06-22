@@ -9,6 +9,7 @@ A new model adds: config struct, layer wiring, state-dict map. That's it.
 module Models
 
 using Flux
+using Functors
 using BFloat16s: BFloat16
 using SafeTensors: load_safetensors, load_sharded_safetensors
 using ..Layers:
@@ -22,6 +23,7 @@ using ..Layers:
     GeluMLP,
     MoEMLP,
     GQA,
+    QuantizedInt8Matrix,
     KVCache,
     _gelu_exact
 
@@ -44,6 +46,7 @@ export BertConfig,
     bert_state_dict_map
 export MixtralConfig, MixtralForCausalLM, mixtral_state_dict_map
 export convert_eltype, fp16, bf16, fp32
+export QuantizedInt8Matrix, quantize_int8
 
 include("weights.jl")
 include("state_dict.jl")
@@ -58,5 +61,6 @@ include("neox.jl")
 include("bert.jl")
 include("mixtral.jl")
 include("dtype.jl")
+include("quantize.jl")
 
 end # module Models

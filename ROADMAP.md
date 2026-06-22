@@ -438,7 +438,21 @@ SentencePiece or WordPiece directly.
       kernel) is future work. The device speedup here comes from on-GPU
       `batched_mul`/`softmax` and the tiling's memory bound, not a custom
       kernel.
-- [ ] Int8 weight-only quantization on load.
+- [x] Int8 weight-only quantization. `QuantizedInt8Matrix` (in
+      `src/Layers/Layers.jl`) stores a weight as per-output-row symmetric
+      int8 (`scale[i] = maximum(abs, W[i,:]) / 127`) and subtypes
+      `AbstractMatrix{Float32}`, so its `*` dequantizes before the matmul
+      and `Linear` needs no forward change. `quantize_int8(model)`
+      (`src/Models/quantize.jl`) walks the model with `fmap` and swaps each
+      `Linear` weight for a `QuantizedInt8Matrix`, leaving norms and token
+      embeddings in Float32; it mirrors the `fp16`/`bf16` post-load
+      wrappers. Weight-only and correctness-first: the dequant is
+      materialized per call (no int8 GEMM kernel on CPU/GPU), so the win is
+      ~4x smaller resident weights, not speed. Logit error vs fp32 runs
+      `1e-2`–`1e-1`. Tested in `test/quantize.jl` (round-trip within one
+      quantization step, matmul matches the dequantized weight, Linears
+      quantized while embeddings/norms stay Float32, forward + KV-cache
+      decode track fp32, Qwen's biased QKV handled).
 - [ ] **GGUF read support.** This single feature opens the entire local-LLM
       ecosystem (llama.cpp checkpoints, community quantizations).
 - [ ] Speculative decoding scaffolding (draft model + target model).

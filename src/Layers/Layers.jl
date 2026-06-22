@@ -25,6 +25,7 @@ export KVCache,
     GeluMLP,
     MoEMLP,
     GQA,
+    QuantizedInt8Matrix,
     sdpa,
     flash_sdpa,
     softcap,
@@ -377,6 +378,49 @@ Flux.Optimisers.trainable(m::Linear{W,Nothing}) where {W} = (; weight=m.weight)
 function Flux.Optimisers.trainable(m::Linear{W,<:AbstractVector}) where {W}
     return (; weight=m.weight, bias=m.bias)
 end
+
+"""
+    QuantizedInt8Matrix <: AbstractMatrix{Float32}
+
+A weight matrix stored as per-output-row symmetric int8: `scale[i] * q[i, j]`
+recovers the `(out, in)` Float32 entry. Drops into [`Linear`](@ref) unchanged
+via `*`, which dequantizes before the matmul.
+"""
+struct QuantizedInt8Matrix <: AbstractMatrix{Float32}
+    q::Matrix{Int8}
+    scale::Vector{Float32}
+end
+
+"""
+    QuantizedInt8Matrix(W::AbstractMatrix{<:Real})
+
+Quantize `W` per row: `scale[i] = maximum(abs, W[i, :]) / 127`.
+"""
+function QuantizedInt8Matrix(W::AbstractMatrix{<:Real})
+    out, inn = size(W)
+    q = Matrix{Int8}(undef, out, inn)
+    scale = Vector{Float32}(undef, out)
+    @inbounds for i in 1:out
+        amax = 0.0f0
+        for j in 1:inn
+            a = abs(Float32(W[i, j]))
+            a > amax && (amax = a)
+        end
+        s = amax == 0 ? 1.0f0 : amax / 127.0f0
+        scale[i] = s
+        for j in 1:inn
+            q[i, j] = round(Int8, clamp(Float32(W[i, j]) / s, -127.0f0, 127.0f0))
+        end
+    end
+    return QuantizedInt8Matrix(q, scale)
+end
+
+Base.size(m::QuantizedInt8Matrix) = size(m.q)
+Base.getindex(m::QuantizedInt8Matrix, i::Int, j::Int) = m.scale[i] * Float32(m.q[i, j])
+
+# Dequantize then matmul; CPU/GPU BLAS has no int8 GEMM. The Int8 storage is
+# the persistent memory win, the dequant buffer is transient per call.
+Base.:*(m::QuantizedInt8Matrix, x::AbstractMatrix) = m.scale .* (Float32.(m.q) * x)
 
 """
     SiLUGatedMLP{G, U, D}
