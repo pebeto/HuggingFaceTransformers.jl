@@ -453,8 +453,28 @@ SentencePiece or WordPiece directly.
       quantization step, matmul matches the dequantized weight, Linears
       quantized while embeddings/norms stay Float32, forward + KV-cache
       decode track fp32, Qwen's biased QKV handled).
-- [ ] **GGUF read support.** This single feature opens the entire local-LLM
-      ecosystem (llama.cpp checkpoints, community quantizations).
+- [x] GGUF read support. `src/GGUF/GGUF.jl` is a new submodule whose
+      `load_gguf(path)` parses the GGUF v3 container: magic + version, the
+      full metadata key/value table (all 13 value types including nested
+      arrays), and the tensor info table (name, dims, GGML dtype, offset),
+      honouring `general.alignment` (default 32). It returns a `GGUFFile`
+      with `version`, `metadata`, `tensors` (dequantized to `Float32`), and
+      `tensor_types`. Tensor dims keep GGML's contiguous-first order, which
+      maps straight onto Julia's column-major layout (mapping to HF's
+      row-major `(out, in)` weights is a transpose left to the model-wiring
+      step). Dequant covers F32, F16, Q8_0, and Q4_0 — the unquantized and
+      the two simplest block-quant formats, which between them cover most
+      community checkpoints. The k-quants (Q4_K/Q5_K/Q6_K and friends) have
+      intricate superblock layouts and are not dequantized yet; hitting one
+      throws an `ArgumentError` naming the dtype rather than returning
+      garbage. Tested in `test/gguf.jl` via a Julia-side GGUF writer (so
+      round-trips need no external fixture): metadata of every exercised
+      type round-trips, F32 is exact, F16 within Float16 precision, Q8_0 and
+      Q4_0 within one quantization step, an unsupported dtype and a bad magic
+      both error. Next step to actually run a llama.cpp checkpoint is the
+      GGUF→model mapping (architecture/config from metadata, `blk.N.*` tensor
+      names → Allspark's HF-style names); that's mechanical but wants real
+      fixtures to verify, so it's its own chunk.
 - [ ] Speculative decoding scaffolding (draft model + target model).
 - [ ] Continuous batching for server-style deployment (defer until a real
       consumer asks for it).

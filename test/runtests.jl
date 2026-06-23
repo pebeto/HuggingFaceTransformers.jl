@@ -4,6 +4,7 @@ using Allspark
 @testset verbose = true "Allspark.jl" begin
     @testset "loads cleanly" begin
         @test isdefined(Allspark, :HFHub)
+        @test isdefined(Allspark, :GGUF)
         @test isdefined(Allspark, :Tokenizers)
         @test isdefined(Allspark, :Layers)
         @test isdefined(Allspark, :Models)
@@ -16,6 +17,10 @@ using Allspark
 
     @testset verbose = true "Weights" begin
         include("weights.jl")
+    end
+
+    @testset verbose = true "GGUF" begin
+        include("gguf.jl")
     end
 
     @testset verbose = true "Tokenizers" begin
