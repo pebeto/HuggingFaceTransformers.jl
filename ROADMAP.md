@@ -475,7 +475,38 @@ SentencePiece or WordPiece directly.
       GGUF→model mapping (architecture/config from metadata, `blk.N.*` tensor
       names → Allspark's HF-style names); that's mechanical but wants real
       fixtures to verify, so it's its own chunk.
-- [ ] Speculative decoding scaffolding (draft model + target model).
+- [x] Speculative decoding scaffolding (draft model + target model).
+      `speculative_generate(target, draft, input_ids; n_draft, …)` in
+      `src/Generation/speculative.jl`. Each round: the small `draft` model
+      proposes `n_draft` (γ) tokens autoregressively, the `target` verifies all
+      γ in a single forward pass, and the Leviathan/Chen accept-reject rule
+      keeps the output distributed exactly as `target` alone. Greedy
+      (`do_sample=false`) accepts draft token `i` iff it equals
+      `argmax(target_i)` and on the first miss emits the target's argmax;
+      sampling (`do_sample=true`, `temperature`) accepts with probability
+      `min(1, p_i/q_i)`, resamples a rejection from `normalize((p_i-q_i)₊)`,
+      and draws a bonus token from the target's last-position distribution when
+      all γ are accepted. The two-model KV-cache rollback is handled by the
+      invariant "both caches valid for positions 1..L-1, last committed token
+      unfed": each round sync-feeds that token to both models (the one
+      single-token pass that can't be avoided since the target distribution
+      after the final committed token was never computed), feeds all γ drafted
+      tokens into the draft cache so it stays valid through an accept-all round,
+      and lets the next round overwrite stale slots beyond the accepted length
+      (attention only ever reads `1..step+seq-1`, so stale tail entries are
+      never seen). Draft and target must share a vocabulary; a mismatched
+      LM-head width raises `DimensionMismatch`. Correctness-first scaffolding:
+      `top_k`/`top_p`/`repetition_penalty` aren't applied in the speculative
+      path yet, and the per-round sync feed is recompute a tuned implementation
+      would fold into the next verify pass. Tested in `test/speculative.jl`
+      (50 assertions): the load-bearing one is that greedy speculative
+      reproduces `generate(target, …)` byte-for-byte across `n_draft ∈
+      {1,2,4,8}` and several `max_new_tokens`, for both a *different* draft
+      (forces rejections + cache rollback) and an *identical* draft (forces
+      the accept-all + bonus path) — which validates the accept/reject math and
+      the dual-cache bookkeeping together, independent of draft quality. Plus
+      exact `max_new_tokens` capping, EOS, sampling reproducibility, and the
+      vocab-mismatch guard.
 - [ ] Continuous batching for server-style deployment (defer until a real
       consumer asks for it).
 

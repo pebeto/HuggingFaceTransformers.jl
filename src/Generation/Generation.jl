@@ -35,7 +35,7 @@ const DecoderLM = Union{
 }
 using ..Tokenizers: Tokenizer, encode, decode
 
-export generate, ChatTemplate, apply_chat_template
+export generate, speculative_generate, ChatTemplate, apply_chat_template
 
 include("jinja/ast.jl")
 include("jinja/blocks.jl")
@@ -233,5 +233,7 @@ function generate(lm::DecoderLM, tokenizer::Tokenizer, prompt::AbstractString; k
     out_ids = generate(lm, ids; kwargs...)
     return decode(tokenizer, out_ids)
 end
+
+include("speculative.jl")
 
 end # module Generation

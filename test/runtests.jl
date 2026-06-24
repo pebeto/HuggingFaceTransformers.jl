@@ -75,6 +75,10 @@ using Allspark
         include("generate.jl")
     end
 
+    @testset verbose = true "Speculative" begin
+        include("speculative.jl")
+    end
+
     @testset verbose = true "ChatTemplate" begin
         include("chat_template.jl")
     end
