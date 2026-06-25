@@ -446,9 +446,7 @@ end
     end
 
     @testset "max_input_chars_per_word triggers UNK" begin
-        short_model = WordPieceModel(
-            vocab; unk_token="[UNK]", max_input_chars_per_word=3
-        )
+        short_model = WordPieceModel(vocab; unk_token="[UNK]", max_input_chars_per_word=3)
         @test encode_word(short_model, "things") == [0]
     end
 end
@@ -473,10 +471,7 @@ end
 @testset verbose = true "BertNormalizer" begin
     @testset "lowercase + strip_accents combined" begin
         n = BertNormalizer(;
-            clean_text=false,
-            handle_chinese_chars=false,
-            strip_accents=true,
-            lowercase=true,
+            clean_text=false, handle_chinese_chars=false, strip_accents=true, lowercase=true
         )
         # café → cafe (accent stripped → lowercased; both 'C' and 'é').
         @test apply_norm(n, "Café") == "cafe"

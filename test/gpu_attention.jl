@@ -50,9 +50,7 @@ end
         q, k_t, v = _qkv(sq, skv, 8, 2; seed=0x12)
         drop = Bool[(j - 1) > (i - 1) for i in 1:sq, j in 1:skv]
         cpu = sdpa(q, k_t, v; scale=scale, drop=drop)
-        gpu = sdpa(
-            to_device(q), to_device(k_t), to_device(v); scale=scale, drop=drop
-        )
+        gpu = sdpa(to_device(q), to_device(k_t), to_device(v); scale=scale, drop=drop)
         @test Array(gpu) ≈ cpu rtol = 1e-3
     end
 
@@ -60,9 +58,7 @@ end
         sq = skv = 12
         w = 4
         q, k_t, v = _qkv(sq, skv, 8, 1; seed=0x13)
-        drop = Bool[
-            (j - 1) > (i - 1) || (i - 1) - (j - 1) >= w for i in 1:sq, j in 1:skv
-        ]
+        drop = Bool[(j - 1) > (i - 1) || (i - 1) - (j - 1) >= w for i in 1:sq, j in 1:skv]
         cpu = sdpa(q, k_t, v; scale=scale, softcap=30.0f0, drop=drop)
         gpu = sdpa(
             to_device(q),

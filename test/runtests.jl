@@ -59,6 +59,10 @@ using Allspark
         include("bert.jl")
     end
 
+    @testset verbose = true "Embedding" begin
+        include("embedding.jl")
+    end
+
     @testset verbose = true "Mixtral" begin
         include("mixtral_model.jl")
     end
@@ -162,6 +166,12 @@ using Allspark
     if !isempty(get(ENV, "ALLSPARK_TEST_PARITY_MIXTRAL", ""))
         @testset verbose = true "Mixtral parity" begin
             include("parity_mixtral.jl")
+        end
+    end
+
+    if !isempty(get(ENV, "ALLSPARK_TEST_PARITY_EMBEDDING", ""))
+        @testset verbose = true "Embedding parity" begin
+            include("parity_embedding.jl")
         end
     end
 

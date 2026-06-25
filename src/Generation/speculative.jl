@@ -107,8 +107,14 @@ function speculative_generate(
         bonus_logits = vec(vlogits[:, γ, 1])
 
         new_tokens = _verify(
-            draft_tokens, draft_probs, target_logits, bonus_logits, γ;
-            do_sample=do_sample, temperature=temperature, rng=rng,
+            draft_tokens,
+            draft_probs,
+            target_logits,
+            bonus_logits,
+            γ;
+            do_sample=do_sample,
+            temperature=temperature,
+            rng=rng,
         )
 
         for tok in new_tokens
@@ -124,8 +130,14 @@ end
 # Accept/reject over the γ drafted tokens, returning the tokens to commit this
 # round (the accepted prefix plus one correction-or-bonus token).
 function _verify(
-    draft_tokens, draft_probs, target_logits, bonus_logits, γ;
-    do_sample::Bool, temperature::Real, rng::AbstractRNG,
+    draft_tokens,
+    draft_probs,
+    target_logits,
+    bonus_logits,
+    γ;
+    do_sample::Bool,
+    temperature::Real,
+    rng::AbstractRNG,
 )
     new_tokens = Int[]
     accepted_all = true
@@ -169,8 +181,9 @@ function _verify(
     return new_tokens
 end
 
-_probs(logits::AbstractVector, temperature::Real) =
+function _probs(logits::AbstractVector, temperature::Real)
     _softmax(temperature == 1 ? logits : logits ./ Float32(temperature))
+end
 
 function _sample_from_probs(rng::AbstractRNG, probs::AbstractVector)
     u = rand(rng, eltype(probs))

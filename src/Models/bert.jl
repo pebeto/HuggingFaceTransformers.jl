@@ -160,6 +160,48 @@ end
 Flux.@layer BertModel
 
 """
+    BertModel(cfg::BertConfig)
+
+Materialize a fresh, randomly-initialized encoder trunk (embeddings +
+encoder stack) matching `cfg`. Shared by [`BertForMaskedLM`](@ref) and
+[`BertEmbeddingModel`](@ref).
+"""
+function BertModel(cfg::BertConfig)
+    head_dim = cfg.hidden_size ÷ cfg.num_attention_heads
+    eps = Float32(cfg.layer_norm_eps)
+
+    embeddings = BertEmbeddings(
+        TokenEmbedding(cfg.vocab_size, cfg.hidden_size),
+        TokenEmbedding(
+            cfg.max_position_embeddings + cfg.position_embedding_offset, cfg.hidden_size
+        ),
+        TokenEmbedding(cfg.type_vocab_size, cfg.hidden_size),
+        LayerNorm(cfg.hidden_size, eps),
+    )
+
+    layers = [
+        BertEncoderLayer(
+            GQA(
+                cfg.hidden_size,
+                cfg.num_attention_heads,
+                cfg.num_attention_heads,    # MHA
+                head_dim,
+                nothing;                    # no RoPE — positions live in the embedding
+                qkv_bias=true,
+                wo_bias=true,
+                causal=false,               # bidirectional
+            ),
+            LayerNorm(cfg.hidden_size, eps),
+            Linear(cfg.hidden_size, cfg.intermediate_size; bias=true),
+            Linear(cfg.intermediate_size, cfg.hidden_size; bias=true),
+            LayerNorm(cfg.hidden_size, eps),
+        ) for _ in 1:(cfg.num_hidden_layers)
+    ]
+
+    return BertModel(embeddings, BertEncoder(layers))
+end
+
+"""
     BertLMHead{D, N, P}
 
 MaskedLM prediction head: `dense → gelu → LayerNorm → decoder + bias`.
@@ -213,38 +255,8 @@ embedding LayerNorm and post-norm LayerNorms all carry bias, and the
 MLP uses exact (erf) GELU.
 """
 function BertForMaskedLM(cfg::BertConfig)
-    head_dim = cfg.hidden_size ÷ cfg.num_attention_heads
     eps = Float32(cfg.layer_norm_eps)
-
-    embeddings = BertEmbeddings(
-        TokenEmbedding(cfg.vocab_size, cfg.hidden_size),
-        TokenEmbedding(
-            cfg.max_position_embeddings + cfg.position_embedding_offset, cfg.hidden_size
-        ),
-        TokenEmbedding(cfg.type_vocab_size, cfg.hidden_size),
-        LayerNorm(cfg.hidden_size, eps),
-    )
-
-    layers = [
-        BertEncoderLayer(
-            GQA(
-                cfg.hidden_size,
-                cfg.num_attention_heads,
-                cfg.num_attention_heads,    # MHA
-                head_dim,
-                nothing;                    # no RoPE — positions live in the embedding
-                qkv_bias=true,
-                wo_bias=true,
-                causal=false,               # bidirectional
-            ),
-            LayerNorm(cfg.hidden_size, eps),
-            Linear(cfg.hidden_size, cfg.intermediate_size; bias=true),
-            Linear(cfg.intermediate_size, cfg.hidden_size; bias=true),
-            LayerNorm(cfg.hidden_size, eps),
-        ) for _ in 1:(cfg.num_hidden_layers)
-    ]
-    encoder = BertEncoder(layers)
-    trunk = BertModel(embeddings, encoder)
+    trunk = BertModel(cfg)
 
     head = BertLMHead(
         Linear(cfg.hidden_size, cfg.hidden_size; bias=true),
@@ -273,25 +285,28 @@ function bert_state_dict_map(cfg::BertConfig)
     out = Dict{String,Tuple{Tuple,Symbol}}()
     p = cfg.hf_prefix
     hp = cfg.head_prefix
+    # Sentence-embedding checkpoints (BGE, E5) often store the trunk with no
+    # `bert.`/`roberta.` namespace; `pfx` drops the separator when empty.
+    pfx(s) = isempty(p) ? s : "$(p).$(s)"
 
     # Embeddings: word / position / token-type embeddings each (vocab-sized, hidden).
-    out["$(p).embeddings.word_embeddings.weight"] = (
+    out[pfx("embeddings.word_embeddings.weight")] = (
         (:trunk, :embeddings, :embed_tokens, :weight), :transpose
     )
-    out["$(p).embeddings.position_embeddings.weight"] = (
+    out[pfx("embeddings.position_embeddings.weight")] = (
         (:trunk, :embeddings, :embed_positions, :weight), :transpose
     )
-    out["$(p).embeddings.token_type_embeddings.weight"] = (
+    out[pfx("embeddings.token_type_embeddings.weight")] = (
         (:trunk, :embeddings, :embed_types, :weight), :transpose
     )
-    out["$(p).embeddings.LayerNorm.weight"] = (
+    out[pfx("embeddings.LayerNorm.weight")] = (
         (:trunk, :embeddings, :norm, :weight), :as_is
     )
-    out["$(p).embeddings.LayerNorm.bias"] = ((:trunk, :embeddings, :norm, :bias), :as_is)
+    out[pfx("embeddings.LayerNorm.bias")] = ((:trunk, :embeddings, :norm, :bias), :as_is)
 
     for i in 0:(cfg.num_hidden_layers - 1)
         layer_path = (:trunk, :encoder, :layers, i + 1)
-        prefix = "$(p).encoder.layer.$(i)"
+        prefix = pfx("encoder.layer.$(i)")
 
         # Self-attention Q/K/V (each shipped as its own linear; not fused for BERT).
         out["$(prefix).attention.self.query.weight"] = (

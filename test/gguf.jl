@@ -147,7 +147,7 @@ end
             path = joinpath(dir, "f32.gguf")
             W = Float32[1 2 3 4; 5 6 7 8]              # (2, 4) Julia
             flat = vec(W)                              # column-major
-            raw = reinterpret(UInt8, flat) |> collect
+            raw = collect(reinterpret(UInt8, flat))
             _write_gguf(
                 path;
                 metadata=Pair{String,Tuple{Int,Any}}[],
@@ -164,7 +164,7 @@ end
         mktempdir() do dir
             path = joinpath(dir, "f16.gguf")
             orig = Float32[0.5, -1.25, 3.0, 100.0]
-            raw = reinterpret(UInt8, Float16.(orig)) |> collect
+            raw = collect(reinterpret(UInt8, Float16.(orig)))
             _write_gguf(
                 path;
                 metadata=Pair{String,Tuple{Int,Any}}[],

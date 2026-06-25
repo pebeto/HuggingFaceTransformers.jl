@@ -188,7 +188,7 @@ function apply_dec(::ByteFallbackDecoder, s::AbstractString)
     out = IOBuffer()
     buf = UInt8[]
     function flush_buf!()
-        isempty(buf) && return
+        isempty(buf) && return nothing
         try
             print(out, String(copy(buf)))
         catch

@@ -136,8 +136,7 @@ end
         # Run again with experts 3 and 4's weights perturbed — output must
         # not change, since neither is selected for any token.
         snapshot = (
-            copy(moe.experts[3].gate_proj.weight),
-            copy(moe.experts[4].down_proj.weight),
+            copy(moe.experts[3].gate_proj.weight), copy(moe.experts[4].down_proj.weight)
         )
         moe.experts[3].gate_proj.weight .+= 100.0f0 .* randn(Float32, size(snapshot[1]))
         moe.experts[4].down_proj.weight .+= 100.0f0 .* randn(Float32, size(snapshot[2]))

@@ -65,9 +65,9 @@ function _run_variant(name::AbstractString, fixture_filename::AbstractString)
     fixture_path = joinpath(FIXTURES_DIR, fixture_filename)
     if !isfile(fixture_path)
         @info "Skipping Mixtral-$(name) parity: fixture $(fixture_path) not " *
-              "present. Generate it with " *
-              "`python3 test/fixtures/record_mixtral_parity.py $(name)` on a " *
-              "machine with enough RAM."
+            "present. Generate it with " *
+            "`python3 test/fixtures/record_mixtral_parity.py $(name)` on a " *
+            "machine with enough RAM."
         return nothing
     end
 

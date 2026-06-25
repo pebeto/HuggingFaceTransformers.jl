@@ -19,9 +19,21 @@ const GGML_Q4_0 = 2
 const GGML_Q8_0 = 8
 
 const GGML_TYPE_NAME = Dict(
-    0 => "F32", 1 => "F16", 2 => "Q4_0", 3 => "Q4_1", 6 => "Q5_0", 7 => "Q5_1",
-    8 => "Q8_0", 9 => "Q8_1", 10 => "Q2_K", 11 => "Q3_K", 12 => "Q4_K",
-    13 => "Q5_K", 14 => "Q6_K", 15 => "Q8_K", 28 => "BF16",
+    0 => "F32",
+    1 => "F16",
+    2 => "Q4_0",
+    3 => "Q4_1",
+    6 => "Q5_0",
+    7 => "Q5_1",
+    8 => "Q8_0",
+    9 => "Q8_1",
+    10 => "Q2_K",
+    11 => "Q3_K",
+    12 => "Q4_K",
+    13 => "Q5_K",
+    14 => "Q6_K",
+    15 => "Q8_K",
+    28 => "BF16",
 )
 
 # GGUF metadata value-type codes.
@@ -147,12 +159,19 @@ function _dequantize(::Val{V}, ::Vector{UInt8}, ::Int) where {V}
     throw(ArgumentError("GGUF tensor dtype $(name) is not supported yet"))
 end
 
-_type_nbytes(t::Integer, n::Int) =
-    t == GGML_F32 ? 4n :
-    t == GGML_F16 ? 2n :
-    t == GGML_Q8_0 ? (n ÷ 32) * 34 :
-    t == GGML_Q4_0 ? (n ÷ 32) * 18 :
-    throw(ArgumentError("unknown size for GGML type $(t)"))
+function _type_nbytes(t::Integer, n::Int)
+    if t == GGML_F32
+        4n
+    elseif t == GGML_F16
+        2n
+    elseif t == GGML_Q8_0
+        (n ÷ 32) * 34
+    elseif t == GGML_Q4_0
+        (n ÷ 32) * 18
+    else
+        throw(ArgumentError("unknown size for GGML type $(t)"))
+    end
+end
 
 """
     load_gguf(path) -> GGUFFile

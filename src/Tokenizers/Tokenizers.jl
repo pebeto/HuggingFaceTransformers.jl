@@ -78,9 +78,8 @@ function _parse_model(m::JSON3.Object)
         vocab = Tuple{String,Float32}[]
         for entry in vocab_raw
             arr = entry::JSON3.Array
-            length(arr) == 2 || throw(
-                ArgumentError("Unigram vocab entry must be [token, score]: $(arr)"),
-            )
+            length(arr) == 2 ||
+                throw(ArgumentError("Unigram vocab entry must be [token, score]: $(arr)"))
             push!(vocab, (String(arr[1]::AbstractString), Float32(arr[2]::Real)))
         end
         unk_id_raw = get(m, :unk_id, nothing)
@@ -180,8 +179,15 @@ function _parse_pre_tokenizer(p::JSON3.Object)
         # honor either form.
         scheme = if scheme_raw isa AbstractString
             s = String(scheme_raw)
-            s == "always" ? :always : s == "first" ? :first : s == "never" ? :never :
-            throw(ArgumentError("unknown Metaspace prepend_scheme: $(s)"))
+            if s == "always"
+                :always
+            elseif s == "first"
+                :first
+            elseif s == "never"
+                :never
+            else
+                throw(ArgumentError("unknown Metaspace prepend_scheme: $(s)"))
+            end
         else
             Bool(get(p, :add_prefix_space, true)::Bool) ? :always : :never
         end
@@ -206,12 +212,10 @@ function _parse_decoder(d::JSON3.Object)
         return SequenceDecoder(steps)
     elseif typ == "Replace"
         pat = d[:pattern]::JSON3.Object
-        haskey(pat, :String) || throw(
-            ArgumentError("Replace decoder only supports literal-string patterns"),
-        )
+        haskey(pat, :String) ||
+            throw(ArgumentError("Replace decoder only supports literal-string patterns"))
         return ReplaceDecoder(
-            String(pat[:String]::AbstractString),
-            String(d[:content]::AbstractString),
+            String(pat[:String]::AbstractString), String(d[:content]::AbstractString)
         )
     elseif typ == "ByteFallback"
         return ByteFallbackDecoder()
@@ -430,7 +434,7 @@ function decode(
     sep = _token_separator(tk.decoder)
 
     function flush!()
-        isempty(buffer) && return
+        isempty(buffer) && return nothing
         joined = join(buffer, sep)
         print(out, apply_dec(tk.decoder, joined))
         empty!(buffer)

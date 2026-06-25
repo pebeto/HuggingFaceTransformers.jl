@@ -485,7 +485,9 @@ struct MoEMLP{G,E}
     function MoEMLP(
         gate::Linear, experts::AbstractVector, num_experts::Integer, top_k::Integer
     )
-        return new{typeof(gate),typeof(experts)}(gate, experts, Int(num_experts), Int(top_k))
+        return new{typeof(gate),typeof(experts)}(
+            gate, experts, Int(num_experts), Int(top_k)
+        )
     end
 end
 
@@ -504,9 +506,8 @@ function MoEMLP(
     init=Flux.glorot_uniform,
 )
     top_k > 0 || throw(ArgumentError("top_k must be > 0"))
-    top_k <= num_experts || throw(
-        ArgumentError("top_k ($(top_k)) cannot exceed num_experts ($(num_experts))"),
-    )
+    top_k <= num_experts ||
+        throw(ArgumentError("top_k ($(top_k)) cannot exceed num_experts ($(num_experts))"))
     gate = Linear(hidden, num_experts; init=init)
     experts = [SiLUGatedMLP(hidden, intermediate; init=init) for _ in 1:num_experts]
     return MoEMLP(gate, experts, Int(num_experts), Int(top_k))
@@ -677,8 +678,12 @@ Scaled dot-product attention over `GQA`'s batch-flattened head layout:
 extensions specialize it for device arrays and route to [`flash_sdpa`](@ref).
 """
 function sdpa(
-    q::AbstractArray, k_t::AbstractArray, v::AbstractArray;
-    scale, softcap=nothing, drop=nothing,
+    q::AbstractArray,
+    k_t::AbstractArray,
+    v::AbstractArray;
+    scale,
+    softcap=nothing,
+    drop=nothing,
 )
     return _sdpa_materialized(q, k_t, v; scale=scale, softcap=softcap, drop=drop)
 end
@@ -709,8 +714,13 @@ never materialized. Accumulates in `Float32` and casts back to `eltype(q)`;
 fully-masked queries return zeros. Device-agnostic (allocates via `similar`).
 """
 function flash_sdpa(
-    q::AbstractArray, k_t::AbstractArray, v::AbstractArray;
-    scale, softcap=nothing, drop=nothing, block_size::Integer=128,
+    q::AbstractArray,
+    k_t::AbstractArray,
+    v::AbstractArray;
+    scale,
+    softcap=nothing,
+    drop=nothing,
+    block_size::Integer=128,
 )
     sq, d, batch = size(q, 1), size(q, 2), size(q, 3)
     skv = size(k_t, 2)

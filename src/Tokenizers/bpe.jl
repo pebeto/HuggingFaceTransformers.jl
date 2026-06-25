@@ -83,5 +83,6 @@ Run BPE on `word` and resolve the resulting tokens to 0-indexed IDs.
 Mirrors the `encode_word(::UnigramModel, …)` signature so the top-level
 `encode` doesn't care which model family it's looking at.
 """
-encode_word(model::BPEModel, word::AbstractString) =
+function encode_word(model::BPEModel, word::AbstractString)
     token_ids(model, bpe_encode_word(model, word))
+end

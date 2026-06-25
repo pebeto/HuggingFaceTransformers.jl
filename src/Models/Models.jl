@@ -26,6 +26,7 @@ using ..Layers:
     QuantizedInt8Matrix,
     KVCache,
     _gelu_exact
+using ..Tokenizers: Tokenizer, encode
 
 export load_weights, load_into!
 export TokenEmbedding, DecoderLayer, DecoderModel, build_caches, load_state_dict!
@@ -44,6 +45,7 @@ export BertConfig,
     BertLMHead,
     BertForMaskedLM,
     bert_state_dict_map
+export BertEmbeddingModel, embed, mean_pool, cls_pool, l2_normalize
 export MixtralConfig, MixtralForCausalLM, mixtral_state_dict_map
 export convert_eltype, fp16, bf16, fp32
 export QuantizedInt8Matrix, quantize_int8
@@ -59,6 +61,7 @@ include("phi3.jl")
 include("gpt2.jl")
 include("neox.jl")
 include("bert.jl")
+include("embedding.jl")
 include("mixtral.jl")
 include("dtype.jl")
 include("quantize.jl")

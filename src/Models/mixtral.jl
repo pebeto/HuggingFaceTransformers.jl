@@ -106,9 +106,8 @@ function build_caches(
 )
     cfg = lm.config
     return [
-        KVCache(
-            cfg.head_dim, cfg.num_key_value_heads, max_seq, batch_size; eltype=eltype
-        ) for _ in 1:(cfg.num_hidden_layers)
+        KVCache(cfg.head_dim, cfg.num_key_value_heads, max_seq, batch_size; eltype=eltype)
+        for _ in 1:(cfg.num_hidden_layers)
     ]
 end
 
@@ -123,39 +122,48 @@ match the Llama/Mistral convention; the MoE block contributes one
 function mixtral_state_dict_map(cfg::MixtralConfig)
     out = Dict{String,Tuple{Tuple,Symbol}}()
 
-    out["model.embed_tokens.weight"] =
-        ((:model, :embed_tokens, :weight), :transpose)
+    out["model.embed_tokens.weight"] = ((:model, :embed_tokens, :weight), :transpose)
 
     for i in 0:(cfg.num_hidden_layers - 1)
         layer_path = (:model, :layers, i + 1)
         prefix = "model.layers.$(i)"
 
-        out["$(prefix).input_layernorm.weight"] =
-            ((layer_path..., :input_layernorm, :weight), :as_is)
-        out["$(prefix).self_attn.q_proj.weight"] =
-            ((layer_path..., :self_attn, :wq, :weight), :as_is)
-        out["$(prefix).self_attn.k_proj.weight"] =
-            ((layer_path..., :self_attn, :wk, :weight), :as_is)
-        out["$(prefix).self_attn.v_proj.weight"] =
-            ((layer_path..., :self_attn, :wv, :weight), :as_is)
-        out["$(prefix).self_attn.o_proj.weight"] =
-            ((layer_path..., :self_attn, :wo, :weight), :as_is)
-        out["$(prefix).post_attention_layernorm.weight"] =
-            ((layer_path..., :post_attention_layernorm, :weight), :as_is)
+        out["$(prefix).input_layernorm.weight"] = (
+            (layer_path..., :input_layernorm, :weight), :as_is
+        )
+        out["$(prefix).self_attn.q_proj.weight"] = (
+            (layer_path..., :self_attn, :wq, :weight), :as_is
+        )
+        out["$(prefix).self_attn.k_proj.weight"] = (
+            (layer_path..., :self_attn, :wk, :weight), :as_is
+        )
+        out["$(prefix).self_attn.v_proj.weight"] = (
+            (layer_path..., :self_attn, :wv, :weight), :as_is
+        )
+        out["$(prefix).self_attn.o_proj.weight"] = (
+            (layer_path..., :self_attn, :wo, :weight), :as_is
+        )
+        out["$(prefix).post_attention_layernorm.weight"] = (
+            (layer_path..., :post_attention_layernorm, :weight), :as_is
+        )
 
         # MoE: router gate + per-expert SwiGLU weights.
-        out["$(prefix).block_sparse_moe.gate.weight"] =
-            ((layer_path..., :mlp, :gate, :weight), :as_is)
+        out["$(prefix).block_sparse_moe.gate.weight"] = (
+            (layer_path..., :mlp, :gate, :weight), :as_is
+        )
         for e in 0:(cfg.num_local_experts - 1)
             ep = (layer_path..., :mlp, :experts, e + 1)
             # HF Mixtral's w1/w2/w3 = gate_proj/down_proj/up_proj. Yes, the
             # ordering is non-obvious — w2 is the down-projection.
-            out["$(prefix).block_sparse_moe.experts.$(e).w1.weight"] =
-                ((ep..., :gate_proj, :weight), :as_is)
-            out["$(prefix).block_sparse_moe.experts.$(e).w2.weight"] =
-                ((ep..., :down_proj, :weight), :as_is)
-            out["$(prefix).block_sparse_moe.experts.$(e).w3.weight"] =
-                ((ep..., :up_proj, :weight), :as_is)
+            out["$(prefix).block_sparse_moe.experts.$(e).w1.weight"] = (
+                (ep..., :gate_proj, :weight), :as_is
+            )
+            out["$(prefix).block_sparse_moe.experts.$(e).w2.weight"] = (
+                (ep..., :down_proj, :weight), :as_is
+            )
+            out["$(prefix).block_sparse_moe.experts.$(e).w3.weight"] = (
+                (ep..., :up_proj, :weight), :as_is
+            )
         end
     end
 

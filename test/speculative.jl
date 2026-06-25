@@ -78,7 +78,9 @@ end
     ids = [1, 2, 3, 4]
     greedy = generate(target, ids; max_new_tokens=6)
     eos = greedy[length(ids) + 1]   # the first token the target would emit
-    out = speculative_generate(target, draft, ids; max_new_tokens=6, n_draft=4, eos_token_id=eos)
+    out = speculative_generate(
+        target, draft, ids; max_new_tokens=6, n_draft=4, eos_token_id=eos
+    )
     @test out[end] == eos
     @test length(out) == length(ids) + 1
 end
@@ -88,13 +90,23 @@ end
     draft, _ = _spec_tiny_lm(; seed=0x8888)
     ids = [1, 2, 3]
     out1 = speculative_generate(
-        target, draft, ids;
-        max_new_tokens=8, n_draft=4, do_sample=true, temperature=0.9,
+        target,
+        draft,
+        ids;
+        max_new_tokens=8,
+        n_draft=4,
+        do_sample=true,
+        temperature=0.9,
         rng=MersenneTwister(2024),
     )
     out2 = speculative_generate(
-        target, draft, ids;
-        max_new_tokens=8, n_draft=4, do_sample=true, temperature=0.9,
+        target,
+        draft,
+        ids;
+        max_new_tokens=8,
+        n_draft=4,
+        do_sample=true,
+        temperature=0.9,
         rng=MersenneTwister(2024),
     )
     @test out1 == out2
@@ -113,9 +125,7 @@ end
     target, _ = _spec_tiny_lm()
     draft, _ = _spec_tiny_lm(; seed=0x3030)
     @test_throws ArgumentError speculative_generate(target, draft, Int[]; max_new_tokens=5)
-    @test_throws ArgumentError speculative_generate(
-        target, draft, [1]; max_new_tokens=-1
-    )
+    @test_throws ArgumentError speculative_generate(target, draft, [1]; max_new_tokens=-1)
     @test_throws ArgumentError speculative_generate(
         target, draft, [1]; max_new_tokens=5, n_draft=0
     )

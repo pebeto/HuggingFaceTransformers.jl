@@ -46,8 +46,8 @@ function _run_variant(name::AbstractString, fixture_filename::AbstractString)
     fixture_path = joinpath(FIXTURES_DIR, fixture_filename)
     if !isfile(fixture_path)
         @info "Skipping tokenizer parity for $(name): fixture " *
-              "$(fixture_path) not present. Generate it with " *
-              "`python3 test/fixtures/record_tokenizer_parity.py $(name)`."
+            "$(fixture_path) not present. Generate it with " *
+            "`python3 test/fixtures/record_tokenizer_parity.py $(name)`."
         return nothing
     end
 
@@ -82,7 +82,7 @@ function _run_variant(name::AbstractString, fixture_filename::AbstractString)
             end
         end
         @info "$(name): $(encode_pass[])/$(length(samples)) encode OK, " *
-              "$(decode_pass[])/$(length(samples)) decode OK"
+            "$(decode_pass[])/$(length(samples)) decode OK"
     end
 end
 

@@ -80,9 +80,7 @@ end
         # Causal + window: query i sees keys (i-w+1 .. i). The last query
         # cannot see key 1, so the first KV block is fully masked for it.
         # That is the flash edge case that must not NaN or add weight.
-        drop = Bool[
-            (j - 1) > (i - 1) || (i - 1) - (j - 1) >= w for i in 1:sq, j in 1:skv
-        ]
+        drop = Bool[(j - 1) > (i - 1) || (i - 1) - (j - 1) >= w for i in 1:sq, j in 1:skv]
         a = sdpa(q, k_t, v; scale=scale, drop=drop)
         b = flash_sdpa(q, k_t, v; scale=scale, drop=drop, block_size=4)
         @test !any(isnan, b)

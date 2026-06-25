@@ -512,8 +512,29 @@ SentencePiece or WordPiece directly.
 
 ## Phase 5 — Beyond text
 
-- [ ] Embedding models (BGE, E5, nomic-embed). Mostly BERT variants — easy
-      wins, high demand.
+- [x] Embedding models (BGE, E5). `BertEmbeddingModel`
+      (`src/Models/embedding.jl`) wraps the `BertModel` trunk with a pooling
+      strategy (`:cls` for BGE, `:mean` for E5) and optional L2 normalization
+      (default on; retrieval checkpoints expect unit-norm vectors).
+      `embed(model, ids)` returns one pooled vector; `embed(model, tokenizer,
+      text|texts)` tokenizes first and leaves special tokens and instruction
+      prefixes (E5's `query:`/`passage:`) to the caller. It exports the pooling
+      helpers `mean_pool`/`cls_pool`/`l2_normalize`. Batch-1 encodes each text
+      on its own, so `:mean` matches sentence-transformers' attention-masked
+      mean with no padding to exclude, and the absent per-sequence padding mask
+      never bites. Loading reuses `bert_state_dict_map` filtered to the trunk
+      keys and ignores any pooler or MLM-head weights; that map now drops the
+      separator on an empty prefix, so prefix-less BGE/E5 checkpoints (keys like
+      `embeddings.word_embeddings.weight`) load. A shared `BertModel(cfg)`
+      constructor came out of `BertForMaskedLM(cfg)`. `test/embedding.jl` runs
+      27 assertions: pooling primitives, unit-norm output, `embed(ids)` against
+      a manual pooled-and-normalized trunk pass, `:cls` versus `:mean` under
+      shared weights, the prefix-less load path, and the tokenizer overloads.
+      The gated `test/parity_embedding.jl` (plus `record_embedding_parity.py`)
+      checks bge-small and e5-small against sentence-transformers within `1e-3`.
+- [ ] nomic-embed. It needs its own encoder: rotary embeddings, SwiGLU MLP, no
+      absolute position embeddings. The shared `BertModel` trunk doesn't fit, so
+      it lands as a separate chunk from the BGE/E5 win.
 - [ ] ViT, then SigLIP, then DINOv2.
 - [ ] Whisper.
 - [ ] LLaVA / Llama-3.2-Vision once vision encoders + decoder LLMs are
