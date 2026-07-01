@@ -532,9 +532,27 @@ SentencePiece or WordPiece directly.
       shared weights, the prefix-less load path, and the tokenizer overloads.
       The gated `test/parity_embedding.jl` (plus `record_embedding_parity.py`)
       checks bge-small and e5-small against sentence-transformers within `1e-3`.
-- [ ] nomic-embed. It needs its own encoder: rotary embeddings, SwiGLU MLP, no
-      absolute position embeddings. The shared `BertModel` trunk doesn't fit, so
-      it lands as a separate chunk from the BGE/E5 win.
+- [x] nomic-embed. `NomicBertConfig` / `NomicBertModel` (`src/Models/nomic.jl`)
+      port the NomicBERT encoder. It keeps BERT's post-norm block
+      (`x = norm1(x + attn(x)); x = norm2(x + mlp(x))`) and swaps three pieces:
+      full rotary at `rope_theta=1000` (not Llama's 10000) replaces the absolute
+      position table, a fused bias-free `Wqkv` feeds bidirectional MHA, and the
+      MLP is gated SwiGLU. The reused layers do the work: `GQA(...; causal=false,
+      qkv_bias=false, wo_bias=false)` with `RoPE(head_dim; base=rope_theta)` for
+      attention and `SiLUGatedMLP` for the MLP (the gated keys map `fc12` → gate,
+      `fc11` → up, `fc2` → down, so `fc11 * silu(fc12)` lands as `up *
+      silu(gate)`). `NomicBertModel` plugs into the existing `BertEmbeddingModel`
+      wrapper, which is generic over its trunk; `BertEmbeddingModel(cfg)` for a
+      `NomicBertConfig` defaults to mean pooling (nomic's convention). Loading
+      runs `nomic_state_dict_map` (embeddings transpose; everything else as-is)
+      and then splits the fused `Wqkv` rows `[Q; K; V]` into `wq`/`wk`/`wv` by
+      hand, since the generic loader has no unstack transform. Architecture
+      details verified against the published `config.json` and
+      `modeling_hf_nomic_bert.py`. Tested in `test/nomic.jl` (27 assertions:
+      forward shape, bidirectional + rotary wiring, the `Wqkv` split and SwiGLU
+      mapping, mean-pooled unit-norm output, `embed(ids)` against a manual pass)
+      plus a gated `test/parity_nomic.jl` (+ `record_nomic_parity.py`) that
+      checks nomic-embed-text-v1.5 against the HF model within `1e-3`.
 - [ ] ViT, then SigLIP, then DINOv2.
 - [ ] Whisper.
 - [ ] LLaVA / Llama-3.2-Vision once vision encoders + decoder LLMs are

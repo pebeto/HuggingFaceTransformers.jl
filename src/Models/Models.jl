@@ -46,6 +46,7 @@ export BertConfig,
     BertForMaskedLM,
     bert_state_dict_map
 export BertEmbeddingModel, embed, mean_pool, cls_pool, l2_normalize
+export NomicBertConfig, NomicBertModel, nomic_state_dict_map
 export MixtralConfig, MixtralForCausalLM, mixtral_state_dict_map
 export convert_eltype, fp16, bf16, fp32
 export QuantizedInt8Matrix, quantize_int8
@@ -62,6 +63,7 @@ include("gpt2.jl")
 include("neox.jl")
 include("bert.jl")
 include("embedding.jl")
+include("nomic.jl")
 include("mixtral.jl")
 include("dtype.jl")
 include("quantize.jl")
