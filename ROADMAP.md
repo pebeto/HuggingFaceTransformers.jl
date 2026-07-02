@@ -553,7 +553,33 @@ SentencePiece or WordPiece directly.
       mapping, mean-pooled unit-norm output, `embed(ids)` against a manual pass)
       plus a gated `test/parity_nomic.jl` (+ `record_nomic_parity.py`) that
       checks nomic-embed-text-v1.5 against the HF model within `1e-3`.
-- [ ] ViT, then SigLIP, then DINOv2.
+- [x] ViT. `ViTConfig` / `ViTModel` / `ViTForImageClassification`
+      (`src/Models/vit.jl`) port `google/vit-base-patch16-224`. It's a pre-norm
+      encoder, so it reuses `DecoderLayer` with bidirectional `GQA` (`causal=false`,
+      no rotary, biased QKV), exact-GELU `GeluMLP`, and `LayerNorm`. The one new
+      component is patch embedding: HF's stride=kernel `Conv2d` over
+      non-overlapping patches equals flattening each patch and applying a
+      `Linear`, so `ViTPatchEmbeddings` reshapes the input to `(feat, patch,
+      batch)` (channel-fastest features, width-patch-fastest order to match HF's
+      `flatten(2)`) and the conv weight `(hidden, C, P, P)` reshapes to the
+      `Linear` `(hidden, C*P*P)`. A learned `[CLS]` token and learned position
+      embeddings are added, and the classifier reads the `[CLS]` position after a
+      final LayerNorm. Attention is standard MHA with separate Q/K/V, so no
+      unstacking is needed; `load_state_dict!` only reshapes the patch conv,
+      squeezes `[CLS]` `(1,1,H)`, and transposes position embeddings `(1,S,H)`.
+      The model takes a preprocessed `(C, H, W, batch)` pixel tensor; image
+      decode/resize stays out of scope (no image deps), so a turnkey
+      image→logits path is future work. Architecture verified against the
+      published `config.json` and `modeling_vit.py`. Tested in `test/vit.jl` (32
+      assertions: the load-bearing one checks patch embedding against an explicit
+      nested-loop conv reference, pinning the layout; plus forward shape, pre-norm
+      wiring, and the full load path) with a gated `test/parity_vit.jl` (+
+      `record_vit_parity.py`) that feeds a saved `pixel_values` tensor and checks
+      logits against HF within `1e-3`.
+- [ ] SigLIP, then DINOv2. Both are ViT-family image encoders reusing the patch
+      embedding and pre-norm block; SigLIP swaps the `[CLS]`-token head for
+      attention pooling and pairs with a text tower, DINOv2 adds register tokens
+      and a different pre-training head.
 - [ ] Whisper.
 - [ ] LLaVA / Llama-3.2-Vision once vision encoders + decoder LLMs are
       both healthy.

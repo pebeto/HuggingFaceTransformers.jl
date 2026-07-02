@@ -67,6 +67,10 @@ using Allspark
         include("nomic.jl")
     end
 
+    @testset verbose = true "ViT" begin
+        include("vit.jl")
+    end
+
     @testset verbose = true "Mixtral" begin
         include("mixtral_model.jl")
     end
@@ -182,6 +186,12 @@ using Allspark
     if !isempty(get(ENV, "ALLSPARK_TEST_PARITY_NOMIC", ""))
         @testset verbose = true "Nomic parity" begin
             include("parity_nomic.jl")
+        end
+    end
+
+    if !isempty(get(ENV, "ALLSPARK_TEST_PARITY_VIT", ""))
+        @testset verbose = true "ViT parity" begin
+            include("parity_vit.jl")
         end
     end
 
