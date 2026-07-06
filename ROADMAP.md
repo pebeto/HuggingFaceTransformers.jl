@@ -576,10 +576,30 @@ SentencePiece or WordPiece directly.
       wiring, and the full load path) with a gated `test/parity_vit.jl` (+
       `record_vit_parity.py`) that feeds a saved `pixel_values` tensor and checks
       logits against HF within `1e-3`.
-- [ ] SigLIP, then DINOv2. Both are ViT-family image encoders reusing the patch
-      embedding and pre-norm block; SigLIP swaps the `[CLS]`-token head for
-      attention pooling and pairs with a text tower, DINOv2 adds register tokens
-      and a different pre-training head.
+- [x] SigLIP. `SiglipConfig` / `SiglipVisionModel` / `SiglipTextModel` /
+      `SiglipModel` (`src/Models/siglip.jl`) port `google/siglip-base-patch16-224`.
+      Both towers are pre-norm encoders reusing `DecoderLayer` with bidirectional
+      biased-QKV `GQA` and tanh-GELU `GeluMLP` (`gelu_pytorch_tanh`) at
+      `layer_norm_eps=1e-6`. The vision tower has no `[CLS]` token: it reuses
+      `ViTPatchEmbeddings`, adds a learned position table, runs the encoder +
+      `post_layernorm`, then pools with `SiglipAttentionPoolingHead` — a single
+      learned probe query cross-attending over the patch tokens (HF's
+      `nn.MultiheadAttention`, whose fused `in_proj` splits into `wq`/`wk`/`wv` at
+      load), followed by `probe_attn + mlp(layernorm(·))`. The text tower embeds
+      tokens + positions, runs the encoder + `final_layer_norm`, pools the last
+      token, and applies a linear `head`. `SiglipModel` L2-normalizes both
+      embeddings and returns `logits_per_image = imgᵀ·txt · exp(logit_scale) +
+      logit_bias`. Architecture verified against the published `config.json` and
+      `modeling_siglip.py`. Tested in `test/siglip.jl` (45 assertions: the
+      load-bearing one checks the pooling head against an explicit single-query
+      multi-head reference; plus forward shapes, no-CLS wiring, the `in_proj`
+      split, the patch/embedding reshapes, the `logit_bias` shift, and unit-norm
+      embeddings) with a gated `test/parity_siglip.jl` (+ `record_siglip_parity.py`)
+      that feeds a saved pixel tensor and padded text ids and checks
+      `logits_per_image` against HF within `1e-2`.
+- [ ] DINOv2. ViT-family image encoder reusing the patch embedding and pre-norm
+      block; adds register tokens, LayerScale on each residual branch, and a
+      SwiGLU MLP in the giant variant — its own head, so a separate chunk.
 - [ ] Whisper.
 - [ ] LLaVA / Llama-3.2-Vision once vision encoders + decoder LLMs are
       both healthy.

@@ -71,6 +71,10 @@ using Allspark
         include("vit.jl")
     end
 
+    @testset verbose = true "SigLIP" begin
+        include("siglip.jl")
+    end
+
     @testset verbose = true "Mixtral" begin
         include("mixtral_model.jl")
     end
@@ -192,6 +196,12 @@ using Allspark
     if !isempty(get(ENV, "ALLSPARK_TEST_PARITY_VIT", ""))
         @testset verbose = true "ViT parity" begin
             include("parity_vit.jl")
+        end
+    end
+
+    if !isempty(get(ENV, "ALLSPARK_TEST_PARITY_SIGLIP", ""))
+        @testset verbose = true "SigLIP parity" begin
+            include("parity_siglip.jl")
         end
     end
 
