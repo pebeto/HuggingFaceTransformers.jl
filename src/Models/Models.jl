@@ -50,6 +50,7 @@ export NomicBertConfig, NomicBertModel, nomic_state_dict_map
 export ViTConfig, ViTModel, ViTForImageClassification, vit_state_dict_map
 export SiglipConfig, SiglipVisionConfig, SiglipTextConfig
 export SiglipVisionModel, SiglipTextModel, SiglipModel, siglip_state_dict_map
+export Dinov2Config, Dinov2Model, dinov2_state_dict_map
 export MixtralConfig, MixtralForCausalLM, mixtral_state_dict_map
 export convert_eltype, fp16, bf16, fp32
 export QuantizedInt8Matrix, quantize_int8
@@ -69,6 +70,7 @@ include("embedding.jl")
 include("nomic.jl")
 include("vit.jl")
 include("siglip.jl")
+include("dinov2.jl")
 include("mixtral.jl")
 include("dtype.jl")
 include("quantize.jl")

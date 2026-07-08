@@ -597,9 +597,27 @@ SentencePiece or WordPiece directly.
       embeddings) with a gated `test/parity_siglip.jl` (+ `record_siglip_parity.py`)
       that feeds a saved pixel tensor and padded text ids and checks
       `logits_per_image` against HF within `1e-2`.
-- [ ] DINOv2. ViT-family image encoder reusing the patch embedding and pre-norm
-      block; adds register tokens, LayerScale on each residual branch, and a
-      SwiGLU MLP in the giant variant — its own head, so a separate chunk.
+- [x] DINOv2. `Dinov2Config` / `Dinov2Model` (`src/Models/dinov2.jl`) port
+      `facebook/dinov2-base`. A ViT-family pre-norm backbone that reuses
+      `ViTPatchEmbeddings`, bidirectional biased-QKV `GQA`, and exact-GELU
+      `GeluMLP`, with two additions: LayerScale on each residual branch
+      (`x = x + ls ⊙ sublayer(norm(x))`, where `ls` is the learned `lambda1`
+      vector) and optional register tokens. When `num_register_tokens > 0` they
+      are inserted after the `[CLS]` token and before the patches, and they get
+      no position embedding (position embeddings are added to `[cls, patches]`
+      first). `Dinov2Model` returns the final-LayerNormed sequence; the CLS token
+      `output[:, 1, :]` is the pooled image feature. Loading maps the encoder +
+      LayerScale vectors, then reshapes the patch conv and squeezes/transposes
+      the `[CLS]`, register, and position tensors by hand. Architecture verified
+      against the published `config.json` and `modeling_dinov2.py`. The giant
+      variant's SwiGLU FFN is not supported yet (`use_swiglu_ffn=true` errors).
+      Tested in `test/dinov2.jl` (37 assertions: LayerScale gates each branch
+      (`ls=0` → identity), registers land in the right slots with no position
+      embedding, plus forward shape, the full load path, and the map contents)
+      with a gated `test/parity_dinov2.jl` (+ `record_dinov2_parity.py`) that
+      feeds a saved pixel tensor and checks the CLS feature (`pooler_output`)
+      against `facebook/dinov2-base` within `1e-2`. Register numerics are pinned
+      synthetically only, since the base checkpoint has no registers.
 - [ ] Whisper.
 - [ ] LLaVA / Llama-3.2-Vision once vision encoders + decoder LLMs are
       both healthy.
