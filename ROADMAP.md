@@ -618,7 +618,30 @@ SentencePiece or WordPiece directly.
       feeds a saved pixel tensor and checks the CLS feature (`pooler_output`)
       against `facebook/dinov2-base` within `1e-2`. Register numerics are pinned
       synthetically only, since the base checkpoint has no registers.
-- [ ] Whisper.
+- [x] Whisper. `WhisperConfig` / `WhisperModel` (`src/Models/whisper.jl`) port
+      `openai/whisper-base` — the first encoder-decoder. The encoder is a Conv1d
+      audio frontend (`conv1` stride-1, `conv2` stride-2, GELU after each) + a
+      stored sinusoidal position table + a pre-norm stack + final LayerNorm, over
+      log-mel features `(num_mel_bins, frames, batch)`. The decoder is a pre-norm
+      stack of causal self-attention (`GQA`), cross-attention to the encoder
+      (`WhisperCrossAttention`, built on `sdpa`), and a GELU MLP, with the output
+      head tied to the token embedding. Two new components: `Conv1d` (PyTorch-
+      compatible cross-correlation via im2col, so its 3-D weight loads `as_is`)
+      and cross-attention. Whisper quirks handled: `k_proj` has no bias (`GQA`'s
+      zero-initialized `wk.bias` is simply never loaded; cross-attn builds `wk`
+      bias-free) and `scale_embedding=false`. Loading needs no manual reshaping —
+      conv weights are 3-D `as_is`, the token/position tables `:transpose`, and
+      the tied `proj_out` is skipped. A `transcribe(model, features, prompt_ids)`
+      greedy decoder is included (recompute-per-step, no KV cache — correctness
+      first). Architecture verified against the published `config.json` and
+      `modeling_whisper.py`. Tested in `test/whisper.jl` (33 assertions: the
+      load-bearing ones check `Conv1d` and cross-attention against explicit
+      references, and decoder causality (changing a later token leaves earlier
+      logits fixed); plus forward shape, the full load path, and `transcribe`)
+      with a gated `test/parity_whisper.jl` (+ `record_whisper_parity.py`) that
+      feeds saved log-mel features and a decoder prompt and checks logits against
+      HF within `1e-2`. Audio → log-mel (STFT/mel frontend) stays out of scope,
+      and the KV-cache decode path is a follow-up.
 - [ ] LLaVA / Llama-3.2-Vision once vision encoders + decoder LLMs are
       both healthy.
 

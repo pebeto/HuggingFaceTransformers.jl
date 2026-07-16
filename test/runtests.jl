@@ -79,6 +79,10 @@ using Allspark
         include("dinov2.jl")
     end
 
+    @testset verbose = true "Whisper" begin
+        include("whisper.jl")
+    end
+
     @testset verbose = true "Mixtral" begin
         include("mixtral_model.jl")
     end
@@ -212,6 +216,12 @@ using Allspark
     if !isempty(get(ENV, "ALLSPARK_TEST_PARITY_DINOV2", ""))
         @testset verbose = true "DINOv2 parity" begin
             include("parity_dinov2.jl")
+        end
+    end
+
+    if !isempty(get(ENV, "ALLSPARK_TEST_PARITY_WHISPER", ""))
+        @testset verbose = true "Whisper parity" begin
+            include("parity_whisper.jl")
         end
     end
 
