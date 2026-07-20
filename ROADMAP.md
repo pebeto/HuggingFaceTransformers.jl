@@ -642,8 +642,30 @@ SentencePiece or WordPiece directly.
       feeds saved log-mel features and a decoder prompt and checks logits against
       HF within `1e-2`. Audio → log-mel (STFT/mel frontend) stays out of scope,
       and the KV-cache decode path is a follow-up.
-- [ ] LLaVA / Llama-3.2-Vision once vision encoders + decoder LLMs are
-      both healthy.
+- [x] LLaVA composition. `LlavaForConditionalGeneration` /
+      `LlavaMultiModalProjector` (`src/Models/llava.jl`) implement the LLaVA glue
+      between a vision tower and a decoder LLM. The projector is
+      `linear_2(gelu(linear_1(x)))` (vision hidden → LLM hidden); the forward
+      embeds the text, projects the vision patch features, splices them into the
+      text-embedding stream at `image_token_index` positions (the caller expands
+      the `<image>` placeholder into one token per patch, matching HF's
+      masked-scatter merge), and runs the LLM on the merged embeddings. Running
+      the decoder from embeddings uses a new `forward_embeds(::DecoderModel, …)`
+      entry point (skips token lookup). The wrapper is vision-tower- and
+      LLM-agnostic (reuses `LlamaForCausalLM`); `forward_from_features` runs the
+      composition on precomputed features (isolating the tower for testing), and
+      `generate_multimodal` does greedy multimodal decoding (recompute per step,
+      no KV cache). Loading maps the projector plus the language model's own map
+      re-rooted under `language_model.`, ignoring vision-tower keys. Tested in
+      `test/llava.jl` (22 assertions: the load-bearing ones check the splice
+      replaces exactly the image positions in order and that image features flow
+      through causally (a pre-image position stays fixed, the final position
+      changes); plus projector math, forward shape, `forward_from_features`
+      equivalence, load, and generation). Deferred as their own chunks: a CLIP
+      vision tower (quick-GELU, `pre_layrnorm`, feature-layer-`-2` select) for
+      llava-1.5 end-to-end numeric parity, and Llama-3.2-Vision (a different
+      mechanism — cross-attention adapter layers inside the LLM, not embedding
+      splicing).
 
 ## Phase 6 — Fine-tuning
 

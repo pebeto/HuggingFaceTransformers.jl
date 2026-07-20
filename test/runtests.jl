@@ -83,6 +83,10 @@ using Allspark
         include("whisper.jl")
     end
 
+    @testset verbose = true "LLaVA" begin
+        include("llava.jl")
+    end
+
     @testset verbose = true "Mixtral" begin
         include("mixtral_model.jl")
     end

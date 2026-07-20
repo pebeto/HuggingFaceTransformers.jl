@@ -83,6 +83,19 @@ function (m::DecoderModel)(
     input_ids::AbstractMatrix{<:Integer}; caches=nothing, step=nothing, position_ids=nothing
 )
     h = m.embed_tokens(input_ids)
+    return forward_embeds(m, h; caches=caches, step=step, position_ids=position_ids)
+end
+
+"""
+    forward_embeds(m::DecoderModel, inputs_embeds; caches, step, position_ids) -> hidden
+
+Run the decoder layers and final norm on precomputed `(hidden, seq, batch)`
+embeddings, skipping token lookup. Used by multimodal models (LLaVA) that splice
+image features into the embedding stream.
+"""
+function forward_embeds(
+    m::DecoderModel, h::AbstractArray; caches=nothing, step=nothing, position_ids=nothing
+)
     for i in eachindex(m.layers)
         cache_i = isnothing(caches) ? nothing : caches[i]
         h = m.layers[i](h; cache=cache_i, step=step, position_ids=position_ids)

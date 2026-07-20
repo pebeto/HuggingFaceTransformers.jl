@@ -53,6 +53,8 @@ export SiglipConfig, SiglipVisionConfig, SiglipTextConfig
 export SiglipVisionModel, SiglipTextModel, SiglipModel, siglip_state_dict_map
 export Dinov2Config, Dinov2Model, dinov2_state_dict_map
 export WhisperConfig, WhisperModel, whisper_state_dict_map, transcribe
+export LlavaForConditionalGeneration, LlavaMultiModalProjector, llava_state_dict_map
+export forward_from_features, generate_multimodal, forward_embeds
 export MixtralConfig, MixtralForCausalLM, mixtral_state_dict_map
 export convert_eltype, fp16, bf16, fp32
 export QuantizedInt8Matrix, quantize_int8
@@ -74,6 +76,7 @@ include("vit.jl")
 include("siglip.jl")
 include("dinov2.jl")
 include("whisper.jl")
+include("llava.jl")
 include("mixtral.jl")
 include("dtype.jl")
 include("quantize.jl")
