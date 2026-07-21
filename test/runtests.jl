@@ -99,6 +99,10 @@ using Allspark
         include("quantize.jl")
     end
 
+    @testset verbose = true "LoRA" begin
+        include("lora.jl")
+    end
+
     @testset verbose = true "Generation" begin
         include("generate.jl")
     end

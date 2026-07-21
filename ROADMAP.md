@@ -669,7 +669,28 @@ SentencePiece or WordPiece directly.
 
 ## Phase 6 — Fine-tuning
 
-- [ ] LoRA / adapter load + save (PEFT-format compatible).
+- [x] LoRA / adapter load + save (PEFT-format compatible). `src/Models/lora.jl`.
+      `LoRALinear` wraps a frozen base `Linear` with `lora_A` `(r, in)` /
+      `lora_B` `(out, r)` and forward `base(x) + scaling·B(Ax)` (matching
+      `Linear`'s N-D reshaping); `scaling = alpha/r` (or `alpha/√r` for rsLoRA).
+      `lora_wrap` builds a fresh adapter (B initialized to zero, PEFT
+      convention) and `merge_lora` folds one into a plain `Linear`
+      (`merge_and_unload`). PEFT I/O: `save_lora`/`load_lora` read and write
+      `adapter_config.json` + `adapter_model.safetensors` with keys
+      `base_model.model.<module>.lora_{A,B}.weight`. Since SafeTensors.jl only
+      reads, a minimal F32 safetensors *writer* was added (C-order layout,
+      8-byte-padded header), verified by round-tripping through the real reader.
+      `apply_lora!(model, adapter_dir, state_dict_map)` merges an adapter into a
+      model in place (PEFT `merge_and_unload`): each target module's base weight
+      is located through the model's own state-dict map and updated by
+      `scaling·(B·A)`. Tested in `test/lora.jl` (28 assertions: LoRA forward math
+      (2-D and N-D), `merge_lora` equivalence, rsLoRA scaling, the safetensors
+      writer round-trip, the PEFT save/load round-trip incl. the
+      `base_model.model.` key format, merging into a tiny Llama (targeted weights
+      change by `scaling·B·A`, untargeted untouched), and the unknown-target
+      guard). The wrap-style path (keep `LoRALinear` in the graph rather than
+      merging) is available via `lora_wrap`/`merge_lora`; non-destructive
+      adapter swapping and training are future work.
 - [ ] Gradient checkpointing.
 - [ ] Thin trainer example (Flux training loop in `examples/`, not a
       framework). Don't reinvent `transformers.Trainer`.
