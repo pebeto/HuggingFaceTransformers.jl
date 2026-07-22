@@ -12,7 +12,8 @@ using Flux
 using NNlib
 using LinearAlgebra
 using Statistics
-using ChainRulesCore: @ignore_derivatives
+using ChainRulesCore: @ignore_derivatives, RuleConfig, HasReverseMode, rrule_via_ad, NoTangent
+import ChainRulesCore
 
 export KVCache,
     RMSNorm,
@@ -29,7 +30,9 @@ export KVCache,
     sdpa,
     flash_sdpa,
     softcap,
-    reset!
+    reset!,
+    checkpoint,
+    Checkpointed
 
 """
     KVCache{T <: AbstractArray}
@@ -963,5 +966,48 @@ end
 
 Flux.@layer GQA
 Flux.Optimisers.trainable(m::GQA) = (; wq=m.wq, wk=m.wk, wv=m.wv, wo=m.wo)
+
+"""
+    checkpoint(f, args...)
+
+Gradient checkpointing: evaluate `f(args...)` without retaining `f`'s internal
+activations for the backward pass. Under reverse-mode AD the pullback recomputes
+`f` (one extra forward) to obtain gradients, trading compute for memory. Outside
+AD it is just `f(args...)`. Results and gradients are identical to calling `f`
+directly — this is purely a memory optimization for training deep stacks.
+
+Differentiable inputs must be positional `args`; to checkpoint a layer and get
+its parameter gradients, pass the layer as `f`: `checkpoint(layer, x)`.
+"""
+checkpoint(f, args...) = f(args...)
+
+function ChainRulesCore.rrule(
+    config::RuleConfig{>:HasReverseMode}, ::typeof(checkpoint), f, args...
+)
+    # Forward returns the value only; f's activations are not captured by the
+    # outer AD. The pullback recomputes f (and its own pullback) on demand.
+    y = f(args...)
+    function checkpoint_pullback(ȳ)
+        _, recomputed_pullback = rrule_via_ad(config, f, args...)
+        return (NoTangent(), recomputed_pullback(ȳ)...)
+    end
+    return y, checkpoint_pullback
+end
+
+"""
+    Checkpointed{L}
+
+Wraps a layer so its forward is gradient-checkpointed:
+`Checkpointed(layer)(x) == layer(x)`, but the block's activations are recomputed
+in the backward pass. Transparent to `Flux`/`Functors` (its parameters are the
+wrapped layer's).
+"""
+struct Checkpointed{L}
+    layer::L
+end
+
+(c::Checkpointed)(args...) = checkpoint(c.layer, args...)
+
+Flux.@layer Checkpointed
 
 end # module Layers

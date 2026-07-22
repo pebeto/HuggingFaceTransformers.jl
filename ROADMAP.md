@@ -691,7 +691,21 @@ SentencePiece or WordPiece directly.
       guard). The wrap-style path (keep `LoRALinear` in the graph rather than
       merging) is available via `lora_wrap`/`merge_lora`; non-destructive
       adapter swapping and training are future work.
-- [ ] Gradient checkpointing.
+- [x] Gradient checkpointing. `checkpoint(f, args...)` and the `Checkpointed`
+      layer wrapper in `src/Layers/Layers.jl`. `checkpoint` runs `f(args...)`
+      without retaining `f`'s activations for the backward pass; a
+      `ChainRulesCore.rrule` (config with `HasReverseMode`) recomputes `f` via
+      `rrule_via_ad` in the pullback (one extra forward), trading compute for
+      memory. It's built on ChainRulesCore (already a dep, same as
+      `@ignore_derivatives`) rather than adding a Zygote dependency, and is
+      AD-agnostic. `Checkpointed(layer)` wraps a layer so its forward is
+      checkpointed while staying transparent to Flux/Functors (parameters are the
+      wrapped layer's). Correctness-first: results and gradients are identical to
+      the uncheckpointed path — it's purely a memory optimization for training
+      deep stacks. Tested in `test/checkpoint.jl` (11 assertions: forward
+      transparency, gradient equivalence w.r.t. inputs and w.r.t. layer
+      parameters (`GeluMLP`), the `Checkpointed` wrapper, and a stacked
+      two-layer checkpointed graph matching the plain stack).
 - [ ] Thin trainer example (Flux training loop in `examples/`, not a
       framework). Don't reinvent `transformers.Trainer`.
 
