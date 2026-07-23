@@ -706,8 +706,19 @@ SentencePiece or WordPiece directly.
       transparency, gradient equivalence w.r.t. inputs and w.r.t. layer
       parameters (`GeluMLP`), the `Checkpointed` wrapper, and a stacked
       two-layer checkpointed graph matching the plain stack).
-- [ ] Thin trainer example (Flux training loop in `examples/`, not a
-      framework). Don't reinvent `transformers.Trainer`.
+- [x] Thin trainer example (Flux training loop in `examples/`, not a
+      framework). `examples/lora_finetune.jl` — a plain Flux loop that ties the
+      pieces together: `fmap` swaps every `Linear` for a LoRA-wrapped one
+      (`lora_wrap`, base frozen), `Flux.freeze!` freezes the token embeddings and
+      RMSNorms so only LoRA A/B train, the forward runs through `checkpoint`, and
+      after `Flux.setup(Adam)` / `withgradient` / `update!` it saves a PEFT-format
+      adapter with `save_lora`. Self-contained: it builds a small
+      randomly-initialized Llama and overfits a fixed token sequence (loss
+      `~4.4 → ~0.001` in 100 steps, no downloads); a comment points at swapping in
+      a real checkpoint. The integration is regression-guarded by `test/train.jl`
+      (loss drops by more than half while the base weights and embeddings stay
+      byte-identical and the LoRA matrices move), which exercises LoRA +
+      base-freezing + checkpointed forward + a real Flux optimizer step together.
 
 ---
 

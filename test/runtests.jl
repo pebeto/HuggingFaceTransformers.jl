@@ -107,6 +107,10 @@ using Allspark
         include("checkpoint.jl")
     end
 
+    @testset verbose = true "Train" begin
+        include("train.jl")
+    end
+
     @testset verbose = true "Generation" begin
         include("generate.jl")
     end
