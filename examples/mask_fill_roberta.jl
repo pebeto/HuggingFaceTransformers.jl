@@ -1,5 +1,5 @@
 #!/usr/bin/env julia
-# Allspark.jl masked-token completion REPL backed by RoBERTa.
+# HuggingFaceTransformers.jl masked-token completion REPL backed by RoBERTa.
 #
 # Usage:
 #   julia --project=. examples/mask_fill_roberta.jl
@@ -14,13 +14,14 @@
 #   FacebookAI/roberta-base:  ~0.5 GB download, ~0.6 GB RAM
 #   FacebookAI/roberta-large: ~1.5 GB download, ~1.7 GB RAM
 #
-# BERT proper isn't in the example set because it uses WordPiece
-# tokenization, which Allspark doesn't ship yet (Phase 3 work).
+# BERT proper isn't in the example set yet. WordPiece tokenization is
+# supported, so adding it is mostly a matter of writing the example.
 
-using Allspark
-using Allspark.HFHub: snapshot_download
-using Allspark.Tokenizers: load_tokenizer, encode, decode
-using Allspark.Models: load_weights, BertForMaskedLM, BertConfig, load_state_dict!
+using HuggingFaceTransformers
+using HuggingFaceTransformers.HFHub: snapshot_download
+using HuggingFaceTransformers.Tokenizers: load_tokenizer, encode, decode
+using HuggingFaceTransformers.Models:
+    load_weights, BertForMaskedLM, BertConfig, load_state_dict!
 using JSON3
 
 const DEFAULT_MODEL = "FacebookAI/roberta-base"
@@ -79,7 +80,7 @@ function main(repo_id::AbstractString=DEFAULT_MODEL)
     load_state_dict!(lm, load_weights(snapshot_dir))
 
     println()
-    println("Allspark.jl mask-fill REPL (RoBERTa). Ctrl-D to exit.")
+    println("HuggingFaceTransformers.jl mask-fill REPL (RoBERTa). Ctrl-D to exit.")
     println("Type a sentence containing `$(mask_token)`; I'll suggest top-$(TOP_K) tokens.")
     println()
 

@@ -1,8 +1,9 @@
 using Test
 using JSON3
-using Allspark.HFHub: snapshot_download
-using Allspark.Tokenizers: load_tokenizer, encode
-using Allspark.Models: load_weights, MistralForCausalLM, MistralConfig, load_state_dict!
+using HuggingFaceTransformers.HFHub: snapshot_download
+using HuggingFaceTransformers.Tokenizers: load_tokenizer, encode
+using HuggingFaceTransformers.Models:
+    load_weights, MistralForCausalLM, MistralConfig, load_state_dict!
 
 # Variant label → fixture filename. Mirrors test/parity_llama.jl's layout
 # but each variant is its own HF repo. v0.2 carries sliding_window=4096,
@@ -26,11 +27,11 @@ function _selected_variants(raw::AbstractString)
     return parts
 end
 
-const SELECTED = _selected_variants(get(ENV, "ALLSPARK_TEST_PARITY_MISTRAL", ""))
+const SELECTED = _selected_variants(get(ENV, "HFT_TEST_PARITY_MISTRAL", ""))
 
-# Mirrors examples/repl_chat.jl / test/parity_llama.jl pattern. Phase 2's
-# refactor checkpoint will pull these per-model config loaders into the
-# Models module once a third consumer appears.
+# Mirrors the examples/repl_chat.jl and test/parity_llama.jl pattern. These
+# per-model config loaders should move into the Models module once a third
+# consumer appears.
 function _load_mistral_config(snapshot_dir::AbstractString)
     raw = JSON3.read(read(joinpath(snapshot_dir, "config.json"), String))
 
@@ -108,9 +109,9 @@ function _run_variant(name::AbstractString, fixture_filename::AbstractString)
             end
             @test max_err < tolerance
 
-            allspark_top10 = sortperm(last_logits; rev=true)[1:10] .- 1
+            jl_top10 = sortperm(last_logits; rev=true)[1:10] .- 1
             hf_top10 = expected_top_indices[1:10]
-            overlap = length(intersect(Set(allspark_top10), Set(hf_top10)))
+            overlap = length(intersect(Set(jl_top10), Set(hf_top10)))
             @test overlap >= 9
         end
     end
@@ -118,7 +119,7 @@ end
 
 unknown = filter(v -> !(v in [first(t) for t in VARIANTS]), SELECTED)
 isempty(unknown) || error(
-    "Unknown ALLSPARK_TEST_PARITY_MISTRAL variant(s): $(unknown). " *
+    "Unknown HFT_TEST_PARITY_MISTRAL variant(s): $(unknown). " *
     "Valid: $(String[first(v) for v in VARIANTS]) or \"all\".",
 )
 

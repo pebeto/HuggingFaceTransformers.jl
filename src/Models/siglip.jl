@@ -1,11 +1,10 @@
 """
-    SiglipVisionConfig / SiglipTextConfig / SiglipConfig
+    SiglipVisionConfig
 
-SigLIP (`google/siglip-base-patch16-224`). Two ViT-style pre-norm towers with
-`gelu_pytorch_tanh` MLPs and `layer_norm_eps = 1e-6`. The vision tower has no
-`[CLS]` token and pools patch tokens with a learned-probe attention head; the
-text tower pools its last token and applies a linear `head`. `SiglipModel`
-L2-normalizes both embeddings and scores them with `logit_scale`/`logit_bias`.
+Vision tower hyperparameters for SigLIP (`google/siglip-base-patch16-224`). A
+ViT-style pre-norm encoder with `gelu_pytorch_tanh` MLPs at
+`layer_norm_eps = 1e-6`. The tower carries no `[CLS]` token and pools its patch
+tokens through a learned-probe attention head.
 """
 Base.@kwdef struct SiglipVisionConfig
     hidden_size::Int = 768
@@ -18,6 +17,13 @@ Base.@kwdef struct SiglipVisionConfig
     layer_norm_eps::Float64 = 1.0e-6
 end
 
+"""
+    SiglipTextConfig
+
+Text tower hyperparameters for SigLIP. The encoder has the same pre-norm shape
+as the vision tower, but it pools the last token of the sequence and applies a
+linear `head` to reach `projection_size`.
+"""
 Base.@kwdef struct SiglipTextConfig
     vocab_size::Int = 32000
     hidden_size::Int = 768
@@ -29,6 +35,13 @@ Base.@kwdef struct SiglipTextConfig
     layer_norm_eps::Float64 = 1.0e-6
 end
 
+"""
+    SiglipConfig
+
+Pairs a [`SiglipVisionConfig`](@ref) with a [`SiglipTextConfig`](@ref).
+[`SiglipModel`](@ref) L2-normalizes the embedding from each tower and scores
+them against each other using `logit_scale` and `logit_bias`.
+"""
 Base.@kwdef struct SiglipConfig
     vision::SiglipVisionConfig = SiglipVisionConfig()
     text::SiglipTextConfig = SiglipTextConfig()
@@ -234,13 +247,18 @@ function _siglip_encoder_map!(out, hf::AbstractString, root::Tuple, n_layers::In
     for i in 0:(n_layers - 1)
         lp = (root..., :layers, i + 1)
         p = "$(hf).encoder.layers.$(i)"
-        for (proj, dst) in (("q_proj", :wq), ("k_proj", :wk), ("v_proj", :wv), ("out_proj", :wo))
-            out["$(p).self_attn.$(proj).weight"] = ((lp..., :self_attn, dst, :weight), :as_is)
+        for (proj, dst) in
+            (("q_proj", :wq), ("k_proj", :wk), ("v_proj", :wv), ("out_proj", :wo))
+            out["$(p).self_attn.$(proj).weight"] = (
+                (lp..., :self_attn, dst, :weight), :as_is
+            )
             out["$(p).self_attn.$(proj).bias"] = ((lp..., :self_attn, dst, :bias), :as_is)
         end
         out["$(p).layer_norm1.weight"] = ((lp..., :input_layernorm, :weight), :as_is)
         out["$(p).layer_norm1.bias"] = ((lp..., :input_layernorm, :bias), :as_is)
-        out["$(p).layer_norm2.weight"] = ((lp..., :post_attention_layernorm, :weight), :as_is)
+        out["$(p).layer_norm2.weight"] = (
+            (lp..., :post_attention_layernorm, :weight), :as_is
+        )
         out["$(p).layer_norm2.bias"] = ((lp..., :post_attention_layernorm, :bias), :as_is)
         out["$(p).mlp.fc1.weight"] = ((lp..., :mlp, :c_fc, :weight), :as_is)
         out["$(p).mlp.fc1.bias"] = ((lp..., :mlp, :c_fc, :bias), :as_is)
@@ -267,15 +285,27 @@ function siglip_state_dict_map(cfg::SiglipConfig)
         (:vision, :embeddings, :position_embeddings), :transpose
     )
     _siglip_encoder_map!(out, "vision_model", (:vision,), cfg.vision.num_hidden_layers)
-    out["vision_model.post_layernorm.weight"] = ((:vision, :post_layernorm, :weight), :as_is)
+    out["vision_model.post_layernorm.weight"] = (
+        (:vision, :post_layernorm, :weight), :as_is
+    )
     out["vision_model.post_layernorm.bias"] = ((:vision, :post_layernorm, :bias), :as_is)
-    out["vision_model.head.attention.out_proj.weight"] = ((:vision, :head, :wo, :weight), :as_is)
-    out["vision_model.head.attention.out_proj.bias"] = ((:vision, :head, :wo, :bias), :as_is)
-    out["vision_model.head.layernorm.weight"] = ((:vision, :head, :layernorm, :weight), :as_is)
+    out["vision_model.head.attention.out_proj.weight"] = (
+        (:vision, :head, :wo, :weight), :as_is
+    )
+    out["vision_model.head.attention.out_proj.bias"] = (
+        (:vision, :head, :wo, :bias), :as_is
+    )
+    out["vision_model.head.layernorm.weight"] = (
+        (:vision, :head, :layernorm, :weight), :as_is
+    )
     out["vision_model.head.layernorm.bias"] = ((:vision, :head, :layernorm, :bias), :as_is)
-    out["vision_model.head.mlp.fc1.weight"] = ((:vision, :head, :mlp, :c_fc, :weight), :as_is)
+    out["vision_model.head.mlp.fc1.weight"] = (
+        (:vision, :head, :mlp, :c_fc, :weight), :as_is
+    )
     out["vision_model.head.mlp.fc1.bias"] = ((:vision, :head, :mlp, :c_fc, :bias), :as_is)
-    out["vision_model.head.mlp.fc2.weight"] = ((:vision, :head, :mlp, :c_proj, :weight), :as_is)
+    out["vision_model.head.mlp.fc2.weight"] = (
+        (:vision, :head, :mlp, :c_proj, :weight), :as_is
+    )
     out["vision_model.head.mlp.fc2.bias"] = ((:vision, :head, :mlp, :c_proj, :bias), :as_is)
 
     out["text_model.embeddings.token_embedding.weight"] = (
@@ -285,7 +315,9 @@ function siglip_state_dict_map(cfg::SiglipConfig)
         (:text, :position_embeddings), :transpose
     )
     _siglip_encoder_map!(out, "text_model", (:text,), cfg.text.num_hidden_layers)
-    out["text_model.final_layer_norm.weight"] = ((:text, :final_layer_norm, :weight), :as_is)
+    out["text_model.final_layer_norm.weight"] = (
+        (:text, :final_layer_norm, :weight), :as_is
+    )
     out["text_model.final_layer_norm.bias"] = ((:text, :final_layer_norm, :bias), :as_is)
     out["text_model.head.weight"] = ((:text, :head, :weight), :as_is)
     out["text_model.head.bias"] = ((:text, :head, :bias), :as_is)
@@ -307,7 +339,10 @@ function load_state_dict!(m::SiglipModel, weights::AbstractDict{String,<:Abstrac
 
     vhidden = m.config.vision.hidden_size
     conv = weights["vision_model.embeddings.patch_embedding.weight"]   # (hidden, C, P, P)
-    copyto!(m.vision.embeddings.patch_embeddings.projection.weight, reshape(Array(conv), vhidden, :))
+    copyto!(
+        m.vision.embeddings.patch_embeddings.projection.weight,
+        reshape(Array(conv), vhidden, :),
+    )
 
     head = m.vision.head
     copyto!(head.probe, vec(weights["vision_model.head.probe"]))

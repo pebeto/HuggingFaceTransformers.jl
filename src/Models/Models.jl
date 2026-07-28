@@ -1,5 +1,5 @@
 """
-    Allspark.Models
+    HuggingFaceTransformers.Models
 
 Concrete model architectures (`LlamaForCausalLM`, `BertModel`, ...) plus the
 state-dict mapping tables that translate HuggingFace parameter keys

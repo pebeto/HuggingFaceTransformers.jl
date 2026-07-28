@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Record the reference CLS feature for Allspark.jl's DINOv2 parity test.
+"""Record the reference CLS feature for HuggingFaceTransformers.jl's DINOv2 parity test.
 
 Usage:
     python3 test/fixtures/record_dinov2_parity.py [VARIANT]
@@ -11,7 +11,7 @@ Requirements:
 
 Why these choices (matches the other record_*_parity.py scripts):
 - attn_implementation="eager": disables SDPA so accumulation order matches
-  Allspark's naive softmax attention.
+  HuggingFaceTransformers's naive softmax attention.
 - torch_dtype=torch.float32: parity is asserted in fp32.
 
 The fixture stores a seeded random `pixel_values` tensor at the model's native

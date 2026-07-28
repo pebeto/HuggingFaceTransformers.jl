@@ -1,8 +1,8 @@
 using Test
 using Random
 using Flux
-using Allspark.Models
-using Allspark.Models: siglip_state_dict_map, load_state_dict!
+using HuggingFaceTransformers.Models
+using HuggingFaceTransformers.Models: siglip_state_dict_map, load_state_dict!
 
 function _tiny_siglip_config()
     return SiglipConfig(;
@@ -53,7 +53,9 @@ function _siglip_sd(cfg::SiglipConfig)
     np = (v.image_size ÷ v.patch_size)^2
     out = Dict{String,Array{Float32}}()
 
-    out["vision_model.embeddings.patch_embedding.weight"] = randn(Float32, vh, v.num_channels, v.patch_size, v.patch_size)
+    out["vision_model.embeddings.patch_embedding.weight"] = randn(
+        Float32, vh, v.num_channels, v.patch_size, v.patch_size
+    )
     out["vision_model.embeddings.patch_embedding.bias"] = randn(Float32, vh)
     out["vision_model.embeddings.position_embedding.weight"] = randn(Float32, np, vh)
     _siglip_encoder_sd!(out, "vision_model", v.num_hidden_layers, vh, v.intermediate_size)
@@ -72,7 +74,9 @@ function _siglip_sd(cfg::SiglipConfig)
     out["vision_model.head.mlp.fc2.bias"] = randn(Float32, vh)
 
     out["text_model.embeddings.token_embedding.weight"] = randn(Float32, t.vocab_size, th)
-    out["text_model.embeddings.position_embedding.weight"] = randn(Float32, t.max_position_embeddings, th)
+    out["text_model.embeddings.position_embedding.weight"] = randn(
+        Float32, t.max_position_embeddings, th
+    )
     _siglip_encoder_sd!(out, "text_model", t.num_hidden_layers, th, t.intermediate_size)
     out["text_model.final_layer_norm.weight"] = randn(Float32, th)
     out["text_model.final_layer_norm.bias"] = randn(Float32, th)
@@ -95,7 +99,9 @@ function _explicit_pool_attn(head, hs)
         for hh in 1:H
             r = ((hh - 1) * hd + 1):(hh * hd)
             qh = q[r]
-            scores = Float32[sum(qh .* head.wk(hs[:, k, n])[r]) / sqrt(Float32(hd)) for k in 1:np]
+            scores = Float32[
+                sum(qh .* head.wk(hs[:, k, n])[r]) / sqrt(Float32(hd)) for k in 1:np
+            ]
             w = softmax(scores)
             acc = zeros(Float32, hd)
             for k in 1:np
@@ -114,7 +120,8 @@ end
     @test length(m.vision.layers) == cfg.vision.num_hidden_layers
     @test length(m.text.layers) == cfg.text.num_hidden_layers
     # No CLS: vision embeddings hold only patch projection + position table.
-    @test fieldnames(typeof(m.vision.embeddings)) == (:patch_embeddings, :position_embeddings)
+    @test fieldnames(typeof(m.vision.embeddings)) ==
+        (:patch_embeddings, :position_embeddings)
     @test size(m.vision.embeddings.position_embeddings, 2) ==
         (cfg.vision.image_size ÷ cfg.vision.patch_size)^2
     for layer in m.vision.layers
@@ -129,7 +136,9 @@ end
     Random.seed!(0xC1)
     cfg = _tiny_siglip_config()
     m = SiglipModel(cfg)
-    px = randn(Float32, cfg.vision.num_channels, cfg.vision.image_size, cfg.vision.image_size, 2)
+    px = randn(
+        Float32, cfg.vision.num_channels, cfg.vision.image_size, cfg.vision.image_size, 2
+    )
     ids = rand(0:(cfg.text.vocab_size - 1), 5, 3)
 
     @test size(m.vision(px)) == (cfg.vision.hidden_size, 2)
@@ -177,7 +186,8 @@ end
 
     # A vision encoder layer + post_layernorm.
     l = m.vision.layers[1]
-    @test l.self_attn.wq.weight == sd["vision_model.encoder.layers.0.self_attn.q_proj.weight"]
+    @test l.self_attn.wq.weight ==
+        sd["vision_model.encoder.layers.0.self_attn.q_proj.weight"]
     @test l.self_attn.wo.bias == sd["vision_model.encoder.layers.0.self_attn.out_proj.bias"]
     @test l.input_layernorm.weight == sd["vision_model.encoder.layers.0.layer_norm1.weight"]
     @test l.mlp.c_fc.weight == sd["vision_model.encoder.layers.0.mlp.fc1.weight"]
@@ -188,7 +198,8 @@ end
         permutedims(sd["text_model.embeddings.token_embedding.weight"], (2, 1))
     @test m.text.position_embeddings ==
         permutedims(sd["text_model.embeddings.position_embedding.weight"], (2, 1))
-    @test m.text.layers[2].mlp.c_proj.weight == sd["text_model.encoder.layers.1.mlp.fc2.weight"]
+    @test m.text.layers[2].mlp.c_proj.weight ==
+        sd["text_model.encoder.layers.1.mlp.fc2.weight"]
     @test m.text.final_layer_norm.weight == sd["text_model.final_layer_norm.weight"]
     @test m.text.head.weight == sd["text_model.head.weight"]
     @test m.logit_scale[1] == only(sd["logit_scale"])
@@ -200,7 +211,9 @@ end
     cfg = _tiny_siglip_config()
     m = SiglipModel(cfg)
     load_state_dict!(m, _siglip_sd(cfg))
-    px = randn(Float32, cfg.vision.num_channels, cfg.vision.image_size, cfg.vision.image_size, 2)
+    px = randn(
+        Float32, cfg.vision.num_channels, cfg.vision.image_size, cfg.vision.image_size, 2
+    )
     ids = rand(0:(cfg.text.vocab_size - 1), 4, 3)
 
     l1 = m(px, ids)
@@ -209,7 +222,7 @@ end
     @test l2 ≈ l1 .+ 1.0f0
 
     img = m.vision(px)
-    normed = Allspark.Models.l2_normalize(img)
+    normed = HuggingFaceTransformers.Models.l2_normalize(img)
     @test all(isapprox.(vec(sqrt.(sum(abs2, normed; dims=1))), 1.0f0; atol=1.0e-5))
 end
 

@@ -1,4 +1,4 @@
-name = "Allspark"
+name = "HuggingFaceTransformers"
 uuid = "4edb9471-6902-4db8-ae5d-c53814454a23"
 authors = ["Jose Esparza <joseesparzadc@gmail.com>"]
 version = "0.1.0"
@@ -27,9 +27,9 @@ CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
 Metal = "dde4c033-4e86-420c-a63e-0dd931031962"
 
 [extensions]
-AllsparkAMDGPUExt = "AMDGPU"
-AllsparkCUDAExt = "CUDA"
-AllsparkMetalExt = "Metal"
+HuggingFaceTransformersAMDGPUExt = "AMDGPU"
+HuggingFaceTransformersCUDAExt = "CUDA"
+HuggingFaceTransformersMetalExt = "Metal"
 
 [compat]
 AMDGPU = "1"

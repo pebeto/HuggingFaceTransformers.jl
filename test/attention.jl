@@ -1,6 +1,6 @@
 using Test
 using Random
-using Allspark.Layers: sdpa, flash_sdpa, GQA, RoPE
+using HuggingFaceTransformers.Layers: sdpa, flash_sdpa, GQA, RoPE
 
 # Helper: build a random (q, k_t, v) triple in the layout sdpa/flash_sdpa
 # expect: q (sq, d, B), k_t (d, skv, B), v (skv, d, B).

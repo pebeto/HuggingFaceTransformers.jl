@@ -27,8 +27,8 @@ input with `replacement` (typically `▁`, U+2581). With
 input; `:first` prepends only when the input is the first chunk in a
 sequence; `:never` skips prepending entirely. This implementation
 treats all chunks the same way (`:first` and `:always` behave
-identically) since we don't track inter-chunk context — that matches
-the HF default for the Gemma / T5 family.
+identically) since we don't track inter-chunk context. That matches
+the HF default for the Gemma and T5 family.
 """
 struct MetaspacePreTokenizer <: PreTokenizer
     replacement::String
@@ -198,7 +198,7 @@ function apply_dec(::ByteFallbackDecoder, s::AbstractString)
                 write(out, b)
             end
         end
-        empty!(buf)
+        return empty!(buf)
     end
 
     i = firstindex(s)
@@ -227,7 +227,7 @@ end
 
 No-op concatenation marker. HF's tokenizer pipeline uses `Fuse` to
 indicate that prior steps' outputs should be joined into a single
-string; in Allspark every decoder already operates on the joined
+string; in HuggingFaceTransformers every decoder already operates on the joined
 string, so this is the identity.
 """
 struct FuseDecoder <: Decoder end
@@ -283,14 +283,14 @@ function apply_dec(d::StripDecoder, s::AbstractString)
 
     # Left strip: pat's end always falls on a char boundary, so SubString
     # from `pat_bytes + 1` is safe.
-    for _ in 1:d.start
+    for _ in 1:(d.start)
         startswith(str, pat) || break
         str = String(SubString(str, pat_bytes + 1))
     end
 
     # Right strip: walk to the char boundary just before where pat starts.
     # `prevind` skips over continuation bytes for multi-byte chars.
-    for _ in 1:d.stop
+    for _ in 1:(d.stop)
         endswith(str, pat) || break
         pat_start = ncodeunits(str) - pat_bytes + 1
         cut_end = prevind(str, pat_start)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Record reference logits for Allspark.jl's Phi-3 parity tests.
+"""Record reference logits for HuggingFaceTransformers.jl's Phi-3 parity tests.
 
 Usage:
     python3 test/fixtures/record_phi3_parity.py [VARIANT]
@@ -7,7 +7,7 @@ Usage:
 VARIANT is one of: mini-4k, medium-4k (default: mini-4k).
 
 Only the 4k context variants are recorded — the 128k variants use the
-`longrope` scaling that Allspark doesn't implement yet. Phi-3.5 also
+`longrope` scaling that HuggingFaceTransformers doesn't implement yet. Phi-3.5 also
 needs partial RoPE work.
 
 Requirements:
@@ -20,9 +20,9 @@ Resource cost (fp32 weights + activations):
 
 Why these choices (matches the other record_*_parity.py scripts):
 - attn_implementation="eager": disables SDPA / FlashAttention so the
-  accumulation order matches Allspark's naive softmax attention.
+  accumulation order matches HuggingFaceTransformers's naive softmax attention.
 - torch_dtype=torch.float32: parity is asserted in fp32.
-- add_special_tokens=False: Allspark's tokenizer doesn't auto-prepend
+- add_special_tokens=False: HuggingFaceTransformers's tokenizer doesn't auto-prepend
   any specials, so the recorder must not either.
 - trust_remote_code=True: Phi-3 still uses custom modeling code on Hub.
 """

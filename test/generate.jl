@@ -1,10 +1,10 @@
 using Test
 using Random
 using Flux
-using Allspark.Models
-using Allspark.Generation
-using Allspark.Tokenizers
-using Allspark.Tokenizers:
+using HuggingFaceTransformers.Models
+using HuggingFaceTransformers.Generation
+using HuggingFaceTransformers.Tokenizers
+using HuggingFaceTransformers.Tokenizers:
     BPEModel, ByteLevelPreTokenizer, ByteLevelDecoder, BYTES_TO_UNICODE, AddedToken
 
 function _tiny_lm(; vocab_size=16, seed=0x7777)
@@ -130,7 +130,7 @@ end
     end
     tk = Tokenizer(
         BPEModel(vocab, Tuple{String,String}[]),
-        Allspark.Tokenizers.IdentityNormalizer(),
+        HuggingFaceTransformers.Tokenizers.IdentityNormalizer(),
         ByteLevelPreTokenizer(false, true),
         ByteLevelDecoder(),
         AddedToken[],

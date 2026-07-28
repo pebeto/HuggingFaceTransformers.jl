@@ -1,7 +1,7 @@
 using Test
 using Random
 using Flux
-using Allspark.Layers: checkpoint, Checkpointed, GeluMLP, Linear
+using HuggingFaceTransformers.Layers: checkpoint, Checkpointed, GeluMLP, Linear
 
 @testset "checkpoint forward is transparent" begin
     Random.seed!(0x51)

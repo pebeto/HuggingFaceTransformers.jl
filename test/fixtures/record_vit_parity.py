@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Record reference logits for Allspark.jl's ViT parity test.
+"""Record reference logits for HuggingFaceTransformers.jl's ViT parity test.
 
 Usage:
     python3 test/fixtures/record_vit_parity.py [VARIANT]
@@ -11,11 +11,11 @@ Requirements:
 
 Why these choices (matches the other record_*_parity.py scripts):
 - attn_implementation="eager": disables SDPA so accumulation order matches
-  Allspark's naive softmax attention.
+  HuggingFaceTransformers's naive softmax attention.
 - torch_dtype=torch.float32: parity is asserted in fp32.
 
 The fixture stores a seeded random `pixel_values` tensor rather than a real
-image: image decode/resize is out of Allspark's scope, so the Julia side feeds
+image: image decode/resize is out of HuggingFaceTransformers's scope, so the Julia side feeds
 this exact tensor and we verify the model forward. `pixel_values` is saved as a
 C-order flat list plus its `(N, C, H, W)` shape.
 """

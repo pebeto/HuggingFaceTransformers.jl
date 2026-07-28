@@ -1,8 +1,9 @@
 using Test
 using Random
 using Flux
-using Allspark.Models
-using Allspark.Models: build_caches, gpt2_state_dict_map, load_state_dict!, load_into!
+using HuggingFaceTransformers.Models
+using HuggingFaceTransformers.Models:
+    build_caches, gpt2_state_dict_map, load_state_dict!, load_into!
 
 function _gpt2_synthetic_state_dict(cfg::GPT2Config)
     out = Dict{String,Array{Float32}}()
@@ -69,11 +70,12 @@ end
 
     @testset "decoder block uses LayerNorm (not RMSNorm)" begin
         for layer in lm.model.layers
-            @test layer.input_layernorm isa Allspark.Layers.LayerNorm
-            @test layer.post_attention_layernorm isa Allspark.Layers.LayerNorm
-            @test layer.mlp isa Allspark.Layers.GeluMLP
+            @test layer.input_layernorm isa HuggingFaceTransformers.Layers.LayerNorm
+            @test layer.post_attention_layernorm isa
+                HuggingFaceTransformers.Layers.LayerNorm
+            @test layer.mlp isa HuggingFaceTransformers.Layers.GeluMLP
         end
-        @test lm.model.norm isa Allspark.Layers.LayerNorm
+        @test lm.model.norm isa HuggingFaceTransformers.Layers.LayerNorm
     end
 
     @testset "forward shapes" begin

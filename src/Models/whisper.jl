@@ -37,8 +37,17 @@ struct Conv1d{W,B}
     pad::Int
 end
 
-function Conv1d(cin::Integer, cout::Integer, k::Integer; stride::Integer=1, pad::Integer=0, bias::Bool=true)
-    return Conv1d(zeros(Float32, cout, cin, k), bias ? zeros(Float32, cout) : nothing, stride, pad)
+function Conv1d(
+    cin::Integer,
+    cout::Integer,
+    k::Integer;
+    stride::Integer=1,
+    pad::Integer=0,
+    bias::Bool=true,
+)
+    return Conv1d(
+        zeros(Float32, cout, cin, k), bias ? zeros(Float32, cout) : nothing, stride, pad
+    )
 end
 
 function (c::Conv1d)(x::AbstractArray{<:Real,3})
@@ -223,8 +232,16 @@ function WhisperModel(cfg::WhisperConfig)
         zeros(Float32, d, cfg.max_source_positions),
         [
             WhisperEncoderLayer(
-                GQA(d, cfg.encoder_attention_heads, cfg.encoder_attention_heads, e_hd,
-                    nothing; qkv_bias=true, wo_bias=true, causal=false),
+                GQA(
+                    d,
+                    cfg.encoder_attention_heads,
+                    cfg.encoder_attention_heads,
+                    e_hd,
+                    nothing;
+                    qkv_bias=true,
+                    wo_bias=true,
+                    causal=false,
+                ),
                 LayerNorm(d),
                 GeluMLP(d, cfg.encoder_ffn_dim; approx=false),
                 LayerNorm(d),
@@ -238,8 +255,16 @@ function WhisperModel(cfg::WhisperConfig)
         zeros(Float32, d, cfg.max_target_positions),
         [
             WhisperDecoderLayer(
-                GQA(d, cfg.decoder_attention_heads, cfg.decoder_attention_heads, d_hd,
-                    nothing; qkv_bias=true, wo_bias=true, causal=true),
+                GQA(
+                    d,
+                    cfg.decoder_attention_heads,
+                    cfg.decoder_attention_heads,
+                    d_hd,
+                    nothing;
+                    qkv_bias=true,
+                    wo_bias=true,
+                    causal=true,
+                ),
                 LayerNorm(d),
                 WhisperCrossAttention(
                     Linear(d, d; bias=true),
@@ -307,7 +332,9 @@ function whisper_state_dict_map(cfg::WhisperConfig)
     end
     _ln_map!(out, "model.encoder.layer_norm", (:encoder, :layer_norm))
 
-    out["model.decoder.embed_tokens.weight"] = ((:decoder, :embed_tokens, :weight), :transpose)
+    out["model.decoder.embed_tokens.weight"] = (
+        (:decoder, :embed_tokens, :weight), :transpose
+    )
     out["model.decoder.embed_positions.weight"] = ((:decoder, :embed_positions), :transpose)
     for i in 0:(cfg.decoder_layers - 1)
         lp = (:decoder, :layers, i + 1)

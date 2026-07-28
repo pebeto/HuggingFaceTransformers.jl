@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Record reference sentence embeddings for Allspark.jl's embedding parity tests.
+"""Record reference sentence embeddings for HuggingFaceTransformers.jl's embedding parity tests.
 
 Usage:
     python3 test/fixtures/record_embedding_parity.py [VARIANT]
@@ -12,10 +12,10 @@ Requirements:
 
 Why these choices (matches the other record_*_parity.py scripts):
 - attn_implementation="eager": disables SDPA / FlashAttention so the
-  accumulation order matches Allspark's naive softmax attention.
+  accumulation order matches HuggingFaceTransformers's naive softmax attention.
 - torch_dtype=torch.float32: parity is asserted in fp32.
 
-The fixture records the special-token-bearing input IDs (Allspark feeds these
+The fixture records the special-token-bearing input IDs (HuggingFaceTransformers feeds these
 verbatim, so tokenizer special-token handling isn't on the critical path), the
 pooling strategy, the detected state-dict prefix, and the unit-norm reference
 vector. BGE uses CLS pooling; E5 uses mean pooling and a "query:" prefix.

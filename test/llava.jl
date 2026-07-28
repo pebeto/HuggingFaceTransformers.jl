@@ -1,8 +1,9 @@
 using Test
 using Random
 using Flux
-using Allspark.Models
-using Allspark.Models: load_state_dict!, llava_state_dict_map, forward_from_features
+using HuggingFaceTransformers.Models
+using HuggingFaceTransformers.Models:
+    load_state_dict!, llava_state_dict_map, forward_from_features
 
 # Stub vision tower: returns fixed patch features, ignoring pixel_values. The
 # LLaVA composition is vision-tower-agnostic, so this exercises it end-to-end
@@ -33,7 +34,7 @@ end
 function _synth_from_map(m, mapping)
     out = Dict{String,Array{Float32}}()
     for (k, (path, t)) in mapping
-        dst = Allspark.Models._resolve(m, path)
+        dst = HuggingFaceTransformers.Models._resolve(m, path)
         shp = t === :transpose ? reverse(size(dst)) : size(dst)
         out[k] = randn(Float32, shp...)
     end
@@ -47,7 +48,7 @@ const IMG = 19   # image placeholder token id (< vocab)
     text = randn(Float32, 8, 5, 1)
     imgf = randn(Float32, 8, 3, 1)
     ids = reshape([2, IMG, IMG, IMG, 5], :, 1)
-    merged = Allspark.Models._splice_image(text, imgf, ids, IMG)
+    merged = HuggingFaceTransformers.Models._splice_image(text, imgf, ids, IMG)
 
     @test merged[:, 1, 1] == text[:, 1, 1]     # text positions untouched
     @test merged[:, 5, 1] == text[:, 5, 1]
@@ -59,7 +60,7 @@ end
 @testset "_splice_image rejects a patch-count mismatch" begin
     text = randn(Float32, 8, 5, 1)
     ids = reshape([2, IMG, IMG, IMG, 5], :, 1)
-    @test_throws DimensionMismatch Allspark.Models._splice_image(
+    @test_throws DimensionMismatch HuggingFaceTransformers.Models._splice_image(
         text, randn(Float32, 8, 2, 1), ids, IMG
     )
 end
@@ -70,7 +71,7 @@ end
     x = randn(Float32, 6, 3, 2)
     got = proj(x)
     @test size(got) == (8, 3, 2)
-    h = Allspark.Layers._gelu_exact.(proj.linear_1(reshape(x, 6, 6)))
+    h = HuggingFaceTransformers.Layers._gelu_exact.(proj.linear_1(reshape(x, 6, 6)))
     @test got ≈ reshape(proj.linear_2(h), 8, 3, 2)
 end
 
@@ -89,7 +90,9 @@ end
 @testset "image features flow through (causally)" begin
     Random.seed!(0xF4)
     lm = _tiny_llava_llm()
-    m = LlavaForConditionalGeneration(_StubTower(zeros(Float32, 6, 3, 1)), lm, 6; image_token_index=IMG)
+    m = LlavaForConditionalGeneration(
+        _StubTower(zeros(Float32, 6, 3, 1)), lm, 6; image_token_index=IMG
+    )
     ids = reshape([2, IMG, IMG, IMG, 5], :, 1)
     f1 = randn(Float32, 6, 3, 1)
     f2 = randn(Float32, 6, 3, 1)
@@ -105,7 +108,9 @@ end
 @testset "load_state_dict! populates projector + language model" begin
     Random.seed!(0xF5)
     lm = _tiny_llava_llm()
-    m = LlavaForConditionalGeneration(_StubTower(zeros(Float32, 6, 3, 1)), lm, 6; image_token_index=IMG)
+    m = LlavaForConditionalGeneration(
+        _StubTower(zeros(Float32, 6, 3, 1)), lm, 6; image_token_index=IMG
+    )
     mp = llava_state_dict_map(m)
     sd = _synth_from_map(m, mp)
     load_state_dict!(m, sd)
@@ -123,7 +128,9 @@ end
 @testset "generate_multimodal greedy-decodes from a multimodal prompt" begin
     Random.seed!(0xF6)
     lm = _tiny_llava_llm()
-    m = LlavaForConditionalGeneration(_StubTower(randn(Float32, 6, 3, 1)), lm, 6; image_token_index=IMG)
+    m = LlavaForConditionalGeneration(
+        _StubTower(randn(Float32, 6, 3, 1)), lm, 6; image_token_index=IMG
+    )
     prompt = [2, IMG, IMG, IMG, 5]
 
     out = generate_multimodal(m, nothing, prompt; max_new_tokens=4)

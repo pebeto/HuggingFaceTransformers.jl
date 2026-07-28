@@ -3,14 +3,14 @@
 #
 #   julia --project=. test/gpu_attention.jl
 #
-# Loading CUDA (or AMDGPU/Metal) triggers the matching Allspark extension,
+# Loading CUDA (or AMDGPU/Metal) triggers the matching HuggingFaceTransformers extension,
 # which routes `sdpa` on device arrays to `flash_sdpa`. This checks that
 # the device path produces the same result as the CPU materialized path.
 using Test
 using Random
-using Allspark.Layers: sdpa, flash_sdpa
+using HuggingFaceTransformers.Layers: sdpa, flash_sdpa
 
-const GPU_BACKEND = get(ENV, "ALLSPARK_GPU_BACKEND", "cuda")
+const GPU_BACKEND = get(ENV, "HFT_GPU_BACKEND", "cuda")
 
 # Bring in the requested backend and return an `adapt`-style mover.
 to_device, backend_name = if GPU_BACKEND == "cuda"
@@ -23,7 +23,7 @@ elseif GPU_BACKEND == "metal"
     using Metal
     MtlArray, "Metal"
 else
-    error("Unknown ALLSPARK_GPU_BACKEND=$(GPU_BACKEND); use cuda|amdgpu|metal")
+    error("Unknown HFT_GPU_BACKEND=$(GPU_BACKEND); use cuda|amdgpu|metal")
 end
 
 function _qkv(sq, skv, d, batch; seed=0)

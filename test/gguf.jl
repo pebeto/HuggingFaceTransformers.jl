@@ -1,13 +1,13 @@
 using Test
-using Allspark.GGUF
-using Allspark.GGUF: load_gguf, GGUFFile
+using HuggingFaceTransformers.GGUF
+using HuggingFaceTransformers.GGUF: load_gguf, GGUFFile
 
 # Minimal GGUF writer, used only to build round-trip fixtures in-process.
 _w(io, x) = write(io, htol(x))
 
 function _write_str(io, s::AbstractString)
     _w(io, UInt64(ncodeunits(s)))
-    write(io, codeunits(s))
+    return write(io, codeunits(s))
 end
 
 # Metadata value types we exercise: u32=4, f32=6, bool=7, string=8, array=9,

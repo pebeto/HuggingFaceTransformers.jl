@@ -1,5 +1,5 @@
 """
-    Allspark.HFHub
+    HuggingFaceTransformers.HFHub
 
 Client for the HuggingFace Hub: resolves `org/repo[@revision]`, downloads
 `config.json`, `tokenizer.json`, and `model.safetensors` (including sharded
@@ -132,11 +132,11 @@ end
 
 Result of a HEAD probe against the Hub for a single file.
 
-* `etag`   — the file's content hash (LFS sha256 or git blob sha1). Used
+* `etag`: the file's content hash (LFS sha256 or git blob sha1). Used
              as the blob filename in the cache.
-* `commit` — the resolved commit SHA for the revision. Used as the
+* `commit`: the resolved commit SHA for the revision. Used as the
              snapshot folder name.
-* `size`   — file size in bytes if the Hub reported it.
+* `size`: file size in bytes if the Hub reported it.
 """
 struct FileMetadata
     etag::String
@@ -284,9 +284,9 @@ end
     snapshot_download(repo_id; revision="main", cache_dir=default_cache_dir(),
                       token=default_token(), verbose=false) -> String
 
-Download the files Allspark needs to load a model: `config.json`,
-`tokenizer.json` (and its companion JSON files), and the model weights —
-sharded (`model.safetensors.index.json` + each shard) or single
+Download the files HuggingFaceTransformers needs to load a model: `config.json`,
+`tokenizer.json` (and its companion JSON files), and the model weights,
+whether sharded (`model.safetensors.index.json` plus each shard) or single
 (`model.safetensors`).
 
 Returns the path to the snapshot directory.

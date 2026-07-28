@@ -2,8 +2,8 @@
     _resolve(obj, path::Tuple)
 
 Walk `path` into `obj`, dispatching `Symbol` steps through `getfield` and
-`Integer` steps through `getindex`. The walker is type-agnostic — any
-struct + indexed-container tree works.
+`Integer` steps through `getindex`. The walker is type-agnostic, so any
+struct and indexed-container tree works.
 """
 function _resolve(obj, path::Tuple)
     for step in path
@@ -17,8 +17,8 @@ end
 
 Apply a state-dict transform to an HF tensor:
 
-- `:as_is`     — return `src` unchanged.
-- `:transpose` — return `permutedims(src, (2, 1))`.
+- `:as_is`: return `src` unchanged.
+- `:transpose`: return `permutedims(src, (2, 1))`.
 
 Add new transforms here when a model demands them (e.g. weight unstacking
 for fused QKV checkpoints).

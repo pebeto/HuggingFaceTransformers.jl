@@ -1,14 +1,14 @@
 using Test
-using Allspark
+using HuggingFaceTransformers
 
-@testset verbose = true "Allspark.jl" begin
+@testset verbose = true "HuggingFaceTransformers.jl" begin
     @testset "loads cleanly" begin
-        @test isdefined(Allspark, :HFHub)
-        @test isdefined(Allspark, :GGUF)
-        @test isdefined(Allspark, :Tokenizers)
-        @test isdefined(Allspark, :Layers)
-        @test isdefined(Allspark, :Models)
-        @test isdefined(Allspark, :Generation)
+        @test isdefined(HuggingFaceTransformers, :HFHub)
+        @test isdefined(HuggingFaceTransformers, :GGUF)
+        @test isdefined(HuggingFaceTransformers, :Tokenizers)
+        @test isdefined(HuggingFaceTransformers, :Layers)
+        @test isdefined(HuggingFaceTransformers, :Models)
+        @test isdefined(HuggingFaceTransformers, :Generation)
     end
 
     @testset verbose = true "HFHub" begin
@@ -137,8 +137,8 @@ using Allspark
 
     # JET smoke pass: gated because JET 0.11+ currently fails to precompile
     # on Julia 1.12 (upstream LoweredCodeUtils method-signature drift).
-    # Set ALLSPARK_TEST_JET=1 once a compatible JET tag exists.
-    if get(ENV, "ALLSPARK_TEST_JET", "0") == "1"
+    # Set HFT_TEST_JET=1 once a compatible JET tag exists.
+    if get(ENV, "HFT_TEST_JET", "0") == "1"
         @testset "JET smoke" begin
             include("jet.jl")
         end
@@ -147,95 +147,95 @@ using Allspark
     # Integration parity tests: each variant needs an HF model download +
     # a recorded Python-side fixture. Gated so default `Pkg.test()` stays
     # fast and offline. Examples:
-    #   ALLSPARK_TEST_PARITY=1B           # one variant
-    #   ALLSPARK_TEST_PARITY=1B,3B        # several
-    #   ALLSPARK_TEST_PARITY=all          # everything with a fixture present
-    #   ALLSPARK_TEST_PARITY=1            # legacy alias for 1B
-    if !isempty(get(ENV, "ALLSPARK_TEST_PARITY", ""))
+    #   HFT_TEST_PARITY=1B           # one variant
+    #   HFT_TEST_PARITY=1B,3B        # several
+    #   HFT_TEST_PARITY=all          # everything with a fixture present
+    #   HFT_TEST_PARITY=1            # legacy alias for 1B
+    if !isempty(get(ENV, "HFT_TEST_PARITY", ""))
         @testset verbose = true "Llama parity" begin
             include("parity_llama.jl")
         end
     end
 
-    if !isempty(get(ENV, "ALLSPARK_TEST_PARITY_MISTRAL", ""))
+    if !isempty(get(ENV, "HFT_TEST_PARITY_MISTRAL", ""))
         @testset verbose = true "Mistral parity" begin
             include("parity_mistral.jl")
         end
     end
 
-    if !isempty(get(ENV, "ALLSPARK_TEST_PARITY_QWEN", ""))
+    if !isempty(get(ENV, "HFT_TEST_PARITY_QWEN", ""))
         @testset verbose = true "Qwen parity" begin
             include("parity_qwen.jl")
         end
     end
 
-    if !isempty(get(ENV, "ALLSPARK_TEST_PARITY_GEMMA", ""))
+    if !isempty(get(ENV, "HFT_TEST_PARITY_GEMMA", ""))
         @testset verbose = true "Gemma parity" begin
             include("parity_gemma.jl")
         end
     end
 
-    if !isempty(get(ENV, "ALLSPARK_TEST_PARITY_PHI3", ""))
+    if !isempty(get(ENV, "HFT_TEST_PARITY_PHI3", ""))
         @testset verbose = true "Phi3 parity" begin
             include("parity_phi3.jl")
         end
     end
 
-    if !isempty(get(ENV, "ALLSPARK_TEST_PARITY_GPT2", ""))
+    if !isempty(get(ENV, "HFT_TEST_PARITY_GPT2", ""))
         @testset verbose = true "GPT2 parity" begin
             include("parity_gpt2.jl")
         end
     end
 
-    if !isempty(get(ENV, "ALLSPARK_TEST_PARITY_NEOX", ""))
+    if !isempty(get(ENV, "HFT_TEST_PARITY_NEOX", ""))
         @testset verbose = true "NeoX parity" begin
             include("parity_neox.jl")
         end
     end
 
-    if !isempty(get(ENV, "ALLSPARK_TEST_PARITY_BERT", ""))
+    if !isempty(get(ENV, "HFT_TEST_PARITY_BERT", ""))
         @testset verbose = true "Bert parity" begin
             include("parity_bert.jl")
         end
     end
 
-    if !isempty(get(ENV, "ALLSPARK_TEST_PARITY_MIXTRAL", ""))
+    if !isempty(get(ENV, "HFT_TEST_PARITY_MIXTRAL", ""))
         @testset verbose = true "Mixtral parity" begin
             include("parity_mixtral.jl")
         end
     end
 
-    if !isempty(get(ENV, "ALLSPARK_TEST_PARITY_EMBEDDING", ""))
+    if !isempty(get(ENV, "HFT_TEST_PARITY_EMBEDDING", ""))
         @testset verbose = true "Embedding parity" begin
             include("parity_embedding.jl")
         end
     end
 
-    if !isempty(get(ENV, "ALLSPARK_TEST_PARITY_NOMIC", ""))
+    if !isempty(get(ENV, "HFT_TEST_PARITY_NOMIC", ""))
         @testset verbose = true "Nomic parity" begin
             include("parity_nomic.jl")
         end
     end
 
-    if !isempty(get(ENV, "ALLSPARK_TEST_PARITY_VIT", ""))
+    if !isempty(get(ENV, "HFT_TEST_PARITY_VIT", ""))
         @testset verbose = true "ViT parity" begin
             include("parity_vit.jl")
         end
     end
 
-    if !isempty(get(ENV, "ALLSPARK_TEST_PARITY_SIGLIP", ""))
+    if !isempty(get(ENV, "HFT_TEST_PARITY_SIGLIP", ""))
         @testset verbose = true "SigLIP parity" begin
             include("parity_siglip.jl")
         end
     end
 
-    if !isempty(get(ENV, "ALLSPARK_TEST_PARITY_DINOV2", ""))
+    if !isempty(get(ENV, "HFT_TEST_PARITY_DINOV2", ""))
         @testset verbose = true "DINOv2 parity" begin
             include("parity_dinov2.jl")
         end
     end
 
-    if !isempty(get(ENV, "ALLSPARK_TEST_PARITY_WHISPER", ""))
+    if !isempty(get(ENV, "HFT_TEST_PARITY_WHISPER", ""))
         @testset verbose = true "Whisper parity" begin
             include("parity_whisper.jl")
         end
@@ -243,9 +243,9 @@ using Allspark
 
     # Tokenizer parity is family-agnostic: a generic harness over recorded
     # (prompt, ids, decoded) tuples from HuggingFace's `transformers`.
-    #   ALLSPARK_TEST_PARITY_TOKENIZER=gpt2,bert-uncased  # subset
-    #   ALLSPARK_TEST_PARITY_TOKENIZER=all                # every fixture present
-    if !isempty(get(ENV, "ALLSPARK_TEST_PARITY_TOKENIZER", ""))
+    #   HFT_TEST_PARITY_TOKENIZER=gpt2,bert-uncased  # subset
+    #   HFT_TEST_PARITY_TOKENIZER=all                # every fixture present
+    if !isempty(get(ENV, "HFT_TEST_PARITY_TOKENIZER", ""))
         @testset verbose = true "Tokenizer parity" begin
             include("parity_tokenizer.jl")
         end

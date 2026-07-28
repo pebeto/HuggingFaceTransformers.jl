@@ -1,8 +1,8 @@
 using Test
 using Random
 using Flux
-using Allspark.Models
-using Allspark.Models:
+using HuggingFaceTransformers.Models
+using HuggingFaceTransformers.Models:
     TokenEmbedding, build_caches, llama_state_dict_map, load_state_dict!, load_into!
 
 function _synthetic_state_dict(cfg::LlamaConfig)

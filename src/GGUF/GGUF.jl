@@ -1,5 +1,5 @@
 """
-    Allspark.GGUF
+    HuggingFaceTransformers.GGUF
 
 Reader for the GGUF container format (llama.cpp checkpoints and community
 quantizations). [`load_gguf`](@ref) returns the metadata key/value table and

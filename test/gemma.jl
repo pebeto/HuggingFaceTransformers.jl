@@ -1,8 +1,9 @@
 using Test
 using Random
 using Flux
-using Allspark.Models
-using Allspark.Models: build_caches, gemma_state_dict_map, load_state_dict!, load_into!
+using HuggingFaceTransformers.Models
+using HuggingFaceTransformers.Models:
+    build_caches, gemma_state_dict_map, load_state_dict!, load_into!
 
 function _gemma_synthetic_state_dict(cfg::GemmaConfig)
     out = Dict{String,Array{Float32}}()
@@ -115,10 +116,10 @@ end
     lm = GemmaForCausalLM(cfg)
     layer = lm.model.layers[1]
     # Spot-check the four norm fields exist and are Gemma's variant.
-    @test layer.input_layernorm isa Allspark.Layers.GemmaRMSNorm
-    @test layer.post_attention_layernorm isa Allspark.Layers.GemmaRMSNorm
-    @test layer.pre_feedforward_layernorm isa Allspark.Layers.GemmaRMSNorm
-    @test layer.post_feedforward_layernorm isa Allspark.Layers.GemmaRMSNorm
+    @test layer.input_layernorm isa HuggingFaceTransformers.Layers.GemmaRMSNorm
+    @test layer.post_attention_layernorm isa HuggingFaceTransformers.Layers.GemmaRMSNorm
+    @test layer.pre_feedforward_layernorm isa HuggingFaceTransformers.Layers.GemmaRMSNorm
+    @test layer.post_feedforward_layernorm isa HuggingFaceTransformers.Layers.GemmaRMSNorm
 end
 
 @testset "gemma_state_dict_map" begin

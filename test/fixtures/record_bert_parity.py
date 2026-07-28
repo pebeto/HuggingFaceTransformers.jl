@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Record reference logits for Allspark.jl's BERT/RoBERTa parity tests.
+"""Record reference logits for HuggingFaceTransformers.jl's BERT/RoBERTa parity tests.
 
-Currently records RoBERTa only; BERT proper uses the WordPiece tokenizer
-which Allspark doesn't ship yet (Phase 3 work).
+Records RoBERTa only. WordPiece tokenization is supported, so BERT proper is
+no longer blocked on the tokenizer; it just has no reference recorded here.
 
 Usage:
     python3 test/fixtures/record_bert_parity.py [VARIANT]
@@ -19,7 +19,7 @@ Resource cost (fp32 weights + activations):
 
 Why these choices (matches the other record_*_parity.py scripts):
 - attn_implementation="eager": disables SDPA / FlashAttention so the
-  accumulation order matches Allspark's naive softmax attention.
+  accumulation order matches HuggingFaceTransformers's naive softmax attention.
 - torch_dtype=torch.float32: parity is asserted in fp32.
 
 The prompt contains an explicit `<mask>` token whose logits we compare;

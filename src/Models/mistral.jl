@@ -56,7 +56,7 @@ end
     MistralForCausalLM(cfg::MistralConfig)
 
 Materialize a fresh, randomly-initialized `MistralForCausalLM` matching the
-shapes in `cfg`. Weights are uninitialized for inference purposes — they
+shapes in `cfg`. Weights are uninitialized for inference purposes, so they
 must be replaced by a state-dict load before the model is meaningful.
 """
 function MistralForCausalLM(cfg::MistralConfig)
@@ -92,8 +92,8 @@ end
     build_caches(lm::MistralForCausalLM, max_seq, batch_size; eltype=Float32)
 
 Allocate one [`KVCache`](@ref) per decoder layer. The cache is sized to
-`max_seq` slots regardless of `sliding_window` — Phase 4 will introduce a
-ring-buffer cache to cap memory at `min(max_seq, sliding_window)`.
+`max_seq` slots regardless of `sliding_window`. A ring-buffer cache that
+capped memory at `min(max_seq, sliding_window)` is not implemented.
 """
 function build_caches(
     lm::MistralForCausalLM, max_seq::Integer, batch_size::Integer; eltype=Float32
@@ -110,7 +110,7 @@ end
 
 HuggingFace → internal parameter table for a Mistral model. The HF
 parameter naming is identical to Llama's, so this delegates to
-[`Allspark.Models._decoder_state_dict_map`](@ref).
+[`_decoder_state_dict_map`](@ref).
 """
 function mistral_state_dict_map(cfg::MistralConfig)
     return _decoder_state_dict_map(cfg.num_hidden_layers, cfg.tie_word_embeddings)

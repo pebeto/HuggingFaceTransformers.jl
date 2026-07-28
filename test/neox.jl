@@ -1,8 +1,9 @@
 using Test
 using Random
 using Flux
-using Allspark.Models
-using Allspark.Models: build_caches, neox_state_dict_map, load_state_dict!, load_into!
+using HuggingFaceTransformers.Models
+using HuggingFaceTransformers.Models:
+    build_caches, neox_state_dict_map, load_state_dict!, load_into!
 
 function _neox_synthetic_state_dict(cfg::NeoXConfig)
     out = Dict{String,Array{Float32}}()
@@ -72,10 +73,11 @@ end
 
     @testset "layer kit composition" begin
         for layer in lm.model.layers
-            @test layer isa Allspark.Models.NeoXDecoderLayer
-            @test layer.input_layernorm isa Allspark.Layers.LayerNorm
-            @test layer.post_attention_layernorm isa Allspark.Layers.LayerNorm
-            @test layer.mlp isa Allspark.Layers.GeluMLP
+            @test layer isa HuggingFaceTransformers.Models.NeoXDecoderLayer
+            @test layer.input_layernorm isa HuggingFaceTransformers.Layers.LayerNorm
+            @test layer.post_attention_layernorm isa
+                HuggingFaceTransformers.Layers.LayerNorm
+            @test layer.mlp isa HuggingFaceTransformers.Layers.GeluMLP
             # MHA: kv heads == q heads.
             @test layer.self_attn.num_heads_q == layer.self_attn.num_heads_k
             # Biases on Q/K/V and O.

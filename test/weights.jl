@@ -1,7 +1,7 @@
 using Test
 using JSON3
 using SafeTensors: serialize
-using Allspark.Models: load_weights
+using HuggingFaceTransformers.Models: load_weights
 
 @testset verbose = true "load_weights" begin
     @testset "single-file checkpoint" begin

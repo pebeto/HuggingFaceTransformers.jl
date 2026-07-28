@@ -1,5 +1,5 @@
 #!/usr/bin/env julia
-# Allspark.jl text-completion REPL backed by GPT-2.
+# HuggingFaceTransformers.jl text-completion REPL backed by GPT-2.
 #
 # Usage:
 #   julia --project=. examples/completion_gpt2.jl
@@ -14,11 +14,12 @@
 #   gpt2-large:  ~3 GB download,   ~3.5 GB RAM   (774M)
 #   gpt2-xl:     ~6 GB download,   ~7 GB RAM     (1558M)
 
-using Allspark
-using Allspark.HFHub: snapshot_download
-using Allspark.Tokenizers: load_tokenizer, encode, decode
-using Allspark.Models: load_weights, GPT2ForCausalLM, GPT2Config, load_state_dict!
-using Allspark.Generation: generate
+using HuggingFaceTransformers
+using HuggingFaceTransformers.HFHub: snapshot_download
+using HuggingFaceTransformers.Tokenizers: load_tokenizer, encode, decode
+using HuggingFaceTransformers.Models:
+    load_weights, GPT2ForCausalLM, GPT2Config, load_state_dict!
+using HuggingFaceTransformers.Generation: generate
 using JSON3
 
 const DEFAULT_MODEL = "gpt2"
@@ -72,7 +73,7 @@ function main(repo_id::AbstractString=DEFAULT_MODEL)
     load_state_dict!(lm, load_weights(snapshot_dir))
 
     println()
-    println("Allspark.jl completion REPL (GPT-2). Ctrl-D to exit.")
+    println("HuggingFaceTransformers.jl completion REPL (GPT-2). Ctrl-D to exit.")
     println("Type a prefix; the model continues it for up to 64 tokens.")
     println()
 

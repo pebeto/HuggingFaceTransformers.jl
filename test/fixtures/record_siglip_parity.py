@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Record reference logits for Allspark.jl's SigLIP parity test.
+"""Record reference logits for HuggingFaceTransformers.jl's SigLIP parity test.
 
 Usage:
     python3 test/fixtures/record_siglip_parity.py [VARIANT]
@@ -11,7 +11,7 @@ Requirements:
 
 Why these choices (matches the other record_*_parity.py scripts):
 - attn_implementation="eager": disables SDPA so accumulation order matches
-  Allspark's naive softmax attention.
+  HuggingFaceTransformers's naive softmax attention.
 - torch_dtype=torch.float32: parity is asserted in fp32.
 
 The fixture stores a seeded random `pixel_values` tensor (image decode/resize is

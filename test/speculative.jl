@@ -1,8 +1,8 @@
 using Test
 using Random
 using Flux
-using Allspark.Models
-using Allspark.Generation
+using HuggingFaceTransformers.Models
+using HuggingFaceTransformers.Generation
 
 function _spec_tiny_lm(; vocab_size=16, seed=0x7777)
     cfg = LlamaConfig(;

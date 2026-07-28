@@ -1,8 +1,8 @@
 using Test
 using Random
 using Flux
-using Allspark.Models
-using Allspark.Models: dinov2_state_dict_map, load_state_dict!
+using HuggingFaceTransformers.Models
+using HuggingFaceTransformers.Models: dinov2_state_dict_map, load_state_dict!
 
 function _tiny_dinov2_config(; num_register_tokens=2)
     return Dinov2Config(;

@@ -10,12 +10,12 @@ RoPE) but ships its weights in two fused tensors per layer:
 struct here reuses `DecoderModel` / `DecoderLayer` / `GQA` /
 `SiLUGatedMLP` unchanged; the slicing happens once in
 [`load_state_dict!`](@ref load_state_dict!(::Phi3ForCausalLM, ::AbstractDict)).
-The future Phase 4 path is to swap in a single fused matmul instead;
+Swapping in a single fused matmul would be faster; this is
 correctness-first today.
 
 Only `partial_rotary_factor == 1.0` (the Phi-3 / Phi-3.5 baseline) is
-supported. The loader rejects other values explicitly — `longrope`
-scaling and partial RoPE need their own implementation, deferred.
+supported. The loader rejects other values explicitly, since `longrope`
+scaling and partial RoPE each need their own implementation.
 """
 Base.@kwdef struct Phi3Config
     vocab_size::Int
@@ -35,7 +35,7 @@ end
 """
     Phi3ForCausalLM{C, M, H}
 
-`DecoderModel` trunk wrapped in a `Linear` LM head — the same shape as
+`DecoderModel` trunk wrapped in a `Linear` LM head, the same shape as
 `LlamaForCausalLM`, distinguished by config type so dispatch picks the
 right loader.
 """
@@ -110,7 +110,7 @@ end
 Pure-data state-dict map for the entries Phi-3 stores 1:1 with the
 internal model: layernorms, `o_proj`, `down_proj`, embeddings,
 final norm, and (when untied) `lm_head`. The fused `qkv_proj` and
-`gate_up_proj` weights are NOT in this table — they're handled by the
+`gate_up_proj` weights are NOT in this table. They are handled by the
 slicing pass in [`load_state_dict!`](@ref).
 """
 function phi3_state_dict_map(cfg::Phi3Config)

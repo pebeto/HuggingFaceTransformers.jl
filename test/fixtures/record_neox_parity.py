@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Record reference logits for Allspark.jl's GPT-NeoX (Pythia) parity tests.
+"""Record reference logits for HuggingFaceTransformers.jl's GPT-NeoX (Pythia) parity tests.
 
 Usage:
     python3 test/fixtures/record_neox_parity.py [VARIANT]
@@ -18,9 +18,9 @@ Resource cost (fp32 weights + activations):
 
 Why these choices (matches the other record_*_parity.py scripts):
 - attn_implementation="eager": disables SDPA / FlashAttention so the
-  accumulation order matches Allspark's naive softmax attention.
+  accumulation order matches HuggingFaceTransformers's naive softmax attention.
 - torch_dtype=torch.float32: parity is asserted in fp32.
-- add_special_tokens=False: Allspark's tokenizer doesn't auto-prepend
+- add_special_tokens=False: HuggingFaceTransformers's tokenizer doesn't auto-prepend
   any specials, so the recorder must not either.
 """
 import json

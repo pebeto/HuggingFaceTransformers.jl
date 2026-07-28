@@ -1,11 +1,11 @@
 using Test
 using Random
 using Flux
-using Allspark.Models
-using Allspark.Models:
+using HuggingFaceTransformers.Models
+using HuggingFaceTransformers.Models:
     bert_state_dict_map, load_state_dict!, mean_pool, cls_pool, l2_normalize
-using Allspark.Tokenizers: Tokenizer
-using Allspark.Tokenizers:
+using HuggingFaceTransformers.Tokenizers: Tokenizer
+using HuggingFaceTransformers.Tokenizers:
     BPEModel,
     ByteLevelPreTokenizer,
     ByteLevelDecoder,

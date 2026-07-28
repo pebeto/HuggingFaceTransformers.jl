@@ -1,8 +1,9 @@
 using Test
 using Random
 using Flux
-using Allspark.Models
-using Allspark.Models: build_caches, phi3_state_dict_map, load_state_dict!, load_into!
+using HuggingFaceTransformers.Models
+using HuggingFaceTransformers.Models:
+    build_caches, phi3_state_dict_map, load_state_dict!, load_into!
 
 function _phi3_synthetic_state_dict(cfg::Phi3Config)
     out = Dict{String,Array{Float32}}()

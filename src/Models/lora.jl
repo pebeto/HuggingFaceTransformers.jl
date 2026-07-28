@@ -64,7 +64,15 @@ Base.@kwdef struct LoraConfig
     task_type::String = "CAUSAL_LM"
 end
 
-lora_scaling(c::LoraConfig) = Float32(c.use_rslora ? c.lora_alpha / sqrt(c.r) : c.lora_alpha / c.r)
+"""
+    lora_scaling(c::LoraConfig) -> Float32
+
+The multiplier applied to the low-rank update `B*A`. Standard LoRA uses
+`lora_alpha / r`; rank-stabilized LoRA (`use_rslora=true`) uses
+`lora_alpha / sqrt(r)` so the update's magnitude stays comparable as `r` grows.
+"""
+lora_scaling(c::LoraConfig) =
+    Float32(c.use_rslora ? c.lora_alpha / sqrt(c.r) : c.lora_alpha / c.r)
 
 # Minimal safetensors writer (SafeTensors.jl only reads). Writes F32 tensors in
 # C-order so a standard safetensors reader reloads the same logical arrays.
@@ -205,7 +213,9 @@ function apply_lora!(model, adapter_dir::AbstractString, state_dict_map::Abstrac
         linear = _resolve(model, path[1:(end - 1)])
         delta = scaling .* (B * A)
         size(delta) == size(linear.weight) || throw(
-            DimensionMismatch("LoRA $(mp): update $(size(delta)) ≠ weight $(size(linear.weight))"),
+            DimensionMismatch(
+                "LoRA $(mp): update $(size(delta)) ≠ weight $(size(linear.weight))"
+            ),
         )
         linear.weight .+= delta
         applied += 1

@@ -1,5 +1,5 @@
 #!/usr/bin/env julia
-# Allspark.jl REPL chat against a Mistral model.
+# HuggingFaceTransformers.jl REPL chat against a Mistral model.
 #
 # Usage:
 #   julia --project=. examples/repl_chat_mistral.jl
@@ -13,11 +13,12 @@
 #   Mistral-7B-Instruct-v0.3:  ~30 GB download, ~30 GB peak RAM.
 # Subsequent runs reuse the cached weights and start in seconds.
 
-using Allspark
-using Allspark.HFHub: snapshot_download
-using Allspark.Tokenizers: load_tokenizer, encode, decode
-using Allspark.Models: load_weights, MistralForCausalLM, MistralConfig, load_state_dict!
-using Allspark.Generation: generate, ChatTemplate
+using HuggingFaceTransformers
+using HuggingFaceTransformers.HFHub: snapshot_download
+using HuggingFaceTransformers.Tokenizers: load_tokenizer, encode, decode
+using HuggingFaceTransformers.Models:
+    load_weights, MistralForCausalLM, MistralConfig, load_state_dict!
+using HuggingFaceTransformers.Generation: generate, ChatTemplate
 using JSON3
 
 const DEFAULT_MODEL = "mistralai/Mistral-7B-Instruct-v0.2"
@@ -77,7 +78,7 @@ function load_chat_template(snapshot_dir::AbstractString)
         try
             return ChatTemplate(String(template_source)), bos, eos
         catch err
-            @warn """Bundled chat_template uses Jinja features Allspark
+            @warn """Bundled chat_template uses Jinja features HuggingFaceTransformers
                   doesn't support yet. Falling back to a plain Mistral
                   [INST] template; tool calls and other advanced template
                   features won't work.""" err
@@ -131,7 +132,9 @@ function main(repo_id::AbstractString=DEFAULT_MODEL)
 
     messages = Dict{String,String}[]
     println()
-    println("Allspark.jl REPL chat (Mistral). Ctrl-D to exit, /reset to clear history.")
+    println(
+        "HuggingFaceTransformers.jl REPL chat (Mistral). Ctrl-D to exit, /reset to clear history.",
+    )
     println()
 
     while true

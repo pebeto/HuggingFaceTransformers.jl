@@ -1,5 +1,5 @@
 using Test
-using Allspark.Generation: ChatTemplate, apply_chat_template
+using HuggingFaceTransformers.Generation: ChatTemplate, apply_chat_template
 
 @testset verbose = true "building blocks" begin
     @testset "literals & basic output" begin

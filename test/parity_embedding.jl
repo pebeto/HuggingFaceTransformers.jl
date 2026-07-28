@@ -1,7 +1,8 @@
 using Test
 using JSON3
-using Allspark.HFHub: snapshot_download
-using Allspark.Models: load_weights, BertConfig, BertEmbeddingModel, embed, load_state_dict!
+using HuggingFaceTransformers.HFHub: snapshot_download
+using HuggingFaceTransformers.Models:
+    load_weights, BertConfig, BertEmbeddingModel, embed, load_state_dict!
 
 # Sentence-embedding parity against HF (sentence-transformers pooling).
 # Variants are BERT-family checkpoints; each fixture records the pooling
@@ -25,7 +26,7 @@ function _selected_variants(raw::AbstractString)
     return parts
 end
 
-const SELECTED = _selected_variants(get(ENV, "ALLSPARK_TEST_PARITY_EMBEDDING", ""))
+const SELECTED = _selected_variants(get(ENV, "HFT_TEST_PARITY_EMBEDDING", ""))
 
 function _load_embedding_config(snapshot_dir::AbstractString, fixture)
     raw = JSON3.read(read(joinpath(snapshot_dir, "config.json"), String))
@@ -81,7 +82,7 @@ end
 
 unknown = filter(v -> !(v in [first(t) for t in VARIANTS]), SELECTED)
 isempty(unknown) || error(
-    "Unknown ALLSPARK_TEST_PARITY_EMBEDDING variant(s): $(unknown). " *
+    "Unknown HFT_TEST_PARITY_EMBEDDING variant(s): $(unknown). " *
     "Valid: $(String[first(v) for v in VARIANTS]) or \"all\".",
 )
 

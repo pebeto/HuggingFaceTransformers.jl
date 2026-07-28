@@ -1,14 +1,14 @@
 using JET
-using Allspark
+using HuggingFaceTransformers
 
 JET.test_package(
-    Allspark;
+    HuggingFaceTransformers;
     target_modules=(
-        Allspark,
-        Allspark.HFHub,
-        Allspark.Tokenizers,
-        Allspark.Layers,
-        Allspark.Models,
-        Allspark.Generation,
+        HuggingFaceTransformers,
+        HuggingFaceTransformers.HFHub,
+        HuggingFaceTransformers.Tokenizers,
+        HuggingFaceTransformers.Layers,
+        HuggingFaceTransformers.Models,
+        HuggingFaceTransformers.Generation,
     ),
 )

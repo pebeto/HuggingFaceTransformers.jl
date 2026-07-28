@@ -1,9 +1,10 @@
 using Test
 using Random
 using Flux
-using Allspark.Models
-using Allspark.Models: build_caches, mixtral_state_dict_map, load_state_dict!, load_into!
-using Allspark.Layers: MoEMLP
+using HuggingFaceTransformers.Models
+using HuggingFaceTransformers.Models:
+    build_caches, mixtral_state_dict_map, load_state_dict!, load_into!
+using HuggingFaceTransformers.Layers: MoEMLP
 
 function _mixtral_synthetic_state_dict(cfg::MixtralConfig)
     out = Dict{String,Array{Float32}}()
@@ -69,7 +70,7 @@ end
 
     @testset "every decoder layer holds an MoE MLP" begin
         for layer in lm.model.layers
-            @test layer.mlp isa Allspark.Layers.MoEMLP
+            @test layer.mlp isa HuggingFaceTransformers.Layers.MoEMLP
             @test length(layer.mlp.experts) == cfg.num_local_experts
             @test layer.mlp.num_experts == cfg.num_local_experts
             @test layer.mlp.top_k == cfg.num_experts_per_tok

@@ -8,7 +8,7 @@ GPT-2 predates most of the Llama-family conventions:
 
 - `LayerNorm` (with bias) for normalization, not `RMSNorm`.
 - Learned absolute position embeddings added to token embeddings in the
-  trunk — no RoPE in the attention layer.
+  trunk, with no RoPE in the attention layer.
 - Non-gated GELU MLP (tanh approximation), not SwiGLU.
 - Fused `c_attn.weight` Q/K/V projection stored as a single tensor.
 - HF stores GPT-2 linear weights in `Conv1D` orientation `(in, out)`,
@@ -151,7 +151,7 @@ internal model. The HF naming is `transformer.h.{i}.…`, not Llama's
 `model.layers.{i}.…`.
 
 The fused `c_attn.weight` / `c_attn.bias` (concatenated Q/K/V) and the
-Conv1D-orientation weights (`c_proj`, `c_fc`) are NOT in this table —
+Conv1D-orientation weights (`c_proj`, `c_fc`) are NOT in this table.
 [`load_state_dict!`](@ref) slices and transposes them at load time.
 LayerNorm biases ARE in this table because they're 1:1 vectors.
 """

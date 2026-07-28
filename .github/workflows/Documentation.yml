@@ -1,0 +1,46 @@
+name: Documentation
+
+# Two published versions, both tracking a branch:
+#
+#   dev    -> https://pebeto.github.io/HuggingFaceTransformers.jl/dev
+#   master -> https://pebeto.github.io/HuggingFaceTransformers.jl/stable
+#
+# docs/make.jl reads GITHUB_REF_NAME to pick the (devbranch, devurl) pair, so
+# the branch this runs on decides which directory gets written. Tags are
+# deliberately not a trigger: Documenter would deploy a tag to `stable` as well,
+# and two sources writing the same directory is how you get a confusing site.
+on:
+  push:
+    branches: [master, dev]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
+jobs:
+  docs:
+    name: Build and deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: read
+      statuses: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.12'
+      - uses: julia-actions/cache@v2
+      - name: Install docs dependencies
+        run: |
+          julia --project=docs -e '
+            using Pkg
+            Pkg.develop(PackageSpec(path=pwd()))
+            Pkg.instantiate()'
+      - name: Build and deploy
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DOCUMENTER_KEY: ${{ secrets.DOCUMENTER_KEY }}
+        run: julia --project=docs docs/make.jl

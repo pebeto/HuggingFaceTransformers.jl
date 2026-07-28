@@ -1,5 +1,5 @@
 #!/usr/bin/env julia
-# Allspark.jl LoRA fine-tuning example — a plain Flux training loop, not a
+# HuggingFaceTransformers.jl LoRA fine-tuning example — a plain Flux training loop, not a
 # framework. It ties together three pieces: LoRA adapters (train only low-rank
 # A/B, freeze the base), gradient checkpointing (recompute activations in the
 # backward pass to save memory), and PEFT-format adapter saving.
@@ -15,8 +15,8 @@
 using Random
 using Flux
 using Functors: isleaf
-using Allspark.Models
-using Allspark.Layers: Linear, checkpoint
+using HuggingFaceTransformers.Models
+using HuggingFaceTransformers.Layers: Linear, checkpoint
 
 const VOCAB = 32
 const SEQLEN = 16
@@ -73,7 +73,9 @@ function main()
         Flux.freeze!(layer.post_attention_layernorm)
     end
 
-    println("Fine-tuning a $(cfg.num_hidden_layers)-layer LoRA (rank $(RANK)) to memorize a sequence...")
+    println(
+        "Fine-tuning a $(cfg.num_hidden_layers)-layer LoRA (rank $(RANK)) to memorize a sequence...",
+    )
     init_loss = nexttoken_loss(model, data)
     for epoch in 1:100
         loss, grads = Flux.withgradient(m -> nexttoken_loss(m, data), model)
@@ -91,17 +93,23 @@ function main()
         for (field, name) in
             ((:wq, "q_proj"), (:wk, "k_proj"), (:wv, "v_proj"), (:wo, "o_proj"))
             ll = getfield(layer.self_attn, field)
-            module_weights["model.layers.$(i - 1).self_attn.$(name)"] = (ll.lora_A, ll.lora_B)
+            module_weights["model.layers.$(i - 1).self_attn.$(name)"] = (
+                ll.lora_A, ll.lora_B
+            )
         end
     end
     out_dir = mktempdir()
     save_lora(
         out_dir,
-        LoraConfig(; r=RANK, lora_alpha=ALPHA, target_modules=["q_proj", "k_proj", "v_proj", "o_proj"]),
+        LoraConfig(;
+            r=RANK,
+            lora_alpha=ALPHA,
+            target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
+        ),
         module_weights,
     )
     println("Saved PEFT adapter to $(out_dir)")
-    println("  files: ", join(readdir(out_dir), ", "))
+    return println("  files: ", join(readdir(out_dir), ", "))
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__

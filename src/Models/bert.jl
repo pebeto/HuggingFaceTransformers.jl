@@ -8,7 +8,7 @@ snake_case).
 BERT and RoBERTa are encoder-only transformers; they differ from
 decoder-only models in three architecturally significant ways:
 
-- **Bidirectional attention** — no causal mask. Every query attends to
+- **Bidirectional attention**: no causal mask. Every query attends to
   every key. Wired up via the `causal=false` flag on `GQA`.
 - **Post-norm** decoder block: LayerNorm comes *after* the residual add,
   not before. See [`BertEncoderLayer`](@ref).
@@ -133,7 +133,7 @@ Flux.@layer BertEncoder
     BertModel{E, EN}
 
 Encoder-only transformer trunk: embeddings → encoder stack. Returns
-the per-token hidden states (no pooler — sequence classification heads
+the per-token hidden states (no pooler, since sequence classification heads
 are out of scope for now).
 """
 struct BertModel{E,EN}

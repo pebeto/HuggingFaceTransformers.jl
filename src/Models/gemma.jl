@@ -40,8 +40,8 @@ end
 """
     GemmaDecoderLayer{A, N1, N2, N3, N4, M}
 
-A Gemma2 decoder block with four RMSNorms — pre and post for both
-attention and MLP — instead of Llama's pre-only pair. The forward is:
+A Gemma2 decoder block with four RMSNorms (pre and post for both attention
+and MLP) instead of Llama's pre-only pair. The forward is:
 
 ```
 x = x + post_attention_layernorm(self_attn(input_layernorm(x)))

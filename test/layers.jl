@@ -1,9 +1,9 @@
 using Test
 using Random
-using Allspark.Layers
-# Flux exports its own `LayerNorm`; pull in Allspark's explicitly so the
+using HuggingFaceTransformers.Layers
+# Flux exports its own `LayerNorm`; pull in HuggingFaceTransformers's explicitly so the
 # `LayerNorm` testset binds the right one.
-using Allspark.Layers: LayerNorm
+using HuggingFaceTransformers.Layers: LayerNorm
 using Flux
 using NNlib
 using Statistics
@@ -20,7 +20,7 @@ using Statistics
     @test size(y) == size(x)
 
     # RMS values of normalized outputs should be approximately 1
-    rms_val = sqrt.(sum(y .^ 2, dims=1) ./ dim)
+    rms_val = sqrt.(sum(y .^ 2; dims=1) ./ dim)
     @test all(isapprox.(rms_val, 1.0f0, atol=1e-3))
 
     # Test gradient flow and parameter updates
@@ -220,7 +220,7 @@ end
     @test all(cache.k[:, :, 5:10, :] .== 0)
 
     # Parity check: output from step-by-step decoding with cache must match prefill of the full 4-token sequence
-    x_full = cat(x1, x2, dims=2)
+    x_full = cat(x1, x2; dims=2)
     out_full = gqa(x_full)
 
     # Since GQA has randomly initialized weights, out_full[:, 4:4, :] should match out2 exactly (modulo floating point error)
@@ -501,7 +501,7 @@ end
 end
 
 @testset "KVCache affordances" begin
-    using Allspark.Layers: reset!
+    using HuggingFaceTransformers.Layers: reset!
 
     cache = KVCache(8, 2, 16, 4)
     @test eltype(cache) === Float32

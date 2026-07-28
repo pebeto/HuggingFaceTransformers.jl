@@ -1,5 +1,5 @@
 #!/usr/bin/env julia
-# Allspark.jl REPL chat against a Qwen2 / Qwen2.5 model.
+# HuggingFaceTransformers.jl REPL chat against a Qwen2 / Qwen2.5 model.
 #
 # Usage:
 #   julia --project=. examples/repl_chat_qwen.jl
@@ -13,11 +13,12 @@
 #   Qwen2.5-3B-Instruct:   ~12 GB download, ~14 GB RAM   (untied)
 #   Qwen2.5-7B-Instruct:   ~30 GB download, ~32 GB RAM   (untied)
 
-using Allspark
-using Allspark.HFHub: snapshot_download
-using Allspark.Tokenizers: load_tokenizer, encode, decode
-using Allspark.Models: load_weights, QwenForCausalLM, QwenConfig, load_state_dict!
-using Allspark.Generation: generate, ChatTemplate
+using HuggingFaceTransformers
+using HuggingFaceTransformers.HFHub: snapshot_download
+using HuggingFaceTransformers.Tokenizers: load_tokenizer, encode, decode
+using HuggingFaceTransformers.Models:
+    load_weights, QwenForCausalLM, QwenConfig, load_state_dict!
+using HuggingFaceTransformers.Generation: generate, ChatTemplate
 using JSON3
 
 const DEFAULT_MODEL = "Qwen/Qwen2.5-0.5B-Instruct"
@@ -80,7 +81,7 @@ function load_chat_template(snapshot_dir::AbstractString)
         try
             return ChatTemplate(String(template_source))
         catch err
-            @warn """Bundled chat_template uses Jinja features Allspark
+            @warn """Bundled chat_template uses Jinja features HuggingFaceTransformers
                   doesn't support yet. Falling back to a plain ChatML
                   template; tool calls and other advanced features
                   won't work.""" err
@@ -133,7 +134,9 @@ function main(repo_id::AbstractString=DEFAULT_MODEL)
 
     messages = Dict{String,String}[]
     println()
-    println("Allspark.jl REPL chat (Qwen). Ctrl-D to exit, /reset to clear history.")
+    println(
+        "HuggingFaceTransformers.jl REPL chat (Qwen). Ctrl-D to exit, /reset to clear history.",
+    )
     println()
 
     while true

@@ -1,8 +1,12 @@
 using Test
 using JSON3
-using Allspark.HFHub: snapshot_download
-using Allspark.Models:
-    load_weights, SiglipModel, SiglipConfig, SiglipVisionConfig, SiglipTextConfig,
+using HuggingFaceTransformers.HFHub: snapshot_download
+using HuggingFaceTransformers.Models:
+    load_weights,
+    SiglipModel,
+    SiglipConfig,
+    SiglipVisionConfig,
+    SiglipTextConfig,
     load_state_dict!
 
 # SigLIP parity: the full image + text → logits path. The fixture stores the
@@ -25,7 +29,7 @@ function _selected_variants(raw::AbstractString)
     return parts
 end
 
-const SELECTED = _selected_variants(get(ENV, "ALLSPARK_TEST_PARITY_SIGLIP", ""))
+const SELECTED = _selected_variants(get(ENV, "HFT_TEST_PARITY_SIGLIP", ""))
 
 function _load_siglip_config(snapshot_dir::AbstractString)
     raw = JSON3.read(read(joinpath(snapshot_dir, "config.json"), String))
@@ -95,7 +99,7 @@ end
 
 unknown = filter(v -> !(v in [first(t) for t in VARIANTS]), SELECTED)
 isempty(unknown) || error(
-    "Unknown ALLSPARK_TEST_PARITY_SIGLIP variant(s): $(unknown). " *
+    "Unknown HFT_TEST_PARITY_SIGLIP variant(s): $(unknown). " *
     "Valid: $(String[first(v) for v in VARIANTS]) or \"all\".",
 )
 

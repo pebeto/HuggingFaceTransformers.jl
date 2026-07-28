@@ -2,12 +2,12 @@ using Test
 using Random
 using Flux
 using BFloat16s: BFloat16
-using Allspark.Models
-using Allspark.Models: build_caches, fp16, bf16, fp32, convert_eltype
+using HuggingFaceTransformers.Models
+using HuggingFaceTransformers.Models: build_caches, fp16, bf16, fp32, convert_eltype
 
 # BFloat16 deadlocks in CPU LLVM codegen on Julia 1.12.6 (Float16 is fine).
-# Gate the bf16 cases; opt in with ALLSPARK_TEST_BFLOAT16=1 where it works.
-const BF16_OK = get(ENV, "ALLSPARK_TEST_BFLOAT16", "0") == "1"
+# Gate the bf16 cases; opt in with HFT_TEST_BFLOAT16=1 where it works.
+const BF16_OK = get(ENV, "HFT_TEST_BFLOAT16", "0") == "1"
 
 # Tiny Llama so the conversion covers a real mix of layers and scalars.
 function _tiny_llama_for_dtype()

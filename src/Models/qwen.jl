@@ -15,8 +15,8 @@ carried here:
   source config; the parity loader resolves both fields and passes either
   the window size or `nothing` here.
 
-Default `rope_theta` is `1_000_000.0` (Qwen2/2.5 baseline) — overridden
-per-checkpoint by `config.json`.
+Default `rope_theta` is `1_000_000.0` (the Qwen2 and Qwen2.5 baseline),
+overridden per-checkpoint by `config.json`.
 """
 Base.@kwdef struct QwenConfig
     vocab_size::Int
@@ -60,7 +60,7 @@ end
     QwenForCausalLM(cfg::QwenConfig)
 
 Materialize a fresh, randomly-initialized `QwenForCausalLM` matching the
-shapes in `cfg`. Weights are uninitialized for inference purposes — they
+shapes in `cfg`. Weights are uninitialized for inference purposes, so they
 must be replaced by a state-dict load before the model is meaningful.
 """
 function QwenForCausalLM(cfg::QwenConfig)
@@ -112,7 +112,7 @@ end
     qwen_state_dict_map(cfg::QwenConfig) -> Dict{String, Tuple{Tuple, Symbol}}
 
 HuggingFace → internal parameter table for a Qwen model. Delegates to
-[`Allspark.Models._decoder_state_dict_map`](@ref) with `qkv_bias=true`,
+[`_decoder_state_dict_map`](@ref) with `qkv_bias=true`,
 so the table includes `q_proj.bias`, `k_proj.bias`, and `v_proj.bias`
 entries that other Llama-family models don't have.
 """

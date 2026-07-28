@@ -42,8 +42,8 @@ where any out-of-vocabulary byte gets encoded as a `<0xHH>` token, with
 `byte_to_id[byte + 1]` giving the HF ID of that fallback token.
 
 The `trie` is built once at construction and indexes only the original
-vocab (not added tokens — those are matched upstream in
-`_split_on_added`).
+vocab, not added tokens, which are matched upstream in
+`_split_on_added`.
 """
 mutable struct UnigramModel
     vocab::Dict{String,Int}
@@ -137,9 +137,9 @@ and (when `byte_fallback` is true) adds a single-byte fallback
 transition using the `<0xHH>` token. Picks the highest-log-probability
 backtrack path.
 
-If no path reaches the end of `text` — pathological with neither
-matches nor byte fallback — returns the `unk_id` token alone (or an
-empty vector when no `unk` is configured).
+If no path reaches the end of `text`, which is pathological and needs
+neither matches nor byte fallback, this returns the `unk_id` token alone (or
+an empty vector when no `unk` is configured).
 """
 function encode_word(model::UnigramModel, text::AbstractString)
     isempty(text) && return Int[]

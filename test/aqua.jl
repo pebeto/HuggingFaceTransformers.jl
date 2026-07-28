@@ -1,8 +1,8 @@
 using Aqua
-using Allspark
+using HuggingFaceTransformers
 
 Aqua.test_all(
-    Allspark;
+    HuggingFaceTransformers;
     ambiguities=false,
     # Several declared deps (Flux, NNlib, SafeTensors, ...) are wired up
     # across multiple submodules; re-enable once every declared dep is

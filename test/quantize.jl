@@ -1,7 +1,7 @@
 using Test
 using Random
-using Allspark.Models
-using Allspark.Models: Linear, QuantizedInt8Matrix, quantize_int8
+using HuggingFaceTransformers.Models
+using HuggingFaceTransformers.Models: Linear, QuantizedInt8Matrix, quantize_int8
 
 function _tiny_llama_for_quant()
     return LlamaConfig(;

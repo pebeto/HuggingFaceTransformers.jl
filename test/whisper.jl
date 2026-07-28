@@ -1,8 +1,9 @@
 using Test
 using Random
 using Flux
-using Allspark.Models
-using Allspark.Models: whisper_state_dict_map, load_state_dict!, Conv1d, WhisperCrossAttention
+using HuggingFaceTransformers.Models
+using HuggingFaceTransformers.Models:
+    whisper_state_dict_map, load_state_dict!, Conv1d, WhisperCrossAttention
 
 function _tiny_whisper_config()
     return WhisperConfig(;
@@ -29,10 +30,14 @@ function _whisper_attn_sd!(out, pre, h)
     out["$(pre).v_proj.weight"] = randn(Float32, h, h)
     out["$(pre).v_proj.bias"] = randn(Float32, h)
     out["$(pre).out_proj.weight"] = randn(Float32, h, h)
-    out["$(pre).out_proj.bias"] = randn(Float32, h)
+    return out["$(pre).out_proj.bias"] = randn(Float32, h)
 end
 
-_ln_sd!(out, pre, h) = (out["$(pre).weight"] = randn(Float32, h); out["$(pre).bias"] = randn(Float32, h))
+function _ln_sd!(out, pre, h)
+    return (
+        out["$(pre).weight"] = randn(Float32, h); out["$(pre).bias"] = randn(Float32, h)
+    )
+end
 
 function _whisper_synthetic_sd(cfg::WhisperConfig)
     d = cfg.d_model
@@ -41,7 +46,9 @@ function _whisper_synthetic_sd(cfg::WhisperConfig)
     out["model.encoder.conv1.bias"] = randn(Float32, d)
     out["model.encoder.conv2.weight"] = randn(Float32, d, d, 3)
     out["model.encoder.conv2.bias"] = randn(Float32, d)
-    out["model.encoder.embed_positions.weight"] = randn(Float32, cfg.max_source_positions, d)
+    out["model.encoder.embed_positions.weight"] = randn(
+        Float32, cfg.max_source_positions, d
+    )
     for i in 0:(cfg.encoder_layers - 1)
         pre = "model.encoder.layers.$(i)"
         _whisper_attn_sd!(out, "$(pre).self_attn", d)
@@ -55,7 +62,9 @@ function _whisper_synthetic_sd(cfg::WhisperConfig)
     _ln_sd!(out, "model.encoder.layer_norm", d)
 
     out["model.decoder.embed_tokens.weight"] = randn(Float32, cfg.vocab_size, d)
-    out["model.decoder.embed_positions.weight"] = randn(Float32, cfg.max_target_positions, d)
+    out["model.decoder.embed_positions.weight"] = randn(
+        Float32, cfg.max_target_positions, d
+    )
     for i in 0:(cfg.decoder_layers - 1)
         pre = "model.decoder.layers.$(i)"
         _whisper_attn_sd!(out, "$(pre).self_attn", d)
@@ -102,7 +111,9 @@ function _ref_cross_attn(a, xq, xkv)
     for nn in 1:n, h in 1:H
         r = ((h - 1) * hd + 1):(h * hd)
         for i in 1:sq
-            scores = Float32[sum(q[r, i, nn] .* k[r, j, nn]) / sqrt(Float32(hd)) for j in 1:skv]
+            scores = Float32[
+                sum(q[r, i, nn] .* k[r, j, nn]) / sqrt(Float32(hd)) for j in 1:skv
+            ]
             w = softmax(scores)
             acc = zeros(Float32, hd)
             for j in 1:skv
@@ -126,11 +137,12 @@ end
 @testset "cross-attention matches explicit reference" begin
     Random.seed!(0xB2)
     a = WhisperCrossAttention(
-        Allspark.Layers.Linear(8, 8; bias=true),
-        Allspark.Layers.Linear(8, 8; bias=false),
-        Allspark.Layers.Linear(8, 8; bias=true),
-        Allspark.Layers.Linear(8, 8; bias=true),
-        2, 4,
+        HuggingFaceTransformers.Layers.Linear(8, 8; bias=true),
+        HuggingFaceTransformers.Layers.Linear(8, 8; bias=false),
+        HuggingFaceTransformers.Layers.Linear(8, 8; bias=true),
+        HuggingFaceTransformers.Layers.Linear(8, 8; bias=true),
+        2,
+        4,
     )
     for l in (a.wq, a.wv, a.wo)
         copyto!(l.weight, randn(Float32, 8, 8))

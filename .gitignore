@@ -24,4 +24,3 @@ deps/src/
 
 # Local caches
 .cache/
-.allspark_cache/

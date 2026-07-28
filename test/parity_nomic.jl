@@ -1,7 +1,8 @@
 using Test
 using JSON3
-using Allspark.HFHub: snapshot_download
-using Allspark.Models: load_weights, NomicBertConfig, BertEmbeddingModel, embed, load_state_dict!
+using HuggingFaceTransformers.HFHub: snapshot_download
+using HuggingFaceTransformers.Models:
+    load_weights, NomicBertConfig, BertEmbeddingModel, embed, load_state_dict!
 
 # Parity for nomic-embed against HF (trust_remote_code NomicBertModel) with mean
 # pooling + L2 normalization. Record with `record_nomic_parity.py`.
@@ -21,7 +22,7 @@ function _selected_variants(raw::AbstractString)
     return parts
 end
 
-const SELECTED = _selected_variants(get(ENV, "ALLSPARK_TEST_PARITY_NOMIC", ""))
+const SELECTED = _selected_variants(get(ENV, "HFT_TEST_PARITY_NOMIC", ""))
 
 function _load_nomic_config(snapshot_dir::AbstractString)
     raw = JSON3.read(read(joinpath(snapshot_dir, "config.json"), String))
@@ -79,7 +80,7 @@ end
 
 unknown = filter(v -> !(v in [first(t) for t in VARIANTS]), SELECTED)
 isempty(unknown) || error(
-    "Unknown ALLSPARK_TEST_PARITY_NOMIC variant(s): $(unknown). " *
+    "Unknown HFT_TEST_PARITY_NOMIC variant(s): $(unknown). " *
     "Valid: $(String[first(v) for v in VARIANTS]) or \"all\".",
 )
 

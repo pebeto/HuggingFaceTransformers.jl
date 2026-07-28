@@ -2,9 +2,9 @@ using Test
 using Random
 using Flux
 using SafeTensors: load_safetensors
-using Allspark.Models
-using Allspark.Models: llama_state_dict_map, load_state_dict!
-using Allspark.Layers: Linear
+using HuggingFaceTransformers.Models
+using HuggingFaceTransformers.Models: llama_state_dict_map, load_state_dict!
+using HuggingFaceTransformers.Layers: Linear
 
 @testset "LoRALinear forward math (2-D and N-D)" begin
     Random.seed!(0xC1)
@@ -52,8 +52,9 @@ end
 
 @testset "lora_scaling: standard vs rsLoRA" begin
     @test lora_scaling(LoraConfig(; r=4, lora_alpha=8.0, target_modules=["q"])) == 2.0f0
-    @test lora_scaling(LoraConfig(; r=4, lora_alpha=8.0, target_modules=["q"], use_rslora=true)) ≈
-        8.0f0 / sqrt(4)
+    @test lora_scaling(
+        LoraConfig(; r=4, lora_alpha=8.0, target_modules=["q"], use_rslora=true)
+    ) ≈ 8.0f0 / sqrt(4)
 end
 
 @testset "safetensors writer round-trips through the reader" begin
@@ -65,7 +66,7 @@ end
             "w2d" => randn(Float32, 3, 5),
             "w3d" => randn(Float32, 2, 3, 4),
         )
-        Allspark.Models._save_safetensors(path, ts)
+        HuggingFaceTransformers.Models._save_safetensors(path, ts)
         back = load_safetensors(path; mmap=false)
         for (k, v) in ts
             @test size(back[k]) == size(v)
@@ -79,8 +80,10 @@ end
     mktempdir() do dir
         cfg = LoraConfig(; r=4, lora_alpha=8.0, target_modules=["q_proj", "v_proj"])
         mw = Dict(
-            "model.layers.0.self_attn.q_proj" => (randn(Float32, 4, 16), randn(Float32, 16, 4)),
-            "model.layers.0.self_attn.v_proj" => (randn(Float32, 4, 16), randn(Float32, 16, 4)),
+            "model.layers.0.self_attn.q_proj" =>
+                (randn(Float32, 4, 16), randn(Float32, 16, 4)),
+            "model.layers.0.self_attn.v_proj" =>
+                (randn(Float32, 4, 16), randn(Float32, 16, 4)),
         )
         save_lora(dir, cfg, mw)
         @test isfile(joinpath(dir, "adapter_config.json"))
@@ -119,7 +122,9 @@ end
 
     mw = Dict{String,Tuple{Matrix{Float32},Matrix{Float32}}}()
     for i in 0:1, proj in ("q_proj", "v_proj")
-        mw["model.layers.$(i).self_attn.$(proj)"] = (randn(Float32, 4, 16), randn(Float32, 16, 4))
+        mw["model.layers.$(i).self_attn.$(proj)"] = (
+            randn(Float32, 4, 16), randn(Float32, 16, 4)
+        )
     end
     cfg = LoraConfig(; r=4, lora_alpha=8.0, target_modules=["q_proj", "v_proj"])
 
@@ -137,16 +142,25 @@ end
 @testset "apply_lora! rejects an unknown target module" begin
     Random.seed!(0xC7)
     cfg_llm = LlamaConfig(;
-        vocab_size=16, hidden_size=16, intermediate_size=32, num_hidden_layers=1,
-        num_attention_heads=4, num_key_value_heads=4, head_dim=4,
-        max_position_embeddings=32, rope_theta=10000.0,
+        vocab_size=16,
+        hidden_size=16,
+        intermediate_size=32,
+        num_hidden_layers=1,
+        num_attention_heads=4,
+        num_key_value_heads=4,
+        head_dim=4,
+        max_position_embeddings=32,
+        rope_theta=10000.0,
     )
     lm = LlamaForCausalLM(cfg_llm)
     mktempdir() do dir
         save_lora(
             dir,
             LoraConfig(; r=2, lora_alpha=4.0, target_modules=["bogus"]),
-            Dict("model.layers.0.self_attn.bogus" => (randn(Float32, 2, 16), randn(Float32, 16, 2))),
+            Dict(
+                "model.layers.0.self_attn.bogus" =>
+                    (randn(Float32, 2, 16), randn(Float32, 16, 2)),
+            ),
         )
         @test_throws ArgumentError apply_lora!(lm, dir, llama_state_dict_map(cfg_llm))
     end

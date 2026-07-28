@@ -1,5 +1,5 @@
 #!/usr/bin/env julia
-# Allspark.jl REPL chat against a Gemma2 model.
+# HuggingFaceTransformers.jl REPL chat against a Gemma2 model.
 #
 # Usage:
 #   julia --project=. examples/repl_chat_gemma.jl
@@ -14,11 +14,12 @@
 #   gemma-2-9b-it:   ~37 GB download, ~40 GB RAM   (server-class)
 #   gemma-2-27b-it: ~108 GB download, ~120 GB RAM  (workstation only)
 
-using Allspark
-using Allspark.HFHub: snapshot_download
-using Allspark.Tokenizers: load_tokenizer, encode, decode
-using Allspark.Models: load_weights, GemmaForCausalLM, GemmaConfig, load_state_dict!
-using Allspark.Generation: generate, ChatTemplate
+using HuggingFaceTransformers
+using HuggingFaceTransformers.HFHub: snapshot_download
+using HuggingFaceTransformers.Tokenizers: load_tokenizer, encode, decode
+using HuggingFaceTransformers.Models:
+    load_weights, GemmaForCausalLM, GemmaConfig, load_state_dict!
+using HuggingFaceTransformers.Generation: generate, ChatTemplate
 using JSON3
 
 const DEFAULT_MODEL = "google/gemma-2-2b-it"
@@ -103,7 +104,7 @@ function load_chat_template(snapshot_dir::AbstractString)
         try
             return ChatTemplate(String(template_source))
         catch err
-            @warn """Bundled chat_template uses Jinja features Allspark
+            @warn """Bundled chat_template uses Jinja features HuggingFaceTransformers
                   doesn't support yet. Falling back to a plain Gemma
                   <start_of_turn> template; tool calls and other advanced
                   features won't work.""" err
@@ -161,7 +162,9 @@ function main(repo_id::AbstractString=DEFAULT_MODEL)
 
     messages = Dict{String,String}[]
     println()
-    println("Allspark.jl REPL chat (Gemma2). Ctrl-D to exit, /reset to clear history.")
+    println(
+        "HuggingFaceTransformers.jl REPL chat (Gemma2). Ctrl-D to exit, /reset to clear history.",
+    )
     println()
 
     while true

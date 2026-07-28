@@ -1,5 +1,5 @@
 """
-    Allspark.Layers
+    HuggingFaceTransformers.Layers
 
 The minimal layer kit used to assemble transformer models: `RMSNorm`,
 `RoPE` (with Llama-3 scaling hooks), bias-less `Linear`, SiLU-gated MLP,
@@ -12,8 +12,9 @@ using Flux
 using NNlib
 using LinearAlgebra
 using Statistics
-using ChainRulesCore: @ignore_derivatives, RuleConfig, HasReverseMode, rrule_via_ad, NoTangent
-import ChainRulesCore
+using ChainRulesCore:
+    @ignore_derivatives, RuleConfig, HasReverseMode, rrule_via_ad, NoTangent
+using ChainRulesCore: ChainRulesCore
 
 export KVCache,
     RMSNorm,
@@ -39,7 +40,7 @@ export KVCache,
 
 A mutable KV-cache wrapper holding preallocated keys and values for
 autoregressive generation. Both fields are 4-D arrays of shape
-`(head_dim, n_kv_heads, max_seq, batch_size)` — feature-first to match the
+`(head_dim, n_kv_heads, max_seq, batch_size)`, feature-first to match the
 projection layout used in `GQA`, so cache writes/reads are straight slice
 assignments with no `permutedims`.
 """
@@ -134,7 +135,7 @@ Flux.Optimisers.trainable(m::RMSNorm) = (; weight=m.weight)
     GemmaRMSNorm{W, T}
 
 Gemma2's RMSNorm variant: scales by `(1 + weight)` instead of just
-`weight`. The off-by-one matters for numerical parity — HF's checkpoint
+`weight`. The off-by-one matters for numerical parity: HF's checkpoint
 weights are stored under the assumption of this scaling, so substituting
 plain `RMSNorm` yields drifted logits.
 """
@@ -181,7 +182,7 @@ end
     LayerNorm(dim::Integer, eps::Real = 1f-5)
 
 Construct a `LayerNorm` layer of dimension `dim`. Weight initializes to
-ones, bias to zeros — the identity at load time, matching how HF stores
+ones, bias to zeros, which is the identity at load time and matches how HF stores
 checkpoints.
 """
 function LayerNorm(dim::Integer, eps::Real=1.0f-5)
@@ -459,7 +460,7 @@ end
 
 Flux.@layer SiLUGatedMLP
 function Flux.Optimisers.trainable(m::SiLUGatedMLP)
-    (; gate_proj=m.gate_proj, up_proj=m.up_proj, down_proj=m.down_proj)
+    return (; gate_proj=m.gate_proj, up_proj=m.up_proj, down_proj=m.down_proj)
 end
 
 """
@@ -478,7 +479,7 @@ release).
 The forward pass is correctness-first: it batches tokens per expert
 (so each expert is called once with its assigned slice of tokens
 rather than once per token), but doesn't yet pipeline router-to-expert
-or fuse the expert matmuls. Phase 4 will revisit.
+or fuse the expert matmuls. Both remain open optimizations.
 """
 struct MoEMLP{G,E}
     gate::G
@@ -625,7 +626,7 @@ end
 
 Flux.@layer GeluGatedMLP
 function Flux.Optimisers.trainable(m::GeluGatedMLP)
-    (; gate_proj=m.gate_proj, up_proj=m.up_proj, down_proj=m.down_proj)
+    return (; gate_proj=m.gate_proj, up_proj=m.up_proj, down_proj=m.down_proj)
 end
 
 """
@@ -637,7 +638,7 @@ linears carry bias.
 `approx` selects the GELU form: `true` uses the tanh approximation
 (what HF ships for GPT-2), `false` uses exact GELU via NNlib's
 erf-based implementation (what BERT, RoBERTa, and GPT-NeoX/Pythia
-ship). The choice is parity-critical — the two agree to ~1e-3 on
+ship). The choice is parity-critical, since the two agree only to ~1e-3 on
 typical activations.
 """
 struct GeluMLP{F,P}
@@ -813,7 +814,7 @@ projection). `wo_bias=true` additionally biases the output projection
 (GPT-2 does this; the Llama family doesn't). The two flags are
 independent because Qwen2 wants `qkv_bias=true, wo_bias=false`.
 
-`causal=false` (default `true`) disables the causal mask — every query
+`causal=false` (default `true`) disables the causal mask, so every query
 sees every key. Used by encoder-only models (BERT, RoBERTa) where
 attention is bidirectional.
 """
@@ -974,7 +975,7 @@ Gradient checkpointing: evaluate `f(args...)` without retaining `f`'s internal
 activations for the backward pass. Under reverse-mode AD the pullback recomputes
 `f` (one extra forward) to obtain gradients, trading compute for memory. Outside
 AD it is just `f(args...)`. Results and gradients are identical to calling `f`
-directly — this is purely a memory optimization for training deep stacks.
+directly; this is purely a memory optimization for training deep stacks.
 
 Differentiable inputs must be positional `args`; to checkpoint a layer and get
 its parameter gradients, pass the layer as `f`: `checkpoint(layer, x)`.

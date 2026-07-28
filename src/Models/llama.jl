@@ -57,7 +57,7 @@ Flux.Optimisers.trainable(lm::LlamaForCausalLM) = (; model=lm.model, lm_head=lm.
     LlamaForCausalLM(cfg::LlamaConfig)
 
 Materialize a fresh, randomly-initialized `LlamaForCausalLM` matching the
-shapes in `cfg`. Weights are uninitialized for inference purposes — they
+shapes in `cfg`. Weights are uninitialized for inference purposes, so they
 must be replaced by a state-dict load before the model is meaningful.
 """
 function LlamaForCausalLM(cfg::LlamaConfig)
@@ -120,7 +120,7 @@ end
     llama_state_dict_map(cfg::LlamaConfig) -> Dict{String, Tuple{Tuple, Symbol}}
 
 Build the HuggingFace → internal parameter table for a Llama model with
-the given config. Delegates to [`Allspark.Models._decoder_state_dict_map`](@ref).
+the given config. Delegates to [`_decoder_state_dict_map`](@ref).
 """
 function llama_state_dict_map(cfg::LlamaConfig)
     return _decoder_state_dict_map(cfg.num_hidden_layers, cfg.tie_word_embeddings)
@@ -142,9 +142,9 @@ function load_state_dict!(
 
     if lm.config.tie_word_embeddings
         # embed.weight is (hidden, vocab); lm_head.weight is (vocab, hidden).
-        # Materialize the transpose rather than share storage — the loader stays
-        # pure-data this way, and the ~vocab×hidden memory cost is a Phase 4
-        # optimization once we have a real workload to measure against.
+        # Materialize the transpose rather than share storage: the loader stays
+        # pure-data this way. Reclaiming the ~vocab×hidden memory is deferred
+        # until a real workload makes it worth measuring.
         copyto!(lm.lm_head.weight, permutedims(lm.model.embed_tokens.weight, (2, 1)))
     end
 

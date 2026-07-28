@@ -1,5 +1,6 @@
-using Allspark.HFHub
-using Allspark.HFHub: RepoRef, parse_repo, repo_folder_name, default_cache_dir
+using HuggingFaceTransformers.HFHub
+using HuggingFaceTransformers.HFHub:
+    RepoRef, parse_repo, repo_folder_name, default_cache_dir
 using Test
 
 @testset "parse_repo" begin
@@ -55,9 +56,9 @@ end
     end
 end
 
-# Network-gated integration test. Set ALLSPARK_TEST_NETWORK=1 to enable.
+# Network-gated integration test. Set HFT_TEST_NETWORK=1 to enable.
 # Uses a HF maintainer-controlled tiny fixture repo so the cost is minimal.
-if get(ENV, "ALLSPARK_TEST_NETWORK", "0") == "1"
+if get(ENV, "HFT_TEST_NETWORK", "0") == "1"
     @testset "download_file + Python cache layout (network)" begin
         repo_id = "hf-internal-testing/tiny-random-LlamaForCausalLM"
         mktempdir() do cache

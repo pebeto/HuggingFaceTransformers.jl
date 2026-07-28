@@ -1,7 +1,8 @@
 using Test
 using JSON3
-using Allspark.HFHub: snapshot_download
-using Allspark.Models: load_weights, ViTConfig, ViTForImageClassification, load_state_dict!
+using HuggingFaceTransformers.HFHub: snapshot_download
+using HuggingFaceTransformers.Models:
+    load_weights, ViTConfig, ViTForImageClassification, load_state_dict!
 
 # ViT image-classification parity against HF. The fixture stores the already
 # preprocessed `pixel_values` tensor (image decode/resize is out of scope), so
@@ -23,11 +24,12 @@ function _selected_variants(raw::AbstractString)
     return parts
 end
 
-const SELECTED = _selected_variants(get(ENV, "ALLSPARK_TEST_PARITY_VIT", ""))
+const SELECTED = _selected_variants(get(ENV, "HFT_TEST_PARITY_VIT", ""))
 
 function _load_vit_config(snapshot_dir::AbstractString)
     raw = JSON3.read(read(joinpath(snapshot_dir, "config.json"), String))
-    num_labels = haskey(raw, :id2label) ? length(raw.id2label) : Int(get(raw, :num_labels, 1000))
+    num_labels =
+        haskey(raw, :id2label) ? length(raw.id2label) : Int(get(raw, :num_labels, 1000))
     return ViTConfig(;
         hidden_size=Int(raw.hidden_size),
         num_hidden_layers=Int(raw.num_hidden_layers),
@@ -79,19 +81,21 @@ function _run_variant(name::AbstractString, fixture_filename::AbstractString)
 
         max_err = Float32(0)
         for (i, hf_idx) in enumerate(expected_top_indices)
-            max_err = max(max_err, abs(Float32(logits[hf_idx + 1]) - expected_top_logits[i]))
+            max_err = max(
+                max_err, abs(Float32(logits[hf_idx + 1]) - expected_top_logits[i])
+            )
         end
         @test max_err < tolerance
 
-        allspark_top10 = sortperm(logits; rev=true)[1:10] .- 1
-        overlap = length(intersect(Set(allspark_top10), Set(expected_top_indices[1:10])))
+        jl_top10 = sortperm(logits; rev=true)[1:10] .- 1
+        overlap = length(intersect(Set(jl_top10), Set(expected_top_indices[1:10])))
         @test overlap >= 9
     end
 end
 
 unknown = filter(v -> !(v in [first(t) for t in VARIANTS]), SELECTED)
 isempty(unknown) || error(
-    "Unknown ALLSPARK_TEST_PARITY_VIT variant(s): $(unknown). " *
+    "Unknown HFT_TEST_PARITY_VIT variant(s): $(unknown). " *
     "Valid: $(String[first(v) for v in VARIANTS]) or \"all\".",
 )
 

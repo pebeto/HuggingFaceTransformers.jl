@@ -1,7 +1,8 @@
 using Test
 using JSON3
-using Allspark.HFHub: snapshot_download
-using Allspark.Models: load_weights, Dinov2Config, Dinov2Model, load_state_dict!
+using HuggingFaceTransformers.HFHub: snapshot_download
+using HuggingFaceTransformers.Models:
+    load_weights, Dinov2Config, Dinov2Model, load_state_dict!
 
 # DINOv2 parity: the CLS feature (HF `pooler_output`, i.e. the CLS token after
 # the final LayerNorm). The fixture stores the preprocessed pixel tensor, so this
@@ -23,7 +24,7 @@ function _selected_variants(raw::AbstractString)
     return parts
 end
 
-const SELECTED = _selected_variants(get(ENV, "ALLSPARK_TEST_PARITY_DINOV2", ""))
+const SELECTED = _selected_variants(get(ENV, "HFT_TEST_PARITY_DINOV2", ""))
 
 function _load_dinov2_config(snapshot_dir::AbstractString)
     raw = JSON3.read(read(joinpath(snapshot_dir, "config.json"), String))
@@ -80,7 +81,7 @@ end
 
 unknown = filter(v -> !(v in [first(t) for t in VARIANTS]), SELECTED)
 isempty(unknown) || error(
-    "Unknown ALLSPARK_TEST_PARITY_DINOV2 variant(s): $(unknown). " *
+    "Unknown HFT_TEST_PARITY_DINOV2 variant(s): $(unknown). " *
     "Valid: $(String[first(v) for v in VARIANTS]) or \"all\".",
 )
 

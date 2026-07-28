@@ -1,4 +1,4 @@
-# Normalization pipeline. Decoder-only models in the Allspark set (Llama,
+# Normalization pipeline. Decoder-only models in the HuggingFaceTransformers set (Llama,
 # Mistral, Qwen, …) tokenize raw bytes and don't need normalization, so
 # `Tokenizer` defaulted to skipping this stage. BERT-family encoders need
 # it: lowercasing for `*-uncased` checkpoints, optional NFD-based accent

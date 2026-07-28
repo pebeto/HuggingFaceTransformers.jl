@@ -1,5 +1,5 @@
 #!/usr/bin/env julia
-# Allspark.jl REPL chat against a Phi-3 model.
+# HuggingFaceTransformers.jl REPL chat against a Phi-3 model.
 #
 # Usage:
 #   julia --project=. examples/repl_chat_phi3.jl
@@ -12,14 +12,15 @@
 #   Phi-3-medium-4k-instruct (14B):  ~56 GB download, ~60 GB RAM
 #
 # 128k context variants and Phi-3.5 are NOT supported here — they use
-# `longrope` scaling / partial RoPE which Allspark doesn't implement
+# `longrope` scaling / partial RoPE which HuggingFaceTransformers doesn't implement
 # yet. The loader rejects them with a clear error.
 
-using Allspark
-using Allspark.HFHub: snapshot_download
-using Allspark.Tokenizers: load_tokenizer, encode, decode
-using Allspark.Models: load_weights, Phi3ForCausalLM, Phi3Config, load_state_dict!
-using Allspark.Generation: generate, ChatTemplate
+using HuggingFaceTransformers
+using HuggingFaceTransformers.HFHub: snapshot_download
+using HuggingFaceTransformers.Tokenizers: load_tokenizer, encode, decode
+using HuggingFaceTransformers.Models:
+    load_weights, Phi3ForCausalLM, Phi3Config, load_state_dict!
+using HuggingFaceTransformers.Generation: generate, ChatTemplate
 using JSON3
 
 const DEFAULT_MODEL = "microsoft/Phi-3-mini-4k-instruct"
@@ -85,7 +86,7 @@ function load_chat_template(snapshot_dir::AbstractString)
         try
             return ChatTemplate(String(template_source))
         catch err
-            @warn """Bundled chat_template uses Jinja features Allspark
+            @warn """Bundled chat_template uses Jinja features HuggingFaceTransformers
                   doesn't support yet. Falling back to a plain Phi-3
                   <|user|> / <|assistant|> / <|end|> template; tool calls
                   and other advanced features won't work.""" err
@@ -139,7 +140,9 @@ function main(repo_id::AbstractString=DEFAULT_MODEL)
 
     messages = Dict{String,String}[]
     println()
-    println("Allspark.jl REPL chat (Phi-3). Ctrl-D to exit, /reset to clear history.")
+    println(
+        "HuggingFaceTransformers.jl REPL chat (Phi-3). Ctrl-D to exit, /reset to clear history.",
+    )
     println()
 
     while true

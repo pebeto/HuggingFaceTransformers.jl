@@ -1,8 +1,8 @@
 using Test
 using Random
 using Flux
-using Allspark.Models
-using Allspark.Models: bert_state_dict_map, load_state_dict!, load_into!
+using HuggingFaceTransformers.Models
+using HuggingFaceTransformers.Models: bert_state_dict_map, load_state_dict!, load_into!
 
 function _bert_synthetic_state_dict(cfg::BertConfig)
     out = Dict{String,Array{Float32}}()
@@ -108,14 +108,14 @@ end
             @test layer.self_attn.causal == false       # bidirectional
             @test layer.self_attn.rope === nothing      # no RoPE
             # Post-norm: attn_norm and ffn_norm exist as LayerNorms (not RMSNorm).
-            @test layer.attn_norm isa Allspark.Layers.LayerNorm
-            @test layer.ffn_norm isa Allspark.Layers.LayerNorm
+            @test layer.attn_norm isa HuggingFaceTransformers.Layers.LayerNorm
+            @test layer.ffn_norm isa HuggingFaceTransformers.Layers.LayerNorm
             # FFN linears carry bias.
             @test layer.intermediate.bias isa AbstractVector
             @test layer.output_dense.bias isa AbstractVector
         end
         # Embeddings LayerNorm.
-        @test lm.trunk.embeddings.norm isa Allspark.Layers.LayerNorm
+        @test lm.trunk.embeddings.norm isa HuggingFaceTransformers.Layers.LayerNorm
     end
 
     @testset "forward shapes" begin

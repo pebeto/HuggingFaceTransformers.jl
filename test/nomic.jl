@@ -1,8 +1,8 @@
 using Test
 using Random
 using Flux
-using Allspark.Models
-using Allspark.Models: nomic_state_dict_map, load_state_dict!
+using HuggingFaceTransformers.Models
+using HuggingFaceTransformers.Models: nomic_state_dict_map, load_state_dict!
 
 function _tiny_nomic_config(; vocab=64)
     return NomicBertConfig(;
@@ -51,7 +51,7 @@ end
     @test fieldnames(typeof(trunk.embeddings)) == (:embed_tokens, :embed_types, :norm)
     for layer in trunk.layers
         @test layer.self_attn.causal == false                 # bidirectional
-        @test layer.self_attn.rope isa Allspark.Layers.RoPE   # rotary present
+        @test layer.self_attn.rope isa HuggingFaceTransformers.Layers.RoPE   # rotary present
     end
 
     @testset "forward shape" begin
@@ -104,7 +104,9 @@ end
 
     # embed(ids) equals a manual mean-pool + normalize of the trunk output.
     hs = m.trunk(reshape(ids, :, 1))
-    manual = Allspark.Models.l2_normalize(Allspark.Models.mean_pool(hs))
+    manual = HuggingFaceTransformers.Models.l2_normalize(
+        HuggingFaceTransformers.Models.mean_pool(hs)
+    )
     @test v ≈ vec(manual)
 end
 

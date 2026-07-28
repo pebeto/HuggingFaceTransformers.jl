@@ -1,12 +1,13 @@
 using Test
 using JSON3
-using Allspark.HFHub: snapshot_download
-using Allspark.Tokenizers: load_tokenizer, encode
-using Allspark.Models: load_weights, BertForMaskedLM, BertConfig, load_state_dict!
+using HuggingFaceTransformers.HFHub: snapshot_download
+using HuggingFaceTransformers.Tokenizers: load_tokenizer, encode
+using HuggingFaceTransformers.Models:
+    load_weights, BertForMaskedLM, BertConfig, load_state_dict!
 
-# Parity is gated on RoBERTa for now — BERT proper uses WordPiece (Phase 3).
-# RoBERTa's byte-level BPE works with Allspark's existing tokenizer, so all
-# four standard checkpoints are exercisable.
+# The recorded fixtures cover RoBERTa (base and large). WordPiece is
+# supported now, so the tokenizer is no longer what blocks BERT proper; it
+# simply has no recorded fixture yet.
 const VARIANTS = (
     ("base", "roberta_base_parity.json"), ("large", "roberta_large_parity.json")
 )
@@ -25,7 +26,7 @@ function _selected_variants(raw::AbstractString)
     return parts
 end
 
-const SELECTED = _selected_variants(get(ENV, "ALLSPARK_TEST_PARITY_BERT", ""))
+const SELECTED = _selected_variants(get(ENV, "HFT_TEST_PARITY_BERT", ""))
 
 function _load_roberta_config(snapshot_dir::AbstractString)
     raw = JSON3.read(read(joinpath(snapshot_dir, "config.json"), String))
@@ -95,9 +96,9 @@ function _run_variant(name::AbstractString, fixture_filename::AbstractString)
             end
             @test max_err < tolerance
 
-            allspark_top10 = sortperm(mask_logits; rev=true)[1:10] .- 1
+            jl_top10 = sortperm(mask_logits; rev=true)[1:10] .- 1
             hf_top10 = expected_top_indices[1:10]
-            overlap = length(intersect(Set(allspark_top10), Set(hf_top10)))
+            overlap = length(intersect(Set(jl_top10), Set(hf_top10)))
             @test overlap >= 9
         end
     end
@@ -105,7 +106,7 @@ end
 
 unknown = filter(v -> !(v in [first(t) for t in VARIANTS]), SELECTED)
 isempty(unknown) || error(
-    "Unknown ALLSPARK_TEST_PARITY_BERT variant(s): $(unknown). " *
+    "Unknown HFT_TEST_PARITY_BERT variant(s): $(unknown). " *
     "Valid: $(String[first(v) for v in VARIANTS]) or \"all\".",
 )
 

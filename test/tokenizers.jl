@@ -1,7 +1,7 @@
 using Test
 using JSON3
-using Allspark.Tokenizers
-using Allspark.Tokenizers:
+using HuggingFaceTransformers.Tokenizers
+using HuggingFaceTransformers.Tokenizers:
     BPEModel,
     UnigramModel,
     WordPieceModel,

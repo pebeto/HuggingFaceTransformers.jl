@@ -1,8 +1,8 @@
 using Test
 using Random
 using Flux
-using Allspark.Models
-using Allspark.Models: vit_state_dict_map, load_state_dict!
+using HuggingFaceTransformers.Models
+using HuggingFaceTransformers.Models: vit_state_dict_map, load_state_dict!
 
 function _tiny_vit_config()
     return ViTConfig(;
@@ -81,7 +81,7 @@ end
     for layer in m.vit.layers
         @test layer.self_attn.causal == false          # bidirectional
         @test layer.self_attn.rope === nothing          # no rotary
-        @test layer.mlp isa Allspark.Layers.GeluMLP
+        @test layer.mlp isa HuggingFaceTransformers.Layers.GeluMLP
         @test layer.mlp.approx == false                 # exact GELU
     end
     @test size(m.vit.embeddings.position_embeddings, 2) == _tiny_vit_num_pos(cfg)
@@ -123,19 +123,23 @@ end
 
     emb = m.vit.embeddings
     # Patch conv reshaped to the Linear; cls squeezed; pos squeezed + transposed.
-    @test emb.patch_embeddings.projection.weight ==
-        reshape(sd["vit.embeddings.patch_embeddings.projection.weight"], cfg.hidden_size, :)
+    @test emb.patch_embeddings.projection.weight == reshape(
+        sd["vit.embeddings.patch_embeddings.projection.weight"], cfg.hidden_size, :,
+    )
     @test emb.cls_token == vec(sd["vit.embeddings.cls_token"])
     @test emb.position_embeddings ==
         permutedims(dropdims(sd["vit.embeddings.position_embeddings"]; dims=1), (2, 1))
 
     # A layer: q/k/v/o, both LayerNorms, and the GELU MLP.
     layer = m.vit.layers[1]
-    @test layer.self_attn.wq.weight == sd["vit.encoder.layer.0.attention.attention.query.weight"]
-    @test layer.self_attn.wv.bias == sd["vit.encoder.layer.0.attention.attention.value.bias"]
+    @test layer.self_attn.wq.weight ==
+        sd["vit.encoder.layer.0.attention.attention.query.weight"]
+    @test layer.self_attn.wv.bias ==
+        sd["vit.encoder.layer.0.attention.attention.value.bias"]
     @test layer.self_attn.wo.bias == sd["vit.encoder.layer.0.attention.output.dense.bias"]
     @test layer.input_layernorm.weight == sd["vit.encoder.layer.0.layernorm_before.weight"]
-    @test layer.post_attention_layernorm.bias == sd["vit.encoder.layer.0.layernorm_after.bias"]
+    @test layer.post_attention_layernorm.bias ==
+        sd["vit.encoder.layer.0.layernorm_after.bias"]
     @test layer.mlp.c_fc.weight == sd["vit.encoder.layer.0.intermediate.dense.weight"]
     @test layer.mlp.c_proj.bias == sd["vit.encoder.layer.0.output.dense.bias"]
     @test m.vit.layers[2].mlp.c_proj.weight == sd["vit.encoder.layer.1.output.dense.weight"]

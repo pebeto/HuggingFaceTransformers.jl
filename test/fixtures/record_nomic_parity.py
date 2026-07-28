@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Record reference embeddings for Allspark.jl's nomic-embed parity test.
+"""Record reference embeddings for HuggingFaceTransformers.jl's nomic-embed parity test.
 
 Usage:
     python3 test/fixtures/record_nomic_parity.py [VARIANT]
@@ -15,7 +15,7 @@ Why these choices (matches the other record_*_parity.py scripts):
   assert parity in fp32.
 - nomic-embed expects a task prefix; we use "search_document:".
 
-The fixture records the special-token-bearing input IDs (Allspark feeds these
+The fixture records the special-token-bearing input IDs (HuggingFaceTransformers feeds these
 verbatim), and the mean-pooled, L2-normalized reference vector.
 """
 import json

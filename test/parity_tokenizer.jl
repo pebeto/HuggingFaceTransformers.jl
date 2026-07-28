@@ -1,9 +1,9 @@
 using Test
 using JSON3
-using Allspark.HFHub: snapshot_download
-using Allspark.Tokenizers: load_tokenizer, encode, decode
+using HuggingFaceTransformers.HFHub: snapshot_download
+using HuggingFaceTransformers.Tokenizers: load_tokenizer, encode, decode
 
-# Tokenizer parity harness. Each variant ties an Allspark-side label to a
+# Tokenizer parity harness. Each variant ties an HuggingFaceTransformers-side label to a
 # fixture file recorded by `test/fixtures/record_tokenizer_parity.py`. The
 # fixture itself names the HF repo and the family (informational only —
 # `load_tokenizer` dispatches on the JSON contents), so adding a variant
@@ -40,7 +40,7 @@ function _selected_variants(raw::AbstractString)
     return parts
 end
 
-const SELECTED = _selected_variants(get(ENV, "ALLSPARK_TEST_PARITY_TOKENIZER", ""))
+const SELECTED = _selected_variants(get(ENV, "HFT_TEST_PARITY_TOKENIZER", ""))
 
 function _run_variant(name::AbstractString, fixture_filename::AbstractString)
     fixture_path = joinpath(FIXTURES_DIR, fixture_filename)
@@ -88,7 +88,7 @@ end
 
 unknown = filter(v -> !(v in [first(t) for t in VARIANTS]), SELECTED)
 isempty(unknown) || error(
-    "Unknown ALLSPARK_TEST_PARITY_TOKENIZER variant(s): $(unknown). " *
+    "Unknown HFT_TEST_PARITY_TOKENIZER variant(s): $(unknown). " *
     "Valid: $(String[first(v) for v in VARIANTS]) or \"all\".",
 )
 

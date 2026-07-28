@@ -1,5 +1,5 @@
 """
-    Allspark.Generation
+    HuggingFaceTransformers.Generation
 
 Decoder sampling: `generate()` (greedy / temperature / top-k / top-p /
 repetition penalty / max_new_tokens / EOS), plus the minimal Jinja
@@ -158,15 +158,15 @@ sequence. Batch-1 only.
 
 Keyword arguments mirror HuggingFace's `model.generate`:
 
-- `max_new_tokens::Integer = 16` — cap on tokens to add.
-- `do_sample::Bool = false` — greedy when `false`; ignores
+- `max_new_tokens::Integer = 16`: cap on tokens to add.
+- `do_sample::Bool = false`: greedy when `false`; ignores
   `temperature`, `top_k`, `top_p`, and `rng`.
-- `temperature::Real = 1.0` — divide logits before softmax.
-- `top_k::Union{Nothing, Integer} = nothing` — keep the top-k logits.
-- `top_p::Union{Nothing, Real} = nothing` — nucleus sampling cutoff in `(0, 1]`.
-- `repetition_penalty::Real = 1.0` — HF rule: logits at already-seen IDs
+- `temperature::Real = 1.0`: divide logits before softmax.
+- `top_k::Union{Nothing, Integer} = nothing`: keep the top-k logits.
+- `top_p::Union{Nothing, Real} = nothing`: nucleus sampling cutoff in `(0, 1]`.
+- `repetition_penalty::Real = 1.0`: HF rule: logits at already-seen IDs
   are divided (if positive) or multiplied (if negative) by `penalty`.
-- `eos_token_id` — `Integer` or `AbstractVector{<:Integer}` that
+- `eos_token_id`: `Integer` or `AbstractVector{<:Integer}` that
   terminates generation when sampled.
 - `rng::AbstractRNG = Random.default_rng()`.
 """

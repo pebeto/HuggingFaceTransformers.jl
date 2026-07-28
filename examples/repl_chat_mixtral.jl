@@ -1,5 +1,5 @@
 #!/usr/bin/env julia
-# Allspark.jl REPL chat against a Mixtral (sparse Mixture-of-Experts) model.
+# HuggingFaceTransformers.jl REPL chat against a Mixtral (sparse Mixture-of-Experts) model.
 #
 # Usage:
 #   julia --project=. examples/repl_chat_mixtral.jl
@@ -13,13 +13,14 @@
 #
 # The forward pass is correctness-first: each expert is called once
 # with its assigned slice of tokens (the standard scatter-gather), not
-# fused. Phase 4 will revisit performance.
+# fused. Fusing the expert matmuls is an open optimization.
 
-using Allspark
-using Allspark.HFHub: snapshot_download
-using Allspark.Tokenizers: load_tokenizer, encode, decode
-using Allspark.Models: load_weights, MixtralForCausalLM, MixtralConfig, load_state_dict!
-using Allspark.Generation: generate, ChatTemplate
+using HuggingFaceTransformers
+using HuggingFaceTransformers.HFHub: snapshot_download
+using HuggingFaceTransformers.Tokenizers: load_tokenizer, encode, decode
+using HuggingFaceTransformers.Models:
+    load_weights, MixtralForCausalLM, MixtralConfig, load_state_dict!
+using HuggingFaceTransformers.Generation: generate, ChatTemplate
 using JSON3
 
 const DEFAULT_MODEL = "mistralai/Mixtral-8x7B-Instruct-v0.1"
@@ -80,7 +81,7 @@ function load_chat_template(snapshot_dir::AbstractString)
         try
             return ChatTemplate(String(template_source)), bos, eos
         catch err
-            @warn """Bundled chat_template uses Jinja features Allspark
+            @warn """Bundled chat_template uses Jinja features HuggingFaceTransformers
                   doesn't support yet. Falling back to a plain Mistral
                   [INST] template; tool calls won't work.""" err
         end
@@ -130,7 +131,9 @@ function main(repo_id::AbstractString=DEFAULT_MODEL)
 
     messages = Dict{String,String}[]
     println()
-    println("Allspark.jl REPL chat (Mixtral). Ctrl-D to exit, /reset to clear history.")
+    println(
+        "HuggingFaceTransformers.jl REPL chat (Mixtral). Ctrl-D to exit, /reset to clear history.",
+    )
     println()
 
     while true

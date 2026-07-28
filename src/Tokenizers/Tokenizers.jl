@@ -1,10 +1,10 @@
 """
-    Allspark.Tokenizers
+    HuggingFaceTransformers.Tokenizers
 
-Generic tokenizers driven by HuggingFace's `tokenizer.json` schema
-(byte-level BPE first; SentencePiece and WordPiece later). No per-model
-tokenizer subclasses — `load_tokenizer("org/repo")` should be the only
-public entry point for the vast majority of models.
+Generic tokenizers driven by HuggingFace's `tokenizer.json` schema, covering
+byte-level BPE, SentencePiece Unigram, and WordPiece. There are no per-model
+tokenizer subclasses: [`load_tokenizer`](@ref) is the single public entry point
+for the vast majority of models.
 """
 module Tokenizers
 
@@ -19,6 +19,14 @@ include("wordpiece.jl")
 include("normalizer.jl")
 include("pretokenizer.jl")
 
+"""
+    AddedToken
+
+An entry from a tokenizer's `added_tokens` table: the literal `content` string,
+the `id` it maps to, and whether it is a `special` token. Added tokens are
+matched before the model's own segmentation runs, and
+[`decode`](@ref) can skip the special ones.
+"""
 struct AddedToken
     id::Int
     content::String
@@ -28,9 +36,10 @@ end
 """
     Tokenizer{M}
 
-A loaded HuggingFace tokenizer. `M` is the model type — currently
-either `BPEModel` (GPT-2 / Llama-3 / Mistral / Qwen / Phi-3 / NeoX /
-RoBERTa) or `UnigramModel` (SentencePiece — Gemma, T5).
+A loaded HuggingFace tokenizer. `M` is the segmentation model: `BPEModel`
+(GPT-2, Llama-3, Mistral, Qwen, Phi-3, NeoX, RoBERTa), `UnigramModel`
+(SentencePiece checkpoints such as Gemma), or `WordPieceModel` (BERT and its
+descendants).
 """
 struct Tokenizer{M}
     model::M
@@ -248,10 +257,16 @@ end
 Load a HuggingFace `tokenizer.json`. `path` may be the JSON file itself or
 a directory containing one.
 
-Supports BPE models with ByteLevel pre-tokenization (the GPT-2 / Llama-3 /
-Qwen2 / RoBERTa family) and Unigram models with Metaspace pre-tokenization
-(SentencePiece — Gemma, T5, …). WordPiece is not yet implemented; classic
-BERT checkpoints still need it.
+Three model types are supported:
+
+- BPE with ByteLevel pre-tokenization, for the GPT-2, Llama-3, Qwen2, and
+  RoBERTa family.
+- Unigram with Metaspace pre-tokenization, for SentencePiece checkpoints such
+  as Gemma and T5.
+- WordPiece with `BertNormalizer`, for BERT and its descendants.
+
+Checkpoints that ship only a `vocab.txt` load through
+[`load_wordpiece_from_vocab_txt`](@ref) instead.
 """
 function load_tokenizer(path::AbstractString)
     file = isdir(path) ? joinpath(path, "tokenizer.json") : path
@@ -414,7 +429,7 @@ end
 _token_separator(::Decoder) = ""
 _token_separator(::WordPieceDecoder) = " "
 function _token_separator(d::SequenceDecoder)
-    isempty(d.steps) ? "" : _token_separator(d.steps[1])
+    return isempty(d.steps) ? "" : _token_separator(d.steps[1])
 end
 
 """
@@ -437,7 +452,7 @@ function decode(
         isempty(buffer) && return nothing
         joined = join(buffer, sep)
         print(out, apply_dec(tk.decoder, joined))
-        empty!(buffer)
+        return empty!(buffer)
     end
 
     for id in ids

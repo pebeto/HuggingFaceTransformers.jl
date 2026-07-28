@@ -2,8 +2,8 @@ using Test
 using Random
 using Flux
 using Functors: isleaf
-using Allspark.Models
-using Allspark.Layers: Linear, checkpoint
+using HuggingFaceTransformers.Models
+using HuggingFaceTransformers.Layers: Linear, checkpoint
 
 # Integration test for the LoRA fine-tuning path (mirrors examples/lora_finetune.jl):
 # wrap Linears with LoRA, freeze the base, train through a checkpointed forward,

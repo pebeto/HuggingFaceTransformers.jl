@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Record HF tokenizer encodings + decodings for the Allspark.jl tokenizer
+"""Record HF tokenizer encodings + decodings for the HuggingFaceTransformers.jl tokenizer
 parity harness (`test/parity_tokenizer.jl`).
 
 Usage:
@@ -31,10 +31,10 @@ The samples list deliberately spans:
 - The empty string and a single character.
 
 `encode` uses `add_special_tokens=False` so the IDs land 1:1 with what
-Allspark produces (Allspark's encoder doesn't auto-prepend BOS).
+HuggingFaceTransformers produces (HuggingFaceTransformers's encoder doesn't auto-prepend BOS).
 `decode` uses `skip_special_tokens=False` and
 `clean_up_tokenization_spaces=True` for tokenizers that support that
-flag, matching Allspark's defaults.
+flag, matching HuggingFaceTransformers's defaults.
 """
 import json
 import os

@@ -1,5 +1,5 @@
 #!/usr/bin/env julia
-# Allspark.jl REPL chat: download a Llama, then talk to it.
+# HuggingFaceTransformers.jl REPL chat: download a Llama, then talk to it.
 #
 # Usage:
 #   julia --project=. examples/repl_chat.jl
@@ -12,12 +12,12 @@
 # First-run cost: a ~2.5 GB download for Llama-3.2-1B, cached to
 # ~/.cache/huggingface/hub. Subsequent runs are instant.
 
-using Allspark
-using Allspark.HFHub: snapshot_download
-using Allspark.Tokenizers: load_tokenizer, encode, decode
-using Allspark.Models:
+using HuggingFaceTransformers
+using HuggingFaceTransformers.HFHub: snapshot_download
+using HuggingFaceTransformers.Tokenizers: load_tokenizer, encode, decode
+using HuggingFaceTransformers.Models:
     load_weights, LlamaForCausalLM, LlamaConfig, LlamaRopeScaling, load_state_dict!
-using Allspark.Generation: generate, ChatTemplate
+using HuggingFaceTransformers.Generation: generate, ChatTemplate
 using JSON3
 
 const DEFAULT_MODEL = "meta-llama/Llama-3.2-1B-Instruct"
@@ -78,7 +78,7 @@ function load_chat_template(snapshot_dir::AbstractString)
         try
             return ChatTemplate(String(template_source)), String(get(raw, :bos_token, ""))
         catch err
-            @warn """Model's bundled chat_template uses Jinja features Allspark
+            @warn """Model's bundled chat_template uses Jinja features HuggingFaceTransformers
                   doesn't support yet. Falling back to a plain Llama-3
                   template; chat works, but tool calls and other advanced
                   template features won't.""" err
@@ -130,7 +130,9 @@ function main(repo_id::AbstractString=DEFAULT_MODEL)
 
     messages = Dict{String,String}[]
     println()
-    println("Allspark.jl REPL chat. Ctrl-D to exit, /reset to clear history.")
+    println(
+        "HuggingFaceTransformers.jl REPL chat. Ctrl-D to exit, /reset to clear history."
+    )
     println()
 
     while true

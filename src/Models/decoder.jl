@@ -70,7 +70,7 @@ Flux.@layer DecoderLayer
 
 Decoder-only transformer trunk: token embedding → stack of
 `DecoderLayer`s → final `RMSNorm`. Returns hidden states without a
-projection to vocabulary — the LM head lives in the per-model
+projection to vocabulary, because the LM head lives in the per-model
 `*ForCausalLM` wrappers.
 """
 struct DecoderModel{E,L,N}
@@ -115,13 +115,13 @@ matches the Llama / Mistral / Qwen convention (`model.embed_tokens.weight`,
 `model.norm.weight`, optional `lm_head.weight`).
 
 `qkv_bias=true` additionally emits entries for `q_proj.bias`, `k_proj.bias`,
-and `v_proj.bias` — used by Qwen2/2.5, which biases QKV but not the output
-projection.
+and `v_proj.bias`, which Qwen2 and Qwen2.5 need because they bias QKV but not
+the output projection.
 
-`llama_state_dict_map`, `mistral_state_dict_map`, and `qwen_state_dict_map`
-delegate here so a fix to the path table benefits every consumer. Phi-3
-also delegates here for the non-fused entries; it handles its fused
-`qkv_proj` and `gate_up_proj` entries separately at load time.
+[`llama_state_dict_map`](@ref), [`mistral_state_dict_map`](@ref), and
+[`qwen_state_dict_map`](@ref) delegate here so a fix to the path table benefits
+every consumer. Phi-3 also delegates here for its non-fused entries, handling
+the fused `qkv_proj` and `gate_up_proj` separately at load time.
 """
 function _decoder_state_dict_map(
     num_hidden_layers::Integer, tie_word_embeddings::Bool; qkv_bias::Bool=false

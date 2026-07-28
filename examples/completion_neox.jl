@@ -1,5 +1,5 @@
 #!/usr/bin/env julia
-# Allspark.jl text-completion REPL backed by GPT-NeoX (Pythia).
+# HuggingFaceTransformers.jl text-completion REPL backed by GPT-NeoX (Pythia).
 #
 # Usage:
 #   julia --project=. examples/completion_neox.jl
@@ -15,11 +15,12 @@
 #   pythia-6.9b:  ~28 GB download,  ~30 GB RAM
 # The 12B sibling needs more headroom than most laptops have.
 
-using Allspark
-using Allspark.HFHub: snapshot_download
-using Allspark.Tokenizers: load_tokenizer, encode, decode
-using Allspark.Models: load_weights, NeoXForCausalLM, NeoXConfig, load_state_dict!
-using Allspark.Generation: generate
+using HuggingFaceTransformers
+using HuggingFaceTransformers.HFHub: snapshot_download
+using HuggingFaceTransformers.Tokenizers: load_tokenizer, encode, decode
+using HuggingFaceTransformers.Models:
+    load_weights, NeoXForCausalLM, NeoXConfig, load_state_dict!
+using HuggingFaceTransformers.Generation: generate
 using JSON3
 
 const DEFAULT_MODEL = "EleutherAI/pythia-70m"
@@ -81,7 +82,9 @@ function main(repo_id::AbstractString=DEFAULT_MODEL)
     load_state_dict!(lm, load_weights(snapshot_dir))
 
     println()
-    println("Allspark.jl completion REPL (GPT-NeoX / Pythia). Ctrl-D to exit.")
+    println(
+        "HuggingFaceTransformers.jl completion REPL (GPT-NeoX / Pythia). Ctrl-D to exit."
+    )
     println("Type a prefix; the model continues it for up to 64 tokens.")
     println()
 

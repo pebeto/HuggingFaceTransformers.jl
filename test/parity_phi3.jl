@@ -1,8 +1,9 @@
 using Test
 using JSON3
-using Allspark.HFHub: snapshot_download
-using Allspark.Tokenizers: load_tokenizer, encode
-using Allspark.Models: load_weights, Phi3ForCausalLM, Phi3Config, load_state_dict!
+using HuggingFaceTransformers.HFHub: snapshot_download
+using HuggingFaceTransformers.Tokenizers: load_tokenizer, encode
+using HuggingFaceTransformers.Models:
+    load_weights, Phi3ForCausalLM, Phi3Config, load_state_dict!
 
 # Variant label → fixture filename. The 4k variants use plain RoPE; the
 # 128k variants need `longrope` scaling which isn't implemented yet, so
@@ -26,7 +27,7 @@ function _selected_variants(raw::AbstractString)
     return parts
 end
 
-const SELECTED = _selected_variants(get(ENV, "ALLSPARK_TEST_PARITY_PHI3", ""))
+const SELECTED = _selected_variants(get(ENV, "HFT_TEST_PARITY_PHI3", ""))
 
 function _load_phi3_config(snapshot_dir::AbstractString)
     raw = JSON3.read(read(joinpath(snapshot_dir, "config.json"), String))
@@ -118,9 +119,9 @@ function _run_variant(name::AbstractString, fixture_filename::AbstractString)
             end
             @test max_err < tolerance
 
-            allspark_top10 = sortperm(last_logits; rev=true)[1:10] .- 1
+            jl_top10 = sortperm(last_logits; rev=true)[1:10] .- 1
             hf_top10 = expected_top_indices[1:10]
-            overlap = length(intersect(Set(allspark_top10), Set(hf_top10)))
+            overlap = length(intersect(Set(jl_top10), Set(hf_top10)))
             @test overlap >= 9
         end
     end
@@ -128,7 +129,7 @@ end
 
 unknown = filter(v -> !(v in [first(t) for t in VARIANTS]), SELECTED)
 isempty(unknown) || error(
-    "Unknown ALLSPARK_TEST_PARITY_PHI3 variant(s): $(unknown). " *
+    "Unknown HFT_TEST_PARITY_PHI3 variant(s): $(unknown). " *
     "Valid: $(String[first(v) for v in VARIANTS]) or \"all\".",
 )
 

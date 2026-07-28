@@ -88,7 +88,9 @@ function _splice_image(text_embeds, image_features, input_ids, image_token::Inte
 end
 
 function _merge_and_run(
-    m::LlavaForConditionalGeneration, vision_features::AbstractArray, input_ids::AbstractMatrix{<:Integer}
+    m::LlavaForConditionalGeneration,
+    vision_features::AbstractArray,
+    input_ids::AbstractMatrix{<:Integer},
 )
     image_features = m.projector(vision_features)                    # (d_text, n, batch)
     text_embeds = m.language_model.model.embed_tokens(input_ids)     # (d_text, seq, batch)
@@ -121,7 +123,7 @@ end
     generate_multimodal(m, pixel_values, input_ids; max_new_tokens=32, eos_token_id=nothing) -> Vector{Int}
 
 Greedy multimodal decode (batch-1). The vision features are computed once; the
-decoder is recomputed each step (no KV cache — correctness first).
+decoder is recomputed each step (no KV cache; correctness first).
 """
 function generate_multimodal(
     m::LlavaForConditionalGeneration,
@@ -145,14 +147,18 @@ end
     llava_state_dict_map(m::LlavaForConditionalGeneration) -> Dict{String, Tuple{Tuple, Symbol}}
 
 Projector keys plus the language model's own map re-rooted under
-`language_model.`. Vision-tower keys are intentionally absent — load the tower
-with its own loader.
+`language_model.`. Vision-tower keys are intentionally absent, so load the
+tower with its own loader.
 """
 function llava_state_dict_map(m::LlavaForConditionalGeneration)
     out = Dict{String,Tuple{Tuple,Symbol}}()
-    out["multi_modal_projector.linear_1.weight"] = ((:projector, :linear_1, :weight), :as_is)
+    out["multi_modal_projector.linear_1.weight"] = (
+        (:projector, :linear_1, :weight), :as_is
+    )
     out["multi_modal_projector.linear_1.bias"] = ((:projector, :linear_1, :bias), :as_is)
-    out["multi_modal_projector.linear_2.weight"] = ((:projector, :linear_2, :weight), :as_is)
+    out["multi_modal_projector.linear_2.weight"] = (
+        (:projector, :linear_2, :weight), :as_is
+    )
     out["multi_modal_projector.linear_2.bias"] = ((:projector, :linear_2, :bias), :as_is)
     for (k, (path, transform)) in llama_state_dict_map(m.language_model.config)
         out["language_model.$(k)"] = ((:language_model, path...), transform)

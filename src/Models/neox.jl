@@ -17,7 +17,7 @@ GPT-NeoX diverges from the Llama family on three axes:
   GPT-2's concatenated `[Q; K; V]`.
 
 LayerNorm (with bias), GeluMLP, and the `wo_bias=true` knob were
-already in the layer kit from GPT-2 — NeoX reuses them.
+already in the layer kit from GPT-2, so NeoX reuses them.
 """
 Base.@kwdef struct NeoXConfig
     vocab_size::Int
@@ -69,8 +69,8 @@ Flux.@layer NeoXDecoderLayer
 """
     NeoXForCausalLM{C, M, H}
 
-GPT-NeoX top-level container: a `DecoderModel` (reused — its forward is
-generic over layer type) populated with `NeoXDecoderLayer`s, plus a
+GPT-NeoX top-level container: a `DecoderModel` (reused, because its forward
+is generic over layer type) populated with `NeoXDecoderLayer`s, plus a
 bias-less `Linear` LM head. Embeddings are not tied on standard
 checkpoints.
 """
@@ -156,7 +156,7 @@ end
 1:1 entries for GPT-NeoX. HF's layout puts the trunk under `gpt_neox.…`
 and the LM head at the root as `embed_out.weight`.
 
-Fused `query_key_value` weights and biases are NOT in this table —
+Fused `query_key_value` weights and biases are NOT in this table.
 [`load_state_dict!`](@ref) handles their interleaved-per-head slicing
 directly.
 """
