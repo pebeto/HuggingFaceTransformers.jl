@@ -57,14 +57,14 @@ function (c::Conv1d)(x::AbstractArray{<:Real,3})
     xp = if c.pad == 0
         x
     else
-        buf = zeros(eltype(x), cin, lp, n)
+        buf = fill!(similar(x, cin, lp, n), 0)     # on x's device
         buf[:, (c.pad + 1):(c.pad + len), :] .= x
         buf
     end
     lout = (lp - k) ÷ c.stride + 1
     # im2col: each output position gathers a k-wide window, flattened
     # channel-fastest to match `reshape(weight, cout, cin*k)`.
-    cols = Array{eltype(x)}(undef, cin * k, lout, n)
+    cols = similar(x, cin * k, lout, n)            # on x's device
     @inbounds for o in 1:lout
         s = (o - 1) * c.stride
         cols[:, o, :] = reshape(view(xp, :, (s + 1):(s + k), :), cin * k, n)

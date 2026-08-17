@@ -16,6 +16,13 @@ using ChainRulesCore:
     @ignore_derivatives, RuleConfig, HasReverseMode, rrule_via_ad, NoTangent
 using ChainRulesCore: ChainRulesCore
 
+# Materialize `x` on the same device as `ref` (dispatch on `ref`'s array type),
+# preserving `x`'s eltype. On CPU it's a copy; on any GPU array it uploads. This
+# is the one primitive that keeps position indices and attention masks, both
+# built with host-side integer logic, on the model's device without
+# vendor-specific code.
+_onlike(ref::AbstractArray, x::AbstractArray) = copyto!(similar(ref, eltype(x), size(x)), x)
+
 export KVCache,
     RMSNorm,
     GemmaRMSNorm,
@@ -64,6 +71,25 @@ function KVCache(
 )
     k = zeros(eltype, head_dim, n_kv_heads, max_seq, batch_size)
     v = zeros(eltype, head_dim, n_kv_heads, max_seq, batch_size)
+    return KVCache(k, v)
+end
+
+"""
+    KVCache(prototype::AbstractArray, head_dim, n_kv_heads, max_seq, batch_size; eltype = Float32)
+
+Allocate the cache on the same device as `prototype` (e.g. a model parameter),
+so cache writes match the activations' device without vendor-specific code.
+"""
+function KVCache(
+    prototype::AbstractArray,
+    head_dim::Integer,
+    n_kv_heads::Integer,
+    max_seq::Integer,
+    batch_size::Integer;
+    eltype=Float32,
+)
+    k = fill!(similar(prototype, eltype, head_dim, n_kv_heads, max_seq, batch_size), 0)
+    v = fill!(similar(prototype, eltype, head_dim, n_kv_heads, max_seq, batch_size), 0)
     return KVCache(k, v)
 end
 
@@ -285,34 +311,37 @@ end
 function _rope_rotate(
     inv_freq::AbstractVector, x::AbstractArray, position_ids::AbstractVector
 )
-    # Compute rotation angles: thetas of shape (half_dim, seq_len)
-    thetas = inv_freq * reshape(position_ids, 1, :)
-    cos_half = cos.(thetas)
-    sin_half = sin.(thetas)
+    # The cos/sin tables are constants (functions of positions and the fixed
+    # `inv_freq`, not of any parameter), so they stay off the AD tape and are
+    # built on `inv_freq`'s device. The rotation itself is what's differentiated.
+    cos_emb, sin_emb = @ignore_derivatives _rope_tables(inv_freq, x, position_ids)
 
-    # Duplicate cos/sin for the two halves of head_dim
-    cos_emb_2d = vcat(cos_half, cos_half)
-    sin_emb_2d = vcat(sin_half, sin_half)
-
-    # Reshape cos/sin to match shape of x
-    if ndims(x) == 4
-        cos_emb = reshape(cos_emb_2d, (size(x, 1), 1, size(x, 3), 1))
-        sin_emb = reshape(sin_emb_2d, (size(x, 1), 1, size(x, 3), 1))
-    elseif ndims(x) == 3
-        cos_emb = reshape(cos_emb_2d, (size(x, 1), size(x, 2), 1))
-        sin_emb = reshape(sin_emb_2d, (size(x, 1), size(x, 2), 1))
-    else
-        cos_emb = cos_emb_2d
-        sin_emb = sin_emb_2d
-    end
-
-    # Apply rotation
     half_dim = size(x, 1) ÷ 2
     x1 = selectdim(x, 1, 1:half_dim)
     x2 = selectdim(x, 1, (half_dim + 1):size(x, 1))
     x_rotated = vcat(-x2, x1)
 
     return (x .* cos_emb) .+ (x_rotated .* sin_emb)
+end
+
+# Build the RoPE cos/sin tables shaped to broadcast against `x`, on `inv_freq`'s
+# device. `position_ids` (host integers) is moved onto that device first.
+function _rope_tables(
+    inv_freq::AbstractVector, x::AbstractArray, position_ids::AbstractVector
+)
+    posf = _onlike(inv_freq, Float32.(reshape(position_ids, 1, :)))
+    thetas = inv_freq * posf                    # (half_dim, seq_len)
+    cos_emb_2d = vcat(cos.(thetas), cos.(thetas))
+    sin_emb_2d = vcat(sin.(thetas), sin.(thetas))
+    if ndims(x) == 4
+        return reshape(cos_emb_2d, size(x, 1), 1, size(x, 3), 1),
+        reshape(sin_emb_2d, size(x, 1), 1, size(x, 3), 1)
+    elseif ndims(x) == 3
+        return reshape(cos_emb_2d, size(x, 1), size(x, 2), 1),
+        reshape(sin_emb_2d, size(x, 1), size(x, 2), 1)
+    else
+        return cos_emb_2d, sin_emb_2d
+    end
 end
 
 function (m::RoPE)(x::AbstractArray, position_ids::AbstractVector)
@@ -324,8 +353,8 @@ function (m::RoPE)(x::AbstractArray, position_ids::AbstractVector)
     # Partial RoPE (GPT-NeoX / Pythia): rotate the first rotary_dim
     # channels of each head, pass the remaining channels through.
     rdim = m.rotary_dim
-    x_rot = Array(selectdim(x, 1, 1:rdim))
-    x_pass = Array(selectdim(x, 1, (rdim + 1):size(x, 1)))
+    x_rot = copy(selectdim(x, 1, 1:rdim))            # copy, not Array: stay on-device
+    x_pass = copy(selectdim(x, 1, (rdim + 1):size(x, 1)))
     rotated = _rope_rotate(m.inv_freq, x_rot, position_ids)
     return cat(rotated, x_pass; dims=1)
 end
@@ -533,46 +562,41 @@ function (m::MoEMLP)(x::AbstractArray)
     top_k = m.top_k
     T = eltype(probs)
 
+    # Top-k routing is data-dependent host-side control flow (it's tiny:
+    # n_experts × n_tokens); do it on the CPU, then keep the expert compute and
+    # the gather/scatter on-device.
+    probs_host = Array(probs)
     selected = Matrix{Int}(undef, top_k, n_tokens)
-    weights = Matrix{T}(undef, top_k, n_tokens)
+    gate_w = Matrix{T}(undef, top_k, n_tokens)
     for i in 1:n_tokens
-        col = view(probs, :, i)
-        topk_idx = partialsortperm(col, 1:top_k; rev=true)
-        w = T[col[k] for k in topk_idx]
+        topk_idx = partialsortperm(view(probs_host, :, i), 1:top_k; rev=true)
+        w = T[probs_host[k, i] for k in topk_idx]
         w ./= sum(w)
         @inbounds for k in 1:top_k
             selected[k, i] = topk_idx[k]
-            weights[k, i] = w[k]
+            gate_w[k, i] = w[k]
         end
     end
 
-    out = zeros(T, hidden, n_tokens)
+    out = fill!(similar(flat), 0)   # on x's device
 
-    # For each expert: gather tokens that chose it, run, scatter back with weights.
+    # For each expert: gather the tokens that chose it, run, scatter back with
+    # weights. Within one expert each token appears at most once, so the indexed
+    # write is a well-defined device gather/scatter.
     for expert_idx in 1:n_experts
-        # Collect (token, slot) pairs where this expert was selected.
         token_idxs = Int[]
-        slot_idxs = Int[]
+        wvals = T[]
         @inbounds for i in 1:n_tokens, k in 1:top_k
             if selected[k, i] == expert_idx
                 push!(token_idxs, i)
-                push!(slot_idxs, k)
+                push!(wvals, gate_w[k, i])
             end
         end
         isempty(token_idxs) && continue
 
-        # Run the expert on the gathered slice.
-        input_subset = flat[:, token_idxs]
-        expert_out = m.experts[expert_idx](input_subset)   # (hidden, n_assigned)
-
-        # Scatter-add weighted outputs.
-        @inbounds for j in eachindex(token_idxs)
-            ti = token_idxs[j]
-            w = weights[slot_idxs[j], ti]
-            for h in 1:hidden
-                out[h, ti] += w * expert_out[h, j]
-            end
-        end
+        expert_out = m.experts[expert_idx](flat[:, token_idxs])   # (hidden, n_assigned)
+        wdev = _onlike(expert_out, reshape(wvals, 1, length(wvals)))
+        out[:, token_idxs] = out[:, token_idxs] .+ expert_out .* wdev
     end
 
     return reshape(out, hidden, trailing...)
@@ -700,9 +724,10 @@ function _sdpa_materialized(q, k_t, v; scale, softcap, drop)
     end
     if !isnothing(drop)
         sq, skv = size(drop)
-        # Multiply the Bool mask directly; keeping it Bool stops Zygote
-        # differentiating back into the mask.
-        scores = scores .+ reshape(drop .* Float32(-1e9), sq, skv, 1)
+        # Move the Bool mask onto the scores' device (no-op on CPU) and keep it
+        # Bool so Zygote doesn't differentiate back into it.
+        drop_dev = @ignore_derivatives _onlike(scores, drop)
+        scores = scores .+ reshape(drop_dev .* Float32(-1e9), sq, skv, 1)
     end
     probs = NNlib.softmax(scores; dims=2)
     return batched_mul(probs, v)
@@ -772,6 +797,35 @@ function flash_sdpa(
     safe_l = ifelse.(l_run .== zero(T), one(T), l_run)
     out = acc ./ safe_l
     return Tin <: AbstractFloat ? Tin.(out) : out
+end
+
+# The tiled forward above updates its running max, denominator, and accumulator in
+# place, which reverse-mode AD cannot trace: Zygote follows the mutation into the
+# device intrinsics and fails with "`llvmcall` requires the compiler". So under AD,
+# differentiate the materialized path instead. Same math to within the summation
+# order, and the tiling's memory advantage is an inference concern, where no tape
+# is being built. Without this, loading any GPU backend extension routes `sdpa` to
+# `flash_sdpa` and makes every device training step fail. A recompute-based flash
+# backward, which would restore the memory advantage for training too, is future
+# work.
+function ChainRulesCore.rrule(
+    config::RuleConfig{>:HasReverseMode},
+    ::typeof(flash_sdpa),
+    q::AbstractArray,
+    k_t::AbstractArray,
+    v::AbstractArray;
+    scale,
+    softcap=nothing,
+    drop=nothing,
+    block_size::Integer=128,
+)
+    materialized(a, b, c) = _sdpa_materialized(a, b, c; scale, softcap, drop)
+    out, back = rrule_via_ad(config, materialized, q, k_t, v)
+    function flash_sdpa_pullback(Δ)
+        _, dq, dk_t, dv = back(Δ)
+        return (NoTangent(), dq, dk_t, dv)
+    end
+    return out, flash_sdpa_pullback
 end
 
 """

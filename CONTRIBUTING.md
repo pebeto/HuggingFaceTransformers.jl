@@ -99,9 +99,26 @@ Pushes to `dev` publish to the `dev` docs, and pushes to `master` publish to
   an environment variable: `HFT_TEST_PARITY` for Llama and
   `HFT_TEST_PARITY_<FAMILY>` for the rest. Each takes a variant label, a
   comma-separated list, or `all`.
-- GPU tests are not part of the default suite. `test/gpu_attention.jl` runs
-  by hand on a real device, and the plan for wiring GPU CI is in
-  [`docs/src/gpu_ci.md`](docs/src/gpu_ci.md).
+- `test/gpu.jl` is part of the default suite. `HFT_GPU_BACKEND` selects the
+  device and defaults to `jlarrays`, the GPUArrays reference backend, so the
+  default run needs no GPU. The same assertions run on real hardware by setting
+  the variable to `cuda`, `amdgpu`, or `metal` in an environment that has the
+  backend package:
+
+  ```
+  julia --project=/tmp/gpuenv -e 'using Pkg
+      Pkg.develop(path="."); Pkg.add(["CUDA", "cuDNN", "Flux", "Functors", "Test"])'
+  HFT_GPU_BACKEND=cuda julia --project=/tmp/gpuenv -e 'include("test/gpu.jl")'
+  ```
+
+  The backend packages are deliberately not test dependencies: they are large and
+  platform-specific, and `Pkg.test()` must stay CPU-only.
+- The reference backend cannot catch everything. It never loads a backend
+  extension, so anything that only happens when `sdpa` routes to `flash_sdpa` is
+  invisible to it. Run at least one real backend before submitting a PR that
+  touches attention, the extensions, or the AD path.
+- `test/gpu_attention.jl` covers the extension dispatch itself and therefore
+  requires real hardware; it errors if pointed at the reference backend.
 
 ## Pull requests
 

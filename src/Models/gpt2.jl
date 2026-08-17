@@ -137,9 +137,10 @@ function build_caches(
 )
     cfg = lm.config
     head_dim = cfg.hidden_size ÷ cfg.num_attention_heads
+    proto = _cache_prototype(lm)
     return [
-        KVCache(head_dim, cfg.num_attention_heads, max_seq, batch_size; eltype=eltype) for
-        _ in 1:(cfg.num_hidden_layers)
+        KVCache(proto, head_dim, cfg.num_attention_heads, max_seq, batch_size; eltype=eltype)
+        for _ in 1:(cfg.num_hidden_layers)
     ]
 end
 

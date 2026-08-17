@@ -80,18 +80,19 @@ end
 Flux.@layer SiglipVisionEmbeddings
 
 """
-    SiglipAttentionPoolingHead{Q, K, V, O, N, M}
+    SiglipAttentionPoolingHead{Q, K, V, O, N, M, P}
 
 Pools patch tokens with a single learned probe query (HF's
 `nn.MultiheadAttention`). `wq`/`wk`/`wv` are the split of the fused
 `in_proj_weight`; `wo` is `out_proj`. Output is `probe_attn + mlp(layernorm(...))`.
+The probe is typed as `P` so it can hold a device array after a GPU move.
 """
-struct SiglipAttentionPoolingHead{Q,K,V,O,N,M}
+struct SiglipAttentionPoolingHead{Q,K,V,O,N,M,P}
     wq::Q
     wk::K
     wv::V
     wo::O
-    probe::Vector{Float32}
+    probe::P
     layernorm::N
     mlp::M
     num_heads::Int
@@ -170,18 +171,19 @@ end
 Flux.@layer SiglipTextModel
 
 """
-    SiglipModel{C, V, T}
+    SiglipModel{C, V, T, S}
 
 Vision + text towers with a sigmoid-contrastive head. `logit_scale` and
-`logit_bias` are 1-element buffers; forward returns `logits_per_image`
+`logit_bias` are 1-element buffers, typed as `S` so they survive a GPU move and
+are broadcast rather than scalar-indexed. Forward returns `logits_per_image`
 `(n_images, n_texts)`.
 """
-struct SiglipModel{C,V,T}
+struct SiglipModel{C,V,T,S}
     config::C
     vision::V
     text::T
-    logit_scale::Vector{Float32}
-    logit_bias::Vector{Float32}
+    logit_scale::S
+    logit_bias::S
 end
 
 function (m::SiglipModel)(
@@ -189,8 +191,9 @@ function (m::SiglipModel)(
 )
     img = l2_normalize(m.vision(pixel_values))         # (proj, n_img)
     txt = l2_normalize(m.text(input_ids))              # (proj, n_txt)
-    scale = exp(m.logit_scale[1])
-    return (permutedims(img) * txt) .* scale .+ m.logit_bias[1]   # (n_img, n_txt)
+    # Broadcast the length-1 scale/bias buffers (no scalar indexing, so this
+    # runs on any device).
+    return (permutedims(img) * txt) .* exp.(m.logit_scale) .+ m.logit_bias   # (n_img, n_txt)
 end
 
 Flux.@layer SiglipModel

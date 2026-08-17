@@ -1,5 +1,6 @@
 using Test
 using Random
+using Flux
 using HuggingFaceTransformers.Layers: sdpa, flash_sdpa, GQA, RoPE
 
 # Helper: build a random (q, k_t, v) triple in the layout sdpa/flash_sdpa
@@ -124,6 +125,39 @@ end
     # fp32-accumulated flash should still track the fp32 materialized result.
     ref = sdpa(q, k_t, v; scale=scale)
     @test maximum(abs.(Float32.(out) .- ref)) < 1e-2
+end
+
+@testset "flash_sdpa is differentiable and matches the materialized gradient" begin
+    # `flash_sdpa`'s tiled forward mutates in place, so it has an explicit rrule
+    # that differentiates the materialized path instead. Without it, loading any
+    # GPU backend extension (which routes `sdpa` to `flash_sdpa`) breaks every
+    # device training step. That failure is invisible to the reference backend,
+    # since no extension loads there, so pin the rule here on CPU.
+    scale = sqrt(8.0f0)
+    q, k_t, v = _qkv(6, 10, 8, 2; seed=0x40)
+    drop = Bool[(j - 1) > (i - 1) for i in 1:6, j in 1:10]
+
+    for (label, kwargs) in (
+        ("no mask", (;)),
+        ("causal mask", (; drop=drop)),
+        ("softcap", (; softcap=30.0f0)),
+    )
+        gq_flash, gk_flash, gv_flash = Flux.gradient(
+            (a, b, c) -> sum(flash_sdpa(a, b, c; scale=scale, block_size=4, kwargs...)),
+            q,
+            k_t,
+            v,
+        )
+        gq_ref, gk_ref, gv_ref = Flux.gradient(
+            (a, b, c) -> sum(sdpa(a, b, c; scale=scale, kwargs...)), q, k_t, v
+        )
+
+        @testset "$(label)" begin
+            @test gq_flash ≈ gq_ref
+            @test gk_flash ≈ gk_ref
+            @test gv_flash ≈ gv_ref
+        end
+    end
 end
 
 @testset "GQA routes through sdpa with unchanged output" begin

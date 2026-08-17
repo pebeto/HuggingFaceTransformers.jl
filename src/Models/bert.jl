@@ -202,16 +202,17 @@ function BertModel(cfg::BertConfig)
 end
 
 """
-    BertLMHead{D, N, P}
+    BertLMHead{D, N, P, B}
 
 MaskedLM prediction head: `dense → gelu → LayerNorm → decoder + bias`.
-`decoder.weight` is tied to the input embedding at load time.
+`decoder.weight` is tied to the input embedding at load time. `bias` is a type
+parameter so the vector can hold a device array after a GPU move.
 """
-mutable struct BertLMHead{D,N,P}
+mutable struct BertLMHead{D,N,P,B}
     dense::D
     norm::N
     decoder::P
-    bias::Vector{Float32}
+    bias::B
 end
 
 function (h::BertLMHead)(x::AbstractArray)

@@ -62,18 +62,19 @@ end
 Flux.@layer Dinov2Embeddings
 
 """
-    Dinov2Layer{A, N1, N2, M}
+    Dinov2Layer{A, N1, N2, M, S}
 
 Pre-norm block with LayerScale: `x = x + ls1 ⊙ attn(norm1(x))` then
-`x = x + ls2 ⊙ mlp(norm2(x))`. `ls1`/`ls2` are the per-channel `lambda1` vectors.
+`x = x + ls2 ⊙ mlp(norm2(x))`. `ls1`/`ls2` are the per-channel `lambda1` vectors,
+typed as `S` so they can hold a device array after a GPU move.
 """
-struct Dinov2Layer{A,N1,N2,M}
+struct Dinov2Layer{A,N1,N2,M,S}
     self_attn::A
     norm1::N1
     norm2::N2
     mlp::M
-    ls1::Vector{Float32}
-    ls2::Vector{Float32}
+    ls1::S
+    ls2::S
 end
 
 function (l::Dinov2Layer)(x::AbstractArray)
@@ -84,7 +85,7 @@ end
 Flux.@layer Dinov2Layer
 
 """
-    Dinov2Model{E, L, N}
+    Dinov2Model{C, E, L, N}
 
 embeddings → pre-norm encoder (with LayerScale) → final LayerNorm. Returns the
 per-token hidden states `(hidden, seq, batch)`; the pooled image feature is the

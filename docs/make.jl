@@ -55,7 +55,6 @@ makedocs(;
             "api/gguf.md",
             "api/internals.md",
         ],
-        "GPU CI plan" => "gpu_ci.md",
     ],
     # Every exported symbol must appear in an @docs block, and a broken
     # cross-reference fails the build rather than shipping a dead link.

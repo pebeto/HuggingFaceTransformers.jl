@@ -111,6 +111,10 @@ using HuggingFaceTransformers
         include("train.jl")
     end
 
+    @testset verbose = true "GPU (device-agnostic)" begin
+        include("gpu.jl")
+    end
+
     @testset verbose = true "Generation" begin
         include("generate.jl")
     end

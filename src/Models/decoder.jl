@@ -3,6 +3,10 @@
 # because its block structure differs (four RMSNorms per layer, embedding
 # scaling); see `gemma.jl`.
 
+# A representative parameter array, used to allocate KV caches on the model's
+# device (CPU or any GPU) via `similar`, so cache writes match the activations.
+_cache_prototype(model) = first(Flux.trainables(model))
+
 """
     TokenEmbedding{W}
 

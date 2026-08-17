@@ -110,8 +110,9 @@ function build_caches(
     lm::LlamaForCausalLM, max_seq::Integer, batch_size::Integer; eltype=Float32
 )
     cfg = lm.config
+    proto = _cache_prototype(lm)
     return [
-        KVCache(cfg.head_dim, cfg.num_key_value_heads, max_seq, batch_size; eltype=eltype)
+        KVCache(proto, cfg.head_dim, cfg.num_key_value_heads, max_seq, batch_size; eltype=eltype)
         for _ in 1:(cfg.num_hidden_layers)
     ]
 end

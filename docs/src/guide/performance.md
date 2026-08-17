@@ -41,21 +41,60 @@ with depth.
 
 ## GPU
 
-Move a model with Flux and the rest follows:
+Two questions are separate here: where the arrays live, and which attention
+kernel runs.
+
+Every forward pass is generic array math (`*`, `batched_mul`, `softmax`,
+broadcast), so it runs on whichever GPUArrays backend you load, dispatching on
+the array type. No vendor-specific code sits in the core, and a model does not
+need a backend extension to execute on a device.
 
 ```julia
 using Flux: gpu
 using CUDA   # or AMDGPU, or Metal on Apple Silicon
 
 lm_gpu = gpu(lm)
+caches = build_caches(lm_gpu, 512, 1)
 ```
+
+[`Models.build_caches`](@ref) allocates each cache on the model's device, so
+cache writes land next to the activations instead of forcing a host round trip.
+
+Every architecture in the package runs on device: the decoder LLMs including
+Mixtral's expert routing and NeoX's partial rotary, the vision encoders, Whisper,
+the embedding models, and the LLaVA composition. Training works on device too,
+including LoRA through a checkpointed forward. The suite checks all of it against
+JLArrays, the GPUArrays reference backend, so the device path stays covered
+without a GPU in CI, and the same assertions run against CUDA, AMDGPU, or Metal
+by setting `HFT_GPU_BACKEND`.
+
+!!! warning "`gpu` can silently do nothing"
+    `Flux.gpu` moves parameters only once an MLDataDevices trigger package is
+    fully loaded. `using CUDA` without `cuDNN` leaves every parameter a plain
+    `Matrix` and the model keeps running on the CPU, which looks like a
+    successful move. Check a parameter's type afterwards, or move explicitly:
+
+    ```julia
+    using Functors: fmap
+    lm_gpu = fmap(x -> x isa AbstractArray ? CuArray(x) : x, lm)
+    ```
+
+Weight-only int8 is the exception to all of this. `QuantizedInt8Matrix` is a
+host-oriented leaf that dequantizes per call, so pair `quantize_int8` with CPU
+execution and use fp16 for a smaller device footprint.
 
 Importing a backend loads the matching package extension, which routes
 [`Layers.sdpa`](@ref) on device arrays to [`Layers.flash_sdpa`](@ref). That is a
 tiled attention kernel: it walks the key and value blocks with a running softmax
 instead of materializing the full score matrix, so memory stays linear in
 sequence length. It also stays NaN-safe for a fully-masked query and preserves
-input precision, so fp16 in gives fp16 out.
+input precision, so fp16 in gives fp16 out. The extension is a performance path,
+not a requirement for running on a device.
+
+The tiled forward updates its accumulators in place, which reverse-mode AD cannot
+trace, so `flash_sdpa` carries an explicit rule that differentiates the
+materialized path instead. Training on a device therefore gets the materialized
+attention backward, and only inference benefits from the tiling.
 
 Three extensions ship, one per backend:
 
@@ -75,8 +114,8 @@ real device:
 HFT_GPU_BACKEND=cuda julia --project=. test/gpu_attention.jl
 ```
 
-That file is not part of the default suite. See the [GPU CI plan](@ref
-"GPU CI plan") for how automated GPU coverage is meant to land.
+That file is the one GPU test outside the default suite, since it needs real
+hardware. `test/gpu.jl` runs everywhere and covers the device path on JLArrays.
 
 ## Memory notes
 
