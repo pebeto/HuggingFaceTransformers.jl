@@ -145,27 +145,33 @@ function build_caches(
 end
 
 """
-    gpt2_state_dict_map(cfg::GPT2Config) -> Dict{String, Tuple{Tuple, Symbol}}
+    gpt2_state_dict_map(cfg::GPT2Config; prefix = "transformer") -> Dict{String, Tuple{Tuple, Symbol}}
 
 Pure-data state-dict map for the entries GPT-2 stores 1:1 with the
 internal model. The HF naming is `transformer.h.{i}.…`, not Llama's
 `model.layers.{i}.…`.
+
+`prefix` selects the namespace. Checkpoints saved from `GPT2LMHeadModel` carry
+`transformer.`, while the released base checkpoints (`gpt2`, `gpt2-medium` and
+friends) store bare keys such as `h.0.ln_1.weight`. Pass `prefix = ""` for those;
+[`load_state_dict!`](@ref) detects which it is.
 
 The fused `c_attn.weight` / `c_attn.bias` (concatenated Q/K/V) and the
 Conv1D-orientation weights (`c_proj`, `c_fc`) are NOT in this table.
 [`load_state_dict!`](@ref) slices and transposes them at load time.
 LayerNorm biases ARE in this table because they're 1:1 vectors.
 """
-function gpt2_state_dict_map(cfg::GPT2Config)
+function gpt2_state_dict_map(cfg::GPT2Config; prefix::AbstractString="transformer")
     out = Dict{String,Tuple{Tuple,Symbol}}()
+    pfx(s) = isempty(prefix) ? s : "$(prefix).$(s)"
 
     # HF stores (vocab, hidden); we want (hidden, vocab).
-    out["transformer.wte.weight"] = ((:model, :embed_tokens, :weight), :transpose)
-    out["transformer.wpe.weight"] = ((:model, :embed_positions, :weight), :transpose)
+    out[pfx("wte.weight")] = ((:model, :embed_tokens, :weight), :transpose)
+    out[pfx("wpe.weight")] = ((:model, :embed_positions, :weight), :transpose)
 
     for i in 0:(cfg.num_hidden_layers - 1)
         layer_path = (:model, :layers, i + 1)
-        hf_prefix = "transformer.h.$(i)"
+        hf_prefix = pfx("h.$(i)")
 
         out["$(hf_prefix).ln_1.weight"] = (
             (layer_path..., :input_layernorm, :weight), :as_is
@@ -179,10 +185,18 @@ function gpt2_state_dict_map(cfg::GPT2Config)
         )
     end
 
-    out["transformer.ln_f.weight"] = ((:model, :norm, :weight), :as_is)
-    out["transformer.ln_f.bias"] = ((:model, :norm, :bias), :as_is)
+    out[pfx("ln_f.weight")] = ((:model, :norm, :weight), :as_is)
+    out[pfx("ln_f.bias")] = ((:model, :norm, :bias), :as_is)
 
     return out
+end
+
+# The released base checkpoints store bare keys; anything saved from the head
+# model namespaces them under `transformer.`. HF resolves this through
+# `base_model_prefix`, so detect it rather than making the caller declare it.
+function _gpt2_prefix(weights)
+    any(startswith("transformer."), keys(weights)) && return "transformer"
+    return ""
 end
 
 """
@@ -207,14 +221,15 @@ function load_state_dict!(
     lm::GPT2ForCausalLM, weights::AbstractDict{String,<:AbstractArray}
 )
     cfg = lm.config
-    load_into!(lm, weights, gpt2_state_dict_map(cfg))
+    ns = _gpt2_prefix(weights)
+    load_into!(lm, weights, gpt2_state_dict_map(cfg; prefix=ns))
 
     h_size = cfg.hidden_size
 
     for i in 0:(cfg.num_hidden_layers - 1)
         layer = lm.model.layers[i + 1]
         attn = layer.self_attn
-        prefix = "transformer.h.$(i)"
+        prefix = isempty(ns) ? "h.$(i)" : "$(ns).h.$(i)"
 
         # Fused QKV weight: Conv1D-shape (hidden, 3*hidden) → transpose →
         # (3*hidden, hidden) → slice along the output dim into wq / wk / wv.

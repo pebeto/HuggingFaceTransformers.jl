@@ -387,6 +387,33 @@ function bert_state_dict_map(cfg::BertConfig)
     return out
 end
 
+# Checkpoints converted before transformers renamed LayerNorm's parameters still
+# ship `LayerNorm.gamma` / `LayerNorm.beta`; `bert-base-uncased` is one of them.
+# HF renames these on load and so do we, scoped to `LayerNorm.` so that a model
+# using `gamma` for something else (LayerScale, say) is left alone.
+const _LEGACY_NORM_NAMES = ("LayerNorm.gamma" => "LayerNorm.weight",
+    "LayerNorm.beta" => "LayerNorm.bias")
+
+function _bert_rename_legacy_norms(weights::AbstractDict{String,<:AbstractArray})
+    needs_rename = any(keys(weights)) do key
+        any(pair -> endswith(key, first(pair)), _LEGACY_NORM_NAMES)
+    end
+    needs_rename || return weights
+
+    renamed = Dict{String,AbstractArray}()
+    for (key, value) in weights
+        new_key = key
+        for (old, new) in _LEGACY_NORM_NAMES
+            if endswith(key, old)
+                new_key = key[1:(end - length(old))] * new
+                break
+            end
+        end
+        renamed[new_key] = value
+    end
+    return renamed
+end
+
 """
     load_state_dict!(lm::BertForMaskedLM, weights) -> lm
 
@@ -398,6 +425,7 @@ input-embedding transpose.
 function load_state_dict!(
     lm::BertForMaskedLM, weights::AbstractDict{String,<:AbstractArray}
 )
+    weights = _bert_rename_legacy_norms(weights)
     load_into!(lm, weights, bert_state_dict_map(lm.config))
 
     if lm.config.tie_word_embeddings

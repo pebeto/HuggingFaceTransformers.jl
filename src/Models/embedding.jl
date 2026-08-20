@@ -99,6 +99,7 @@ the checkpoint.
 function load_state_dict!(
     m::BertEmbeddingModel, weights::AbstractDict{String,<:AbstractArray}
 )
+    weights = _bert_rename_legacy_norms(weights)
     full = bert_state_dict_map(m.config)
     trunk_map = Dict(k => v for (k, v) in full if first(first(v)) === :trunk)
     load_into!(m, weights, trunk_map)

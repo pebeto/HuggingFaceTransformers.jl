@@ -4,7 +4,24 @@ CurrentModule = HuggingFaceTransformers
 
 # Loading a checkpoint
 
-Loading is four explicit steps, and the middle one is manual.
+One call covers the common case:
+
+```julia
+using HuggingFaceTransformers
+
+lm = load("mistralai/Mistral-7B-Instruct-v0.3")
+```
+
+[`load`](@ref) downloads the repository, reads the architecture out of
+`config.json`, builds the matching config and model, and loads the weights.
+Keywords reach the model constructor, so an embedding checkpoint that wants mean
+pooling is `load("intfloat/e5-small-v2"; pooling = :mean)`. Supported
+architectures are listed in [`Models.AUTO_ARCHITECTURES`](@ref); anything else
+throws and names what it found.
+
+The rest of this page is the same work done by hand, which is what you want when
+adding an architecture, changing a hyperparameter, or loading a checkpoint whose
+`config.json` lies about its shape.
 
 ## 1. Fetch the repository
 
@@ -25,9 +42,17 @@ whole snapshot. [`HFHub.default_cache_dir`](@ref) reports where things land, and
 
 ## 2. Build the config
 
-There is no `AutoConfig` equivalent that guesses the architecture from
-`config.json`, so you pick the config type and fill in the fields you need. Each
-file under `examples/` does this for one family.
+[`Models.config_from_json`](@ref) does this per architecture, and
+[`Models.read_config`](@ref) parses the file:
+
+```julia
+using HuggingFaceTransformers.Models: MistralConfig, config_from_json, read_config
+
+cfg = config_from_json(MistralConfig, read_config(dir))
+```
+
+Spelling it out is worth seeing once, because HF's keys and ours do not always
+agree and some fields are derived rather than read:
 
 ```julia
 using HuggingFaceTransformers.Models: MistralConfig

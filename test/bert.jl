@@ -255,3 +255,28 @@ end
     load_state_dict!(lm, sd)
     @test lm.head.decoder.weight == sd["cls.predictions.decoder.weight"]
 end
+
+@testset "renames legacy LayerNorm parameter names" begin
+    # Checkpoints converted before transformers renamed LayerNorm's parameters
+    # ship `LayerNorm.gamma` / `LayerNorm.beta`; `bert-base-uncased` still does.
+    Random.seed!(0xB37)
+    cfg = BertConfig(;
+        vocab_size=32, hidden_size=8, intermediate_size=16, num_hidden_layers=2,
+        num_attention_heads=2, max_position_embeddings=16, type_vocab_size=2,
+    )
+    modern = _bert_synthetic_state_dict(cfg)
+    legacy = Dict(
+        replace(replace(k, "LayerNorm.weight" => "LayerNorm.gamma"),
+            "LayerNorm.bias" => "LayerNorm.beta") => v for (k, v) in modern
+    )
+    @test any(endswith("LayerNorm.gamma"), keys(legacy))   # fixture really is legacy
+
+    ids = reshape([1, 5, 9, 2], :, 1)
+    from_modern = load_state_dict!(BertForMaskedLM(cfg), modern)
+    from_legacy = load_state_dict!(BertForMaskedLM(cfg), legacy)
+    @test from_legacy(ids) ≈ from_modern(ids)
+
+    # The rename is scoped to LayerNorm, so `gamma` elsewhere is left alone.
+    other = Dict{String,Array{Float32}}("encoder.layer.0.layer_scale.gamma" => randn(Float32, 4))
+    @test haskey(Models._bert_rename_legacy_norms(other), "encoder.layer.0.layer_scale.gamma")
+end

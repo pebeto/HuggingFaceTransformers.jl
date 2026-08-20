@@ -36,6 +36,9 @@ using .Layers
 using .Models
 using .Generation
 
+include("auto.jl")
+
 export HFHub, GGUF, Tokenizers, Layers, Models, Generation
+export load
 
 end # module HuggingFaceTransformers

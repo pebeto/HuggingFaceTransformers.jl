@@ -70,8 +70,26 @@ function _parse_merges(raw::AbstractVector)
     return out
 end
 
+# `type` was added to `tokenizer.json` after the first checkpoints shipped, and
+# files without it are still on the Hub (`gpt2`'s among them). HF infers the model
+# from which fields are present, so do the same: a `merges` list means BPE, a
+# vocab of `[token, score]` pairs means Unigram, and a plain vocab object without
+# merges means WordPiece.
+function _infer_model_type(m::JSON3.Object)
+    haskey(m, :merges) && return "BPE"
+    vocab = get(m, :vocab, nothing)
+    vocab isa JSON3.Array && return "Unigram"
+    vocab isa JSON3.Object && return "WordPiece"
+    throw(
+        ArgumentError(
+            "tokenizer.json `model` has no `type` and no recognizable vocab to " *
+            "infer one from; keys present: $(collect(keys(m)))",
+        ),
+    )
+end
+
 function _parse_model(m::JSON3.Object)
-    typ = String(m[:type]::AbstractString)
+    typ = haskey(m, :type) ? String(m[:type]::AbstractString) : _infer_model_type(m)
     if typ == "BPE"
         vocab_raw = m[:vocab]::JSON3.Object
         vocab = Dict{String,Int}()

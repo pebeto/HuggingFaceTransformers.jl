@@ -177,3 +177,31 @@ end
     sd["transformer.h.0.attn.c_attn.weight"] = randn(Float32, cfg.hidden_size, 7)   # wrong second dim
     @test_throws DimensionMismatch load_state_dict!(lm, sd)
 end
+
+@testset "loads both key spellings" begin
+    # The released base checkpoints (`gpt2`, `gpt2-medium`, …) store bare keys such
+    # as `h.0.ln_1.weight`, while anything saved from `GPT2LMHeadModel` namespaces
+    # them under `transformer.`. Both must load to the same parameters.
+    Random.seed!(0xC0F)
+    cfg = GPT2Config(;
+        vocab_size=16, hidden_size=8, intermediate_size=16, num_hidden_layers=2,
+        num_attention_heads=2, max_position_embeddings=16,
+    )
+    prefixed = _gpt2_synthetic_state_dict(cfg)
+    bare = Dict(replace(k, "transformer." => "") => v for (k, v) in prefixed)
+
+    @test !any(startswith("transformer."), keys(bare))   # fixture really is bare
+
+    from_prefixed = load_state_dict!(GPT2ForCausalLM(cfg), prefixed)
+    from_bare = load_state_dict!(GPT2ForCausalLM(cfg), bare)
+
+    ids = reshape([1, 2, 3, 4], :, 1)
+    @test from_bare(ids) ≈ from_prefixed(ids)
+    @test from_bare.model.embed_tokens.weight == from_prefixed.model.embed_tokens.weight
+    @test from_bare.model.layers[1].self_attn.wq.weight ==
+        from_prefixed.model.layers[1].self_attn.wq.weight
+
+    # The map itself is switchable, which is what the loader keys off.
+    @test haskey(gpt2_state_dict_map(cfg; prefix=""), "wte.weight")
+    @test haskey(gpt2_state_dict_map(cfg), "transformer.wte.weight")
+end

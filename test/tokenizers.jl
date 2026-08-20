@@ -561,3 +561,27 @@ end
         end
     end
 end
+
+@testset "infers the model type when tokenizer.json omits it" begin
+    # `type` postdates the earliest tokenizer.json files, and some are still on the
+    # Hub without it (`gpt2`'s is one). HF infers the model from the fields present.
+    mktempdir() do dir
+        spec = _fixture_dict()
+        delete!(spec["model"], "type")
+        path = joinpath(dir, "tokenizer.json")
+        open(io -> JSON3.write(io, spec), path, "w")
+
+        inferred = load_tokenizer(path)          # merges present, so BPE
+        reference = load_tokenizer(_write_fixture(dir))
+        text = "hello world"
+        @test encode(inferred, text) == encode(reference, text)
+        @test decode(inferred, encode(inferred, text)) == text
+    end
+
+    mktempdir() do dir
+        # No type and no usable vocab: say so rather than guessing.
+        path = joinpath(dir, "tokenizer.json")
+        write(path, """{"model": {"dropout": null}}""")
+        @test_throws ArgumentError load_tokenizer(path)
+    end
+end

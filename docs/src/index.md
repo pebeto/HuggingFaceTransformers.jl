@@ -18,6 +18,7 @@ against a reference recorded from `transformers` in Python.
 
 ```@docs
 HuggingFaceTransformers
+load
 ```
 
 ## Installation
@@ -35,30 +36,33 @@ GPT-2 needs no access token, which makes it the shortest end-to-end example.
 Roughly 0.5 GB downloads to `~/.cache/huggingface/hub` on first run.
 
 ```julia
+using HuggingFaceTransformers
 using HuggingFaceTransformers.HFHub: snapshot_download
 using HuggingFaceTransformers.Tokenizers: load_tokenizer
-using HuggingFaceTransformers.Models:
-    GPT2Config, GPT2ForCausalLM, load_weights, load_state_dict!
 using HuggingFaceTransformers.Generation: generate
-using JSON3
+
+lm = load("gpt2")
+tokenizer = load_tokenizer(snapshot_download("gpt2"))
+
+println(generate(lm, tokenizer, "The Julia language is"; max_new_tokens=32))
+```
+
+[`load`](@ref) reads `config.json` to pick the architecture, so no config type is
+named and no field is copied by hand. The download is cached, which is why asking
+for the snapshot directory a second time costs nothing.
+
+To build a model yourself, for an architecture we do not dispatch on or to change
+a hyperparameter, the explicit path is still there:
+
+```julia
+using HuggingFaceTransformers.Models:
+    GPT2Config, GPT2ForCausalLM, config_from_json, read_config,
+    load_weights, load_state_dict!
 
 dir = snapshot_download("gpt2")
-raw = JSON3.read(read(joinpath(dir, "config.json"), String))
-
-cfg = GPT2Config(;
-    vocab_size=Int(raw.vocab_size),
-    hidden_size=Int(raw.n_embd),
-    intermediate_size=4 * Int(raw.n_embd),
-    num_hidden_layers=Int(raw.n_layer),
-    num_attention_heads=Int(raw.n_head),
-    max_position_embeddings=Int(raw.n_positions),
-)
-
+cfg = config_from_json(GPT2Config, read_config(dir))
 lm = GPT2ForCausalLM(cfg)
 load_state_dict!(lm, load_weights(dir))
-
-tokenizer = load_tokenizer(dir)
-println(generate(lm, tokenizer, "The Julia language is"; max_new_tokens=32))
 ```
 
 Gated repositories (Llama and Gemma among them) need a token in `HF_TOKEN`, or
@@ -104,7 +108,11 @@ and Mixtral's top-k expert routing are all handled inside these types.
 
 ## Rough edges
 
-- No `AutoModel` equivalent. You choose the config type and populate it.
+- [`load`](@ref) dispatches on the architectures listed in
+  [`Models.AUTO_ARCHITECTURES`](@ref). Anything else needs the config built by
+  hand, and checkpoints we cannot represent faithfully are refused rather than
+  approximated: Phi-3's longrope variants and DINOv2-giant's SwiGLU FFN both
+  throw.
 - Generation is batch-1, and there is no continuous batching.
 - Vision models take `pixel_values` directly. Image decoding and preprocessing
   are not in the package.

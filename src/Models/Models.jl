@@ -61,6 +61,7 @@ export save_lora, load_lora, apply_lora!
 export MixtralConfig, MixtralForCausalLM, mixtral_state_dict_map
 export convert_eltype, fp16, bf16, fp32
 export QuantizedInt8Matrix, quantize_int8
+export read_config, config_from_json, load_pretrained, AUTO_ARCHITECTURES
 
 include("weights.jl")
 include("state_dict.jl")
@@ -84,5 +85,7 @@ include("lora.jl")
 include("mixtral.jl")
 include("dtype.jl")
 include("quantize.jl")
+# Last: the dispatch table references every config and wrapper type above.
+include("auto.jl")
 
 end # module Models
