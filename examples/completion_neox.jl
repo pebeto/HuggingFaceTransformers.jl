@@ -18,36 +18,10 @@
 using HuggingFaceTransformers
 using HuggingFaceTransformers.HFHub: snapshot_download
 using HuggingFaceTransformers.Tokenizers: load_tokenizer, encode, decode
-using HuggingFaceTransformers.Models:
-    load_weights, NeoXForCausalLM, NeoXConfig, load_state_dict!
 using HuggingFaceTransformers.Generation: generate
 using JSON3
 
 const DEFAULT_MODEL = "EleutherAI/pythia-70m"
-
-function load_neox_config(snapshot_dir::AbstractString)
-    raw = JSON3.read(read(joinpath(snapshot_dir, "config.json"), String))
-    head_dim = if haskey(raw, :head_dim)
-        Int(raw.head_dim)
-    else
-        Int(raw.hidden_size) ÷ Int(raw.num_attention_heads)
-    end
-    rotary_pct = Float64(get(raw, :rotary_pct, 0.25))
-
-    return NeoXConfig(;
-        vocab_size=Int(raw.vocab_size),
-        hidden_size=Int(raw.hidden_size),
-        intermediate_size=Int(raw.intermediate_size),
-        num_hidden_layers=Int(raw.num_hidden_layers),
-        num_attention_heads=Int(raw.num_attention_heads),
-        head_dim=head_dim,
-        max_position_embeddings=Int(raw.max_position_embeddings),
-        rope_theta=Float64(get(raw, :rotary_emb_base, 10_000.0)),
-        partial_rotary_factor=rotary_pct,
-        layer_norm_eps=Float64(get(raw, :layer_norm_eps, 1.0e-5)),
-        tie_word_embeddings=Bool(get(raw, :tie_word_embeddings, false)),
-    )
-end
 
 function load_eos_ids(snapshot_dir::AbstractString)
     gen_path = joinpath(snapshot_dir, "generation_config.json")
@@ -66,20 +40,16 @@ function main(repo_id::AbstractString=DEFAULT_MODEL)
     snapshot_dir = snapshot_download(repo_id; verbose=true)
     println("Snapshot at $(snapshot_dir)")
 
-    println("Parsing config and tokenizer...")
-    cfg = load_neox_config(snapshot_dir)
+    println("Parsing tokenizer...")
     tokenizer = load_tokenizer(snapshot_dir)
     eos_ids = load_eos_ids(snapshot_dir)
 
+    println("Loading model...")
+    lm = load(snapshot_dir)
     println(
-        "Materializing model ($(cfg.num_hidden_layers) layers, " *
-        "$(cfg.hidden_size) hidden, " *
-        "rotary_pct=$(cfg.partial_rotary_factor))...",
+        "Loaded $(nameof(typeof(lm))): $(lm.config.num_hidden_layers) layers, " *
+        "$(lm.config.hidden_size) hidden",
     )
-    lm = NeoXForCausalLM(cfg)
-
-    println("Loading weights (slicing per-head interleaved QKV)...")
-    load_state_dict!(lm, load_weights(snapshot_dir))
 
     println()
     println(

@@ -17,8 +17,6 @@
 using HuggingFaceTransformers
 using HuggingFaceTransformers.HFHub: snapshot_download
 using HuggingFaceTransformers.Tokenizers: load_tokenizer, encode, decode
-using HuggingFaceTransformers.Models:
-    load_weights, GemmaForCausalLM, GemmaConfig, load_state_dict!
 using HuggingFaceTransformers.Generation: generate, ChatTemplate
 using JSON3
 
@@ -41,60 +39,6 @@ const FALLBACK_GEMMA_TEMPLATE = raw"""
 <start_of_turn>model
 {% endif -%}
 """
-
-function load_gemma_config(snapshot_dir::AbstractString)
-    raw = JSON3.read(read(joinpath(snapshot_dir, "config.json"), String))
-
-    head_dim = if haskey(raw, :head_dim)
-        Int(raw.head_dim)
-    else
-        Int(raw.hidden_size) ÷ Int(raw.num_attention_heads)
-    end
-
-    sliding_window = if haskey(raw, :sliding_window) && raw.sliding_window !== nothing
-        Int(raw.sliding_window)
-    else
-        nothing
-    end
-
-    attn_softcap =
-        if haskey(raw, :attn_logit_softcapping) && raw.attn_logit_softcapping !== nothing
-            Float64(raw.attn_logit_softcapping)
-        else
-            nothing
-        end
-
-    final_softcap =
-        if haskey(raw, :final_logit_softcapping) && raw.final_logit_softcapping !== nothing
-            Float64(raw.final_logit_softcapping)
-        else
-            nothing
-        end
-
-    qpas = if haskey(raw, :query_pre_attn_scalar) && raw.query_pre_attn_scalar !== nothing
-        Int(raw.query_pre_attn_scalar)
-    else
-        nothing
-    end
-
-    return GemmaConfig(;
-        vocab_size=Int(raw.vocab_size),
-        hidden_size=Int(raw.hidden_size),
-        intermediate_size=Int(raw.intermediate_size),
-        num_hidden_layers=Int(raw.num_hidden_layers),
-        num_attention_heads=Int(raw.num_attention_heads),
-        num_key_value_heads=Int(get(raw, :num_key_value_heads, raw.num_attention_heads)),
-        head_dim=head_dim,
-        max_position_embeddings=Int(raw.max_position_embeddings),
-        rope_theta=Float64(get(raw, :rope_theta, 10_000.0)),
-        rms_norm_eps=Float64(get(raw, :rms_norm_eps, 1.0e-6)),
-        tie_word_embeddings=Bool(get(raw, :tie_word_embeddings, true)),
-        sliding_window=sliding_window,
-        attn_logit_softcapping=attn_softcap,
-        final_logit_softcapping=final_softcap,
-        query_pre_attn_scalar=qpas,
-    )
-end
 
 function load_chat_template(snapshot_dir::AbstractString)
     raw = JSON3.read(read(joinpath(snapshot_dir, "tokenizer_config.json"), String))
@@ -139,8 +83,7 @@ function main(repo_id::AbstractString=DEFAULT_MODEL)
     snapshot_dir = snapshot_download(repo_id; verbose=true)
     println("Snapshot at $(snapshot_dir)")
 
-    println("Parsing config and tokenizer...")
-    cfg = load_gemma_config(snapshot_dir)
+    println("Parsing tokenizer...")
     tokenizer = load_tokenizer(snapshot_dir)
     template = load_chat_template(snapshot_dir)
     eos_ids = load_eos_ids(snapshot_dir)
@@ -151,14 +94,12 @@ function main(repo_id::AbstractString=DEFAULT_MODEL)
         else
             ""
         end
+    println("Loading model...")
+    lm = load(snapshot_dir)
     println(
-        "Materializing model ($(cfg.num_hidden_layers) layers, " *
-        "$(cfg.hidden_size) hidden$(softcap_note))...",
+        "Loaded $(nameof(typeof(lm))): $(lm.config.num_hidden_layers) layers, " *
+        "$(lm.config.hidden_size) hidden",
     )
-    lm = GemmaForCausalLM(cfg)
-
-    println("Loading weights...")
-    load_state_dict!(lm, load_weights(snapshot_dir))
 
     messages = Dict{String,String}[]
     println()

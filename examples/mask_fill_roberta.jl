@@ -20,38 +20,27 @@
 using HuggingFaceTransformers
 using HuggingFaceTransformers.HFHub: snapshot_download
 using HuggingFaceTransformers.Tokenizers: load_tokenizer, encode, decode
-using HuggingFaceTransformers.Models:
-    load_weights, BertForMaskedLM, BertConfig, load_state_dict!
 using JSON3
 
 const DEFAULT_MODEL = "FacebookAI/roberta-base"
 const TOP_K = 5
 
-function load_roberta_config(snapshot_dir::AbstractString)
-    raw = JSON3.read(read(joinpath(snapshot_dir, "config.json"), String))
-    return BertConfig(;
-        vocab_size=Int(raw.vocab_size),
-        hidden_size=Int(raw.hidden_size),
-        intermediate_size=Int(raw.intermediate_size),
-        num_hidden_layers=Int(raw.num_hidden_layers),
-        num_attention_heads=Int(raw.num_attention_heads),
-        max_position_embeddings=Int(raw.max_position_embeddings) - 2,
-        type_vocab_size=Int(get(raw, :type_vocab_size, 1)),
-        layer_norm_eps=Float64(get(raw, :layer_norm_eps, 1.0e-5)),
-        pad_token_id=Int(get(raw, :pad_token_id, 1)),
-        position_embedding_offset=2,
-        hf_prefix="roberta",
-        head_prefix="lm_head",
-        tie_word_embeddings=true,
-    )
-end
+# Where the mask token is declared varies by checkpoint. `roberta-base` ships a
+# `tokenizer_config.json` holding nothing but `model_max_length`, so fall back to
+# the added-tokens table in `tokenizer.json`, which every fast tokenizer carries.
+function load_mask_token(snapshot_dir::AbstractString)
+    config_path = joinpath(snapshot_dir, "tokenizer_config.json")
+    if isfile(config_path)
+        raw = JSON3.read(read(config_path, String))
+        haskey(raw, :mask_token) && return String(raw.mask_token)
+    end
 
-function load_mask_token_id(snapshot_dir::AbstractString)
-    raw = JSON3.read(read(joinpath(snapshot_dir, "tokenizer_config.json"), String))
-    haskey(raw, :mask_token) || error("no mask_token in tokenizer_config.json")
-    # The mask token id usually lives in special_tokens_map / added_tokens.
-    # Easier: re-encode the mask token's string form via the tokenizer.
-    return String(raw.mask_token)
+    tokenizer_json = JSON3.read(read(joinpath(snapshot_dir, "tokenizer.json"), String))
+    for added in get(tokenizer_json, :added_tokens, ())
+        content = String(added.content)
+        content in ("<mask>", "[MASK]") && return content
+    end
+    return error("no mask token in tokenizer_config.json or tokenizer.json")
 end
 
 function main(repo_id::AbstractString=DEFAULT_MODEL)
@@ -59,10 +48,9 @@ function main(repo_id::AbstractString=DEFAULT_MODEL)
     snapshot_dir = snapshot_download(repo_id; verbose=true)
     println("Snapshot at $(snapshot_dir)")
 
-    println("Parsing config and tokenizer...")
-    cfg = load_roberta_config(snapshot_dir)
+    println("Parsing tokenizer...")
     tokenizer = load_tokenizer(snapshot_dir)
-    mask_token = load_mask_token_id(snapshot_dir)
+    mask_token = load_mask_token(snapshot_dir)
 
     # Look up the integer ID for the mask token string.
     mask_ids = encode(tokenizer, mask_token)
@@ -70,14 +58,12 @@ function main(repo_id::AbstractString=DEFAULT_MODEL)
         error("mask token $(mask_token) didn't tokenize to a single ID; got $(mask_ids)")
     mask_id = mask_ids[1]
 
+    println("Loading model...")
+    lm = load(snapshot_dir)
     println(
-        "Materializing model ($(cfg.num_hidden_layers) layers, " *
-        "$(cfg.hidden_size) hidden)...",
+        "Loaded $(nameof(typeof(lm))): $(lm.config.num_hidden_layers) layers, " *
+        "$(lm.config.hidden_size) hidden",
     )
-    lm = BertForMaskedLM(cfg)
-
-    println("Loading weights...")
-    load_state_dict!(lm, load_weights(snapshot_dir))
 
     println()
     println("HuggingFaceTransformers.jl mask-fill REPL (RoBERTa). Ctrl-D to exit.")

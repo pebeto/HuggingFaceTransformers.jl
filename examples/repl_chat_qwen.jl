@@ -16,8 +16,6 @@
 using HuggingFaceTransformers
 using HuggingFaceTransformers.HFHub: snapshot_download
 using HuggingFaceTransformers.Tokenizers: load_tokenizer, encode, decode
-using HuggingFaceTransformers.Models:
-    load_weights, QwenForCausalLM, QwenConfig, load_state_dict!
 using HuggingFaceTransformers.Generation: generate, ChatTemplate
 using JSON3
 
@@ -39,39 +37,6 @@ You are a helpful assistant.<|im_end|>
 <|im_start|>assistant
 {% endif -%}
 """
-
-function load_qwen_config(snapshot_dir::AbstractString)
-    raw = JSON3.read(read(joinpath(snapshot_dir, "config.json"), String))
-
-    head_dim = if haskey(raw, :head_dim)
-        Int(raw.head_dim)
-    else
-        Int(raw.hidden_size) ÷ Int(raw.num_attention_heads)
-    end
-
-    use_sw = Bool(get(raw, :use_sliding_window, false))
-    sliding_window =
-        if use_sw && haskey(raw, :sliding_window) && raw.sliding_window !== nothing
-            Int(raw.sliding_window)
-        else
-            nothing
-        end
-
-    return QwenConfig(;
-        vocab_size=Int(raw.vocab_size),
-        hidden_size=Int(raw.hidden_size),
-        intermediate_size=Int(raw.intermediate_size),
-        num_hidden_layers=Int(raw.num_hidden_layers),
-        num_attention_heads=Int(raw.num_attention_heads),
-        num_key_value_heads=Int(get(raw, :num_key_value_heads, raw.num_attention_heads)),
-        head_dim=head_dim,
-        max_position_embeddings=Int(raw.max_position_embeddings),
-        rope_theta=Float64(get(raw, :rope_theta, 1_000_000.0)),
-        rms_norm_eps=Float64(get(raw, :rms_norm_eps, 1.0e-6)),
-        tie_word_embeddings=Bool(get(raw, :tie_word_embeddings, false)),
-        sliding_window=sliding_window,
-    )
-end
 
 function load_chat_template(snapshot_dir::AbstractString)
     raw = JSON3.read(read(joinpath(snapshot_dir, "tokenizer_config.json"), String))
@@ -116,21 +81,17 @@ function main(repo_id::AbstractString=DEFAULT_MODEL)
     snapshot_dir = snapshot_download(repo_id; verbose=true)
     println("Snapshot at $(snapshot_dir)")
 
-    println("Parsing config and tokenizer...")
-    cfg = load_qwen_config(snapshot_dir)
+    println("Parsing tokenizer...")
     tokenizer = load_tokenizer(snapshot_dir)
     template = load_chat_template(snapshot_dir)
     eos_ids = load_eos_ids(snapshot_dir)
 
+    println("Loading model...")
+    lm = load(snapshot_dir)
     println(
-        "Materializing model ($(cfg.num_hidden_layers) layers, " *
-        "$(cfg.hidden_size) hidden, " *
-        "tied=$(cfg.tie_word_embeddings))...",
+        "Loaded $(nameof(typeof(lm))): $(lm.config.num_hidden_layers) layers, " *
+        "$(lm.config.hidden_size) hidden",
     )
-    lm = QwenForCausalLM(cfg)
-
-    println("Loading weights...")
-    load_state_dict!(lm, load_weights(snapshot_dir))
 
     messages = Dict{String,String}[]
     println()

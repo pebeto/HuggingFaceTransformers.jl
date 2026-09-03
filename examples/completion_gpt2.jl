@@ -17,29 +17,10 @@
 using HuggingFaceTransformers
 using HuggingFaceTransformers.HFHub: snapshot_download
 using HuggingFaceTransformers.Tokenizers: load_tokenizer, encode, decode
-using HuggingFaceTransformers.Models:
-    load_weights, GPT2ForCausalLM, GPT2Config, load_state_dict!
 using HuggingFaceTransformers.Generation: generate
 using JSON3
 
 const DEFAULT_MODEL = "gpt2"
-
-function load_gpt2_config(snapshot_dir::AbstractString)
-    raw = JSON3.read(read(joinpath(snapshot_dir, "config.json"), String))
-    hidden = Int(raw.n_embd)
-    return GPT2Config(;
-        vocab_size=Int(raw.vocab_size),
-        hidden_size=hidden,
-        intermediate_size=Int(
-            get(raw, :n_inner, nothing) === nothing ? 4 * hidden : raw.n_inner
-        ),
-        num_hidden_layers=Int(raw.n_layer),
-        num_attention_heads=Int(raw.n_head),
-        max_position_embeddings=Int(raw.n_positions),
-        layer_norm_eps=Float64(get(raw, :layer_norm_epsilon, 1.0e-5)),
-        tie_word_embeddings=Bool(get(raw, :tie_word_embeddings, true)),
-    )
-end
 
 function load_eos_ids(snapshot_dir::AbstractString)
     gen_path = joinpath(snapshot_dir, "generation_config.json")
@@ -58,19 +39,16 @@ function main(repo_id::AbstractString=DEFAULT_MODEL)
     snapshot_dir = snapshot_download(repo_id; verbose=true)
     println("Snapshot at $(snapshot_dir)")
 
-    println("Parsing config and tokenizer...")
-    cfg = load_gpt2_config(snapshot_dir)
+    println("Parsing tokenizer...")
     tokenizer = load_tokenizer(snapshot_dir)
     eos_ids = load_eos_ids(snapshot_dir)
 
+    println("Loading model...")
+    lm = load(snapshot_dir)
     println(
-        "Materializing model ($(cfg.num_hidden_layers) layers, " *
-        "$(cfg.hidden_size) hidden)...",
+        "Loaded $(nameof(typeof(lm))): $(lm.config.num_hidden_layers) layers, " *
+        "$(lm.config.hidden_size) hidden",
     )
-    lm = GPT2ForCausalLM(cfg)
-
-    println("Loading weights (transposing Conv1D + slicing fused QKV)...")
-    load_state_dict!(lm, load_weights(snapshot_dir))
 
     println()
     println("HuggingFaceTransformers.jl completion REPL (GPT-2). Ctrl-D to exit.")
