@@ -1,3 +1,15 @@
+"""
+    Undefined
+
+Stands in for a name or member the context does not provide. Jinja renders an
+undefined value as empty and treats it as false in a test, which is what lets a
+template's optional branches (`{% if tools %}`) be skipped instead of raising.
+Deliberately not `nothing`: `undefined is none` must stay false, and a variable
+explicitly set to `none` is still defined.
+"""
+struct Undefined end
+
+_truthy(::Undefined) = false
 _truthy(::Nothing) = false
 _truthy(b::Bool) = b
 _truthy(s::AbstractString) = !isempty(s)
@@ -6,6 +18,7 @@ _truthy(c::AbstractArray) = !isempty(c)
 _truthy(d::AbstractDict) = !isempty(d)
 _truthy(_) = true
 
+_stringify(::Undefined) = ""
 _stringify(::Nothing) = ""
 _stringify(s::AbstractString) = s
 _stringify(b::Bool) = b ? "True" : "False"
@@ -16,17 +29,22 @@ function _get_member(obj::AbstractDict, name)
     haskey(obj, sk) && return obj[sk]
     sym = Symbol(name)
     haskey(obj, sym) && return obj[sym]
-    throw(KeyError(name))
+    return Undefined()
 end
 function _get_member(obj::NamedTuple, name)
     sym = Symbol(name)
-    hasfield(typeof(obj), sym) || throw(KeyError(name))
+    hasfield(typeof(obj), sym) || return Undefined()
     return getfield(obj, sym)
 end
 function _get_member(obj, name)
     sym = Symbol(name)
-    hasproperty(obj, sym) || throw(KeyError(name))
+    hasproperty(obj, sym) || return Undefined()
     return getproperty(obj, sym)
+end
+# Reaching through an undefined value is a template bug, not a skippable branch,
+# so this is the one place undefined raises.
+function _get_member(::Undefined, name)
+    throw(ArgumentError("cannot access `$(name)` on an undefined value"))
 end
 
 _get_item(obj::AbstractDict, key) = _get_member(obj, key)
@@ -101,7 +119,7 @@ function eval_expr(e::LiteralExpr, _)
     return e.value
 end
 function eval_expr(e::NameExpr, ctx::AbstractDict)
-    haskey(ctx, e.name) || throw(KeyError(e.name))
+    haskey(ctx, e.name) || return Undefined()
     return ctx[e.name]
 end
 function eval_expr(e::AttrExpr, ctx::AbstractDict)
@@ -142,23 +160,12 @@ function eval_expr(e::BoolOpExpr, ctx::AbstractDict)
 end
 function eval_expr(e::TestExpr, ctx::AbstractDict)
     if e.name == "defined"
-        result = if e.target isa NameExpr
-            haskey(ctx, e.target.name)
-        else
-            try
-                eval_expr(e.target, ctx)
-                true
-            catch err
-                err isa KeyError ? false : rethrow(err)
-            end
-        end
+        # A variable explicitly set to `none` is still defined, which is why this
+        # asks about the sentinel rather than about emptiness.
+        result = !(eval_expr(e.target, ctx) isa Undefined)
         return e.negated ? !result : result
     elseif e.name == "none"
-        result = try
-            isnothing(eval_expr(e.target, ctx))
-        catch err
-            err isa KeyError ? false : rethrow(err)
-        end
+        result = isnothing(eval_expr(e.target, ctx))
         return e.negated ? !result : result
     end
     throw(ArgumentError("unsupported test: is $(e.name)"))

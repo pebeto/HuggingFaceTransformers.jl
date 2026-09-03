@@ -88,8 +88,15 @@ function _parse_compare(p)
                 _consume!(p)
                 negated = true
             end
-            name_tok = _eat!(p, :name)
-            left = TestExpr(left, name_tok.value, negated)
+            # `none` lexes as a literal rather than a name, so `x is none` needs
+            # its own arm; every other test (`defined`) arrives as a name.
+            test_name = if _check(p, :none)
+                _consume!(p)
+                "none"
+            else
+                _eat!(p, :name).value
+            end
+            left = TestExpr(left, test_name, negated)
         else
             break
         end

@@ -237,3 +237,48 @@ end
         @test_throws ArgumentError apply_chat_template("{{ 1 + }}", [])
     end
 end
+
+@testset verbose = true "undefined values" begin
+    # Tool-capable templates (Qwen, Llama 3.1+, Mistral v0.3) guard their optional
+    # sections with `{% if tools %}`. Jinja skips those branches when the caller
+    # passes no tools, so an undefined name has to be falsy rather than an error.
+    @testset "undefined is falsy, not an error" begin
+        @test apply_chat_template("{% if tools %}T{% else %}none{% endif %}", []) ==
+            "none"
+        @test apply_chat_template("{% if not tools %}skipped{% endif %}", []) == "skipped"
+        @test apply_chat_template("{% if tools %}T{% endif %}ok", []) == "ok"
+    end
+
+    @testset "undefined renders empty" begin
+        @test apply_chat_template("[{{ missing }}]", []) == "[]"
+    end
+
+    @testset "a missing member is undefined too" begin
+        # `message.tool_calls` on a message that has no such key.
+        msgs = [Dict("role" => "user", "content" => "hi")]
+        tmpl = "{% for m in messages %}{% if m.tool_calls %}T{% else %}-{% endif %}" *
+               "{% endfor %}"
+        @test apply_chat_template(tmpl, msgs) == "-"
+        @test apply_chat_template("[{{ messages[0].nope }}]", msgs) == "[]"
+    end
+
+    @testset "undefined is not none, and none is still defined" begin
+        # Jinja distinguishes the two: a variable set to none exists, an undefined
+        # one does not, and neither collapses into the other.
+        @test apply_chat_template("{% if x is none %}y{% else %}n{% endif %}", []) == "n"
+        @test apply_chat_template(
+            "{% if x is none %}y{% else %}n{% endif %}", []; x=nothing
+        ) == "y"
+        @test apply_chat_template(
+            "{% if x is defined %}y{% else %}n{% endif %}", []; x=nothing
+        ) == "y"
+        @test apply_chat_template("{% if x is defined %}y{% else %}n{% endif %}", []) ==
+            "n"
+    end
+
+    @testset "reaching through an undefined value still raises" begin
+        # Skipping an absent branch is intended; dereferencing one is a template bug.
+        @test_throws ArgumentError apply_chat_template("{{ missing.attr }}", [])
+        @test_throws ArgumentError apply_chat_template("{{ a.b.c }}", []; a=Dict())
+    end
+end

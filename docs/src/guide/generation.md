@@ -77,9 +77,18 @@ prompt = template(
 ```
 
 Supported: `if`/`elif`/`else`, `for`, `set`, attribute and item access, slicing,
-arithmetic and comparison and logical operators, `in`, `is defined`, the `trim`
-and `tojson` filters, `raise_exception`, the `loop.*` variables, and whitespace
-control.
+arithmetic and comparison and logical operators, `in`, `is defined`, `is none`,
+the `trim` and `tojson` filters, `raise_exception`, the `loop.*` variables, and
+whitespace control.
+
+Undefined names and missing members follow Jinja: they are falsy in a test and
+render as empty, rather than raising. That is what lets the tool-capable
+templates the modern instruct models ship (Qwen, Llama 3.1+, Mistral v0.3) render
+for ordinary chat, since their `{% if tools %}` sections are simply skipped when
+you pass no tools. Tool calling itself is still out of scope. Reaching *through*
+an undefined value (`missing.attr`) does raise, because that is a template bug
+rather than a branch to skip, and an undefined value is distinct from `none`: a
+variable explicitly set to `none` is still defined.
 
 Not supported: tuple, list, and dict literals, float literals, macros,
 includes, custom filters, custom tests, and step slicing. A template that
