@@ -585,3 +585,96 @@ end
         @test_throws ArgumentError load_tokenizer(path)
     end
 end
+
+@testset verbose = true "post-processor (special tokens)" begin
+    _write(dir, spec) = (p = joinpath(dir, "tokenizer.json");
+        open(io -> JSON3.write(io, spec), p, "w"); p)
+
+    @testset "TemplateProcessing wraps the sequence" begin
+        mktempdir() do dir
+            spec = _fixture_dict()
+            cls, sep = FIXTURE_ENDOFTEXT_ID, FIXTURE_ENDOFTEXT_ID
+            spec["post_processor"] = Dict(
+                "type" => "TemplateProcessing",
+                "single" => [
+                    Dict("SpecialToken" => Dict("id" => "[CLS]", "type_id" => 0)),
+                    Dict("Sequence" => Dict("id" => "A", "type_id" => 0)),
+                    Dict("SpecialToken" => Dict("id" => "[SEP]", "type_id" => 0)),
+                ],
+                "special_tokens" => Dict(
+                    "[CLS]" => Dict("id" => "[CLS]", "ids" => [cls], "tokens" => ["[CLS]"]),
+                    "[SEP]" => Dict("id" => "[SEP]", "ids" => [sep], "tokens" => ["[SEP]"]),
+                ),
+            )
+            tk = load_tokenizer(_write(dir, spec))
+            bare = encode(tk, "hello"; add_special_tokens=false)
+            @test encode(tk, "hello") == vcat(cls, bare, sep)
+            # HF's default is to add them, so ours is too.
+            @test encode(tk, "hello") != bare
+        end
+    end
+
+    @testset "RobertaProcessing states its tokens directly" begin
+        mktempdir() do dir
+            spec = _fixture_dict()
+            spec["post_processor"] = Dict(
+                "type" => "RobertaProcessing",
+                "cls" => ["<s>", 0],
+                "sep" => ["</s>", 2],
+                "trim_offsets" => true,
+                "add_prefix_space" => false,
+            )
+            tk = load_tokenizer(_write(dir, spec))
+            ids = encode(tk, "hello")
+            @test first(ids) == 0
+            @test last(ids) == 2
+            @test ids[2:(end - 1)] == encode(tk, "hello"; add_special_tokens=false)
+        end
+    end
+
+    @testset "offset-only processors add nothing" begin
+        mktempdir() do dir
+            spec = _fixture_dict()
+            spec["post_processor"] = Dict(
+                "type" => "ByteLevel", "add_prefix_space" => true, "trim_offsets" => true
+            )
+            tk = load_tokenizer(_write(dir, spec))
+            @test encode(tk, "hello") == encode(tk, "hello"; add_special_tokens=false)
+        end
+    end
+
+    @testset "a Sequence of processors composes" begin
+        mktempdir() do dir
+            spec = _fixture_dict()
+            spec["post_processor"] = Dict(
+                "type" => "Sequence",
+                "processors" => [
+                    Dict("type" => "ByteLevel", "trim_offsets" => true),
+                    Dict(
+                        "type" => "RobertaProcessing",
+                        "cls" => ["<s>", 0], "sep" => ["</s>", 2],
+                        "trim_offsets" => true, "add_prefix_space" => false,
+                    ),
+                ],
+            )
+            tk = load_tokenizer(_write(dir, spec))
+            ids = encode(tk, "hello")
+            @test first(ids) == 0 && last(ids) == 2
+        end
+    end
+
+    @testset "an unknown processor refuses rather than dropping tokens" begin
+        mktempdir() do dir
+            spec = _fixture_dict()
+            spec["post_processor"] = Dict("type" => "SomeFutureProcessor")
+            @test_throws ArgumentError load_tokenizer(_write(dir, spec))
+        end
+    end
+
+    @testset "no post_processor section means no special tokens" begin
+        mktempdir() do dir
+            tk = load_tokenizer(_write_fixture(dir))
+            @test encode(tk, "hello") == encode(tk, "hello"; add_special_tokens=false)
+        end
+    end
+end

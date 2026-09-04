@@ -107,7 +107,9 @@ function main(repo_id::AbstractString=DEFAULT_MODEL)
 
         push!(messages, Dict("role" => "user", "content" => String(line)))
         prompt = template(messages; add_generation_prompt=true, bos_token=bos_token)
-        prompt_ids = encode(tokenizer, prompt)
+        # The chat template already emits its special tokens as text, so the
+        # post-processor must not add them a second time.
+        prompt_ids = encode(tokenizer, prompt; add_special_tokens=false)
 
         out_ids = generate(
             lm,

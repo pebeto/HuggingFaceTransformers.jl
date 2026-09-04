@@ -70,7 +70,9 @@ function _run_variant(name::AbstractString, fixture_filename::AbstractString)
             label = "[$(i)] " * (length(text) > 40 ? text[1:40] * "…" : text)
 
             @testset "$(label) — encode" begin
-                ids = encode(tk, text)
+                # The fixtures are recorded with add_special_tokens=False, so the
+                # ids land 1:1 on the model's own segmentation.
+                ids = encode(tk, text; add_special_tokens=false)
                 @test ids == expected_ids
                 ids == expected_ids && (encode_pass[] += 1)
             end

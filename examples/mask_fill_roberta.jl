@@ -53,7 +53,7 @@ function main(repo_id::AbstractString=DEFAULT_MODEL)
     mask_token = load_mask_token(snapshot_dir)
 
     # Look up the integer ID for the mask token string.
-    mask_ids = encode(tokenizer, mask_token)
+    mask_ids = encode(tokenizer, mask_token; add_special_tokens=false)
     length(mask_ids) == 1 ||
         error("mask token $(mask_token) didn't tokenize to a single ID; got $(mask_ids)")
     mask_id = mask_ids[1]

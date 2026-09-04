@@ -16,6 +16,28 @@ ids = encode(tokenizer, "Hello, world!")
 text = decode(tokenizer, ids)
 ```
 
+## Special tokens
+
+`encode` applies the checkpoint's `post_processor`, so the ids come back wrapped
+the way the model expects: `[CLS] … [SEP]` for BERT, `<s> … </s>` for RoBERTa,
+`<|startoftranscript|> <|notimestamps|> … <|endoftext|>` for Whisper. Byte-level
+processors add nothing. This matches HF, where `add_special_tokens` defaults to
+true, and it matters: a masked-LM or embedding checkpoint fed bare ids returns
+noticeably worse results.
+
+Pass `add_special_tokens = false` when the text already carries them, which is
+the case for chat-template output, or when you need the model's own segmentation
+alone:
+
+```julia
+prompt = apply_chat_template(template, messages; add_generation_prompt=true)
+ids = encode(tokenizer, prompt; add_special_tokens=false)  # template emitted them
+```
+
+Only the single-sequence form is supported. Pair encoding
+(`[CLS] A [SEP] B [SEP]`), padding, truncation, and offset mapping are not
+implemented yet.
+
 Three segmentation models are supported:
 
 - BPE with ByteLevel pre-tokenization, for the GPT-2, Llama-3, Qwen2, and

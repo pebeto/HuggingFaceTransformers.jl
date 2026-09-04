@@ -34,6 +34,84 @@ struct AddedToken
 end
 
 """
+    PostProcessor
+
+The special tokens a checkpoint wraps around an encoded sequence, read from
+`tokenizer.json`'s `post_processor`. Every processor in the wild that touches
+token ids does so as a prefix and a suffix around the sequence: `[CLS] A [SEP]`
+for BERT, `<s> A </s>` for RoBERTa, `A </s>` for SigLIP, and
+`<|startoftranscript|> <|notimestamps|> A <|endoftext|>` for Whisper. Offset-only
+processors such as `ByteLevel` add nothing, so both vectors are empty.
+
+Pair encoding (`[CLS] A [SEP] B [SEP]`) is not represented yet; only the single
+sequence form is.
+"""
+struct PostProcessor
+    prefix_ids::Vector{Int}
+    suffix_ids::Vector{Int}
+end
+
+PostProcessor() = PostProcessor(Int[], Int[])
+
+_adds_special_tokens(p::PostProcessor) =
+    !isempty(p.prefix_ids) || !isempty(p.suffix_ids)
+
+# `TemplateProcessing` names its specials indirectly: `single` lists entries and
+# `special_tokens` maps each name to the ids it expands to.
+function _template_ids(entries, specials)
+    prefix, suffix, seen_sequence = Int[], Int[], false
+    for entry in entries
+        obj = entry::JSON3.Object
+        if haskey(obj, :Sequence)
+            seen_sequence = true
+        elseif haskey(obj, :SpecialToken)
+            name = String(obj[:SpecialToken][:id])
+            haskey(specials, Symbol(name)) ||
+                throw(ArgumentError("post_processor references unknown special token `$(name)`"))
+            ids = Int[Int(i) for i in specials[Symbol(name)][:ids]]
+            append!(seen_sequence ? suffix : prefix, ids)
+        else
+            throw(ArgumentError("unrecognized post_processor entry: $(collect(keys(obj)))"))
+        end
+    end
+    return PostProcessor(prefix, suffix)
+end
+
+# Offset-only processors leave ids untouched.
+const _OFFSET_ONLY_PROCESSORS = ("ByteLevel", "Metaspace")
+
+function _parse_post_processor(raw::JSON3.Object)
+    typ = String(raw[:type])
+
+    if typ in _OFFSET_ONLY_PROCESSORS
+        return PostProcessor()
+    elseif typ == "TemplateProcessing"
+        return _template_ids(
+            get(raw, :single, ()), get(raw, :special_tokens, JSON3.Object())
+        )
+    elseif typ in ("RobertaProcessing", "BertProcessing")
+        # Both state their tokens directly as [token, id] pairs.
+        cls = raw[:cls]
+        sep = raw[:sep]
+        return PostProcessor(Int[Int(cls[2])], Int[Int(sep[2])])
+    elseif typ == "Sequence"
+        combined = PostProcessor()
+        for inner in get(raw, :processors, ())
+            part = _parse_post_processor(inner::JSON3.Object)
+            combined = PostProcessor(
+                vcat(combined.prefix_ids, part.prefix_ids),
+                vcat(part.suffix_ids, combined.suffix_ids),
+            )
+        end
+        return combined
+    end
+
+    # Silently dropping special tokens would produce plausible-looking but wrong
+    # prompts, so refuse instead.
+    throw(ArgumentError("unsupported post_processor type: $(typ)"))
+end
+
+"""
     Tokenizer{M}
 
 A loaded HuggingFace tokenizer. `M` is the segmentation model: `BPEModel`
@@ -49,6 +127,16 @@ struct Tokenizer{M}
     added_tokens::Vector{AddedToken}
     added_token_lookup::Dict{String,Int}
     id_lookup::Dict{Int,String}
+    post_processor::PostProcessor
+end
+
+# Checkpoints predating the post-processor field, and the vocab.txt path, add
+# nothing around the sequence.
+function Tokenizer(model, normalizer, pre_tokenizer, decoder, added, added_lookup, id_lookup)
+    return Tokenizer(
+        model, normalizer, pre_tokenizer, decoder, added, added_lookup, id_lookup,
+        PostProcessor(),
+    )
 end
 
 function _parse_merges(raw::AbstractVector)
@@ -137,15 +225,28 @@ function _parse_model(m::JSON3.Object)
     end
 end
 
+# A key can be absent or explicitly null; `bert-base-uncased` ships
+# `"strip_accents": null`. Both mean "unset".
+function _json_bool(obj, key::Symbol, default::Bool)
+    haskey(obj, key) || return default
+    value = obj[key]
+    return isnothing(value) ? default : Bool(value)
+end
+
 function _parse_normalizer(n::Union{Nothing,JSON3.Object})
     n === nothing && return IdentityNormalizer()
     typ = String(n[:type]::AbstractString)
     if typ == "BertNormalizer"
+        lowercase = _json_bool(n, :lowercase, true)
+        # An unset `strip_accents` follows `lowercase`, which is what HF does.
+        # Defaulting it to `true` instead would strip accents on cased
+        # checkpoints and silently diverge from the reference tokenization.
+        strip_accents = _json_bool(n, :strip_accents, lowercase)
         return BertNormalizer(;
-            clean_text=Bool(get(n, :clean_text, true)::Bool),
-            handle_chinese_chars=Bool(get(n, :handle_chinese_chars, true)::Bool),
-            strip_accents=Bool(get(n, :strip_accents, true)::Bool),
-            lowercase=Bool(get(n, :lowercase, true)::Bool),
+            clean_text=_json_bool(n, :clean_text, true),
+            handle_chinese_chars=_json_bool(n, :handle_chinese_chars, true),
+            strip_accents=strip_accents,
+            lowercase=lowercase,
         )
     elseif typ == "Sequence"
         # Tokenizers JSON allows a stack of normalizers; for our purposes a
@@ -303,6 +404,9 @@ function load_tokenizer(path::AbstractString)
     dec_raw = get(parsed, :decoder, nothing)
     dec = dec_raw isa JSON3.Object ? _parse_decoder(dec_raw) : ByteLevelDecoder()
 
+    post_raw = get(parsed, :post_processor, nothing)
+    post = post_raw isa JSON3.Object ? _parse_post_processor(post_raw) : PostProcessor()
+
     added = AddedToken[]
     added_raw = get(parsed, :added_tokens, nothing)
     if added_raw isa AbstractVector
@@ -330,7 +434,7 @@ function load_tokenizer(path::AbstractString)
         end
     end
 
-    return Tokenizer(model, norm, pre, dec, added, added_lookup, id_lookup)
+    return Tokenizer(model, norm, pre, dec, added, added_lookup, id_lookup, post)
 end
 
 function _split_on_added(tk::Tokenizer, text::AbstractString)
@@ -376,7 +480,7 @@ convention). Added tokens (e.g. `<|endoftext|>`) appearing verbatim in
 `text` are emitted as their dedicated IDs; everything else is run through
 the pre-tokenizer and BPE model.
 """
-function encode(tk::Tokenizer, text::AbstractString)
+function encode(tk::Tokenizer, text::AbstractString; add_special_tokens::Bool=true)
     ids = Int[]
     for (chunk, special_id) in _split_on_added(tk, text)
         if special_id !== nothing
@@ -389,7 +493,11 @@ function encode(tk::Tokenizer, text::AbstractString)
             end
         end
     end
-    return ids
+
+    add_special_tokens || return ids
+    post = tk.post_processor
+    isempty(post.prefix_ids) && isempty(post.suffix_ids) && return ids
+    return vcat(post.prefix_ids, ids, post.suffix_ids)
 end
 
 """

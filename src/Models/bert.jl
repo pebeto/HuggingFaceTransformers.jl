@@ -51,6 +51,7 @@ struct BertEmbeddings{TE,PE,TYE,N}
     embed_positions::PE
     embed_types::TYE
     norm::N
+    position_offset::Int
 end
 
 function (e::BertEmbeddings)(
@@ -59,7 +60,10 @@ function (e::BertEmbeddings)(
     token_type_ids::AbstractMatrix{<:Integer},
 )
     tok = e.embed_tokens(input_ids)          # (hidden, seq, batch)
-    pos = e.embed_positions(position_ids)    # (hidden, seq) — broadcast across batch
+    # RoBERTa reserves the first `pad_token_id + 1` rows of the position table, so
+    # its positions start at 2 rather than 0. The table is allocated with those
+    # extra rows, and this is where the shift is applied.
+    pos = e.embed_positions(position_ids .+ e.position_offset)
     typ = e.embed_types(token_type_ids)      # (hidden, seq, batch)
     h = tok .+ reshape(pos, size(pos, 1), size(pos, 2), 1) .+ typ
     return e.norm(h)
@@ -177,6 +181,7 @@ function BertModel(cfg::BertConfig)
         ),
         TokenEmbedding(cfg.type_vocab_size, cfg.hidden_size),
         LayerNorm(cfg.hidden_size, eps),
+        cfg.position_embedding_offset,
     )
 
     layers = [
