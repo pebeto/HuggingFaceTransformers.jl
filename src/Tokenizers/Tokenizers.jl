@@ -26,12 +26,23 @@ An entry from a tokenizer's `added_tokens` table: the literal `content` string,
 the `id` it maps to, and whether it is a `special` token. Added tokens are
 matched before the model's own segmentation runs, and
 [`decode`](@ref) can skip the special ones.
+
+`lstrip` and `rstrip` say whether the token absorbs adjacent whitespace.
+RoBERTa's `<mask>` sets `lstrip`, so "is <mask>." encodes without a separate
+space token before the mask; ignoring the flag leaves a stray `Ġ` behind and
+shifts every following position.
 """
 struct AddedToken
     id::Int
     content::String
     special::Bool
+    lstrip::Bool
+    rstrip::Bool
 end
+
+# Most added tokens strip nothing; RoBERTa's `<mask>` is the common exception.
+AddedToken(id::Integer, content::AbstractString, special::Bool) =
+    AddedToken(Int(id), String(content), special, false, false)
 
 """
     PostProcessor
@@ -417,7 +428,9 @@ function load_tokenizer(path::AbstractString)
                 AddedToken(
                     Int(obj[:id]::Integer),
                     String(obj[:content]::AbstractString),
-                    Bool(get(obj, :special, false)::Bool),
+                    _json_bool(obj, :special, false),
+                    _json_bool(obj, :lstrip, false),
+                    _json_bool(obj, :rstrip, false),
                 ),
             )
         end
@@ -444,7 +457,9 @@ function _split_on_added(tk::Tokenizer, text::AbstractString)
 
     chunks = Tuple{String,Union{Nothing,Int}}[]
     pos = 1
-    n = ncodeunits(text)
+    # A character index, not a byte count: they coincide for ASCII but
+    # `ncodeunits` lands mid-character on multi-byte UTF-8 and `SubString` throws.
+    n = lastindex(text)
     while pos <= n
         best_start = n + 1
         best_end = 0
@@ -462,12 +477,20 @@ function _split_on_added(tk::Tokenizer, text::AbstractString)
             break
         end
         if best_start > pos
-            push!(
-                chunks, (String(SubString(text, pos, prevind(text, best_start))), nothing)
-            )
+            before = SubString(text, pos, prevind(text, best_start))
+            # `lstrip` means the token swallows the whitespace in front of it, so
+            # the preceding chunk must not keep it.
+            best_at.lstrip && (before = rstrip(before))
+            isempty(before) || push!(chunks, (String(before), nothing))
         end
         push!(chunks, (best_at.content, best_at.id))
         pos = nextind(text, best_end)
+        # `rstrip` does the same on the other side.
+        if best_at.rstrip
+            while pos <= n && isspace(text[pos])
+                pos = nextind(text, pos)
+            end
+        end
     end
     return chunks
 end

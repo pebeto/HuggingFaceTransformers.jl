@@ -1,0 +1,235 @@
+{
+  "repo_id": "FacebookAI/roberta-base",
+  "tokenizer_family": "bpe",
+  "samples": [
+    {
+      "text": "Hello, world!",
+      "ids": [
+        31414,
+        6,
+        232,
+        328
+      ],
+      "decoded": "Hello, world!"
+    },
+    {
+      "text": "The quick brown fox jumps over the lazy dog.",
+      "ids": [
+        133,
+        2119,
+        6219,
+        23602,
+        13855,
+        81,
+        5,
+        22414,
+        2335,
+        4
+      ],
+      "decoded": "The quick brown fox jumps over the lazy dog."
+    },
+    {
+      "text": "1+2=3 and π ≈ 3.14159",
+      "ids": [
+        134,
+        2744,
+        176,
+        5214,
+        246,
+        8,
+        46927,
+        7471,
+        48981,
+        23133,
+        155,
+        4,
+        1570,
+        27129
+      ],
+      "decoded": "1+2=3 and π ≈ 3.14159"
+    },
+    {
+      "text": "café au lait",
+      "ids": [
+        438,
+        2001,
+        1140,
+        8477,
+        784,
+        5236
+      ],
+      "decoded": "café au lait"
+    },
+    {
+      "text": "naïve résumé über",
+      "ids": [
+        2133,
+        48350,
+        15367,
+        18581,
+        1140,
+        952,
+        4394,
+        1943
+      ],
+      "decoded": "naïve résumé über"
+    },
+    {
+      "text": "你好世界",
+      "ids": [
+        47856,
+        21402,
+        48975,
+        10809,
+        46015,
+        25448,
+        49127,
+        14285
+      ],
+      "decoded": "你好世界"
+    },
+    {
+      "text": "한국어 입력",
+      "ids": [
+        48589,
+        48,
+        46873,
+        8906,
+        12410,
+        43998,
+        25448,
+        20024,
+        46747,
+        17772,
+        5782,
+        45209,
+        21402,
+        8210
+      ],
+      "decoded": "한국어 입력"
+    },
+    {
+      "text": "🚀 rocket emoji",
+      "ids": [
+        6569,
+        15113,
+        7471,
+        7726,
+        21554
+      ],
+      "decoded": "🚀 rocket emoji"
+    },
+    {
+      "text": "  leading whitespace",
+      "ids": [
+        1437,
+        981,
+        17942,
+        18851
+      ],
+      "decoded": "  leading whitespace"
+    },
+    {
+      "text": "trailing whitespace   ",
+      "ids": [
+        9738,
+        7022,
+        17942,
+        18851,
+        1437,
+        1437,
+        1437
+      ],
+      "decoded": "trailing whitespace   "
+    },
+    {
+      "text": "tabs\tand\nnewlines",
+      "ids": [
+        34108,
+        29,
+        50117,
+        463,
+        50118,
+        4651,
+        11723
+      ],
+      "decoded": "tabs\tand\nnewlines"
+    },
+    {
+      "text": "multiple   spaces    in    a    row",
+      "ids": [
+        34654,
+        1437,
+        1437,
+        5938,
+        1437,
+        1437,
+        1437,
+        11,
+        1437,
+        1437,
+        1437,
+        10,
+        1437,
+        1437,
+        1437,
+        3236
+      ],
+      "decoded": "multiple   spaces    in    a    row"
+    },
+    {
+      "text": "don't can't won't shouldn't",
+      "ids": [
+        7254,
+        75,
+        64,
+        75,
+        351,
+        75,
+        4395,
+        75
+      ],
+      "decoded": "don't can't won't shouldn't"
+    },
+    {
+      "text": ".,!?:;-—()[]{}\"'",
+      "ids": [
+        482,
+        42648,
+        35,
+        131,
+        12,
+        578,
+        43048,
+        48992,
+        45152,
+        24303,
+        46150
+      ],
+      "decoded": ".,!?:;-—()[]{}\"'"
+    },
+    {
+      "text": "",
+      "ids": [],
+      "decoded": ""
+    },
+    {
+      "text": "a",
+      "ids": [
+        102
+      ],
+      "decoded": "a"
+    },
+    {
+      "text": "The capital of France is",
+      "ids": [
+        133,
+        812,
+        9,
+        1470,
+        16
+      ],
+      "decoded": "The capital of France is"
+    }
+  ]
+}

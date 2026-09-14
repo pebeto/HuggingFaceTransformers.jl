@@ -1,0 +1,230 @@
+{
+  "repo_id": "microsoft/Phi-3-mini-4k-instruct",
+  "tokenizer_family": "bpe",
+  "samples": [
+    {
+      "text": "Hello, world!",
+      "ids": [
+        15043,
+        29892,
+        3186,
+        29991
+      ],
+      "decoded": "Hello, world!"
+    },
+    {
+      "text": "The quick brown fox jumps over the lazy dog.",
+      "ids": [
+        450,
+        4996,
+        17354,
+        1701,
+        29916,
+        432,
+        17204,
+        975,
+        278,
+        17366,
+        11203,
+        29889
+      ],
+      "decoded": "The quick brown fox jumps over the lazy dog."
+    },
+    {
+      "text": "1+2=3 and π ≈ 3.14159",
+      "ids": [
+        29871,
+        29896,
+        29974,
+        29906,
+        29922,
+        29941,
+        322,
+        29871,
+        30170,
+        29871,
+        30583,
+        29871,
+        29941,
+        29889,
+        29896,
+        29946,
+        29896,
+        29945,
+        29929
+      ],
+      "decoded": "1+2=3 and π ≈ 3.14159"
+    },
+    {
+      "text": "café au lait",
+      "ids": [
+        274,
+        28059,
+        782,
+        425,
+        277
+      ],
+      "decoded": "café au lait"
+    },
+    {
+      "text": "naïve résumé über",
+      "ids": [
+        1055,
+        30085,
+        345,
+        6896,
+        398,
+        29948,
+        2939
+      ],
+      "decoded": "naïve résumé über"
+    },
+    {
+      "text": "你好世界",
+      "ids": [
+        29871,
+        30919,
+        31076,
+        30793,
+        30967
+      ],
+      "decoded": "你好世界"
+    },
+    {
+      "text": "한국어 입력",
+      "ids": [
+        29871,
+        30877,
+        31293,
+        31129,
+        29871,
+        239,
+        161,
+        136,
+        238,
+        163,
+        168
+      ],
+      "decoded": "한국어 입력"
+    },
+    {
+      "text": "🚀 rocket emoji",
+      "ids": [
+        29871,
+        243,
+        162,
+        157,
+        131,
+        696,
+        3522,
+        953,
+        29877,
+        2397
+      ],
+      "decoded": "🚀 rocket emoji"
+    },
+    {
+      "text": "  leading whitespace",
+      "ids": [
+        259,
+        8236,
+        24358
+      ],
+      "decoded": "  leading whitespace"
+    },
+    {
+      "text": "trailing whitespace   ",
+      "ids": [
+        25053,
+        24358,
+        1678
+      ],
+      "decoded": "trailing whitespace   "
+    },
+    {
+      "text": "tabs\tand\nnewlines",
+      "ids": [
+        18859,
+        12,
+        392,
+        13,
+        1482,
+        9012
+      ],
+      "decoded": "tabs\tand\nnewlines"
+    },
+    {
+      "text": "multiple   spaces    in    a    row",
+      "ids": [
+        2999,
+        259,
+        8162,
+        1678,
+        297,
+        1678,
+        263,
+        1678,
+        1948
+      ],
+      "decoded": "multiple   spaces    in    a    row"
+    },
+    {
+      "text": "don't can't won't shouldn't",
+      "ids": [
+        1016,
+        29915,
+        29873,
+        508,
+        29915,
+        29873,
+        2113,
+        29915,
+        29873,
+        9273,
+        29915,
+        29873
+      ],
+      "decoded": "don't can't won't shouldn't"
+    },
+    {
+      "text": ".,!?:;-—()[]{}\"'",
+      "ids": [
+        869,
+        29892,
+        29991,
+        25825,
+        29936,
+        29899,
+        30003,
+        580,
+        24406,
+        5038,
+        29915
+      ],
+      "decoded": ".,!?:;-—()[]{}\"'"
+    },
+    {
+      "text": "",
+      "ids": [],
+      "decoded": ""
+    },
+    {
+      "text": "a",
+      "ids": [
+        263
+      ],
+      "decoded": "a"
+    },
+    {
+      "text": "The capital of France is",
+      "ids": [
+        450,
+        7483,
+        310,
+        3444,
+        338
+      ],
+      "decoded": "The capital of France is"
+    }
+  ]
+}

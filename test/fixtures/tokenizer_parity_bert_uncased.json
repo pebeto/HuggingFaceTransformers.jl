@@ -1,0 +1,213 @@
+{
+  "repo_id": "google-bert/bert-base-uncased",
+  "tokenizer_family": "wordpiece",
+  "samples": [
+    {
+      "text": "Hello, world!",
+      "ids": [
+        7592,
+        1010,
+        2088,
+        999
+      ],
+      "decoded": "hello, world!"
+    },
+    {
+      "text": "The quick brown fox jumps over the lazy dog.",
+      "ids": [
+        1996,
+        4248,
+        2829,
+        4419,
+        14523,
+        2058,
+        1996,
+        13971,
+        3899,
+        1012
+      ],
+      "decoded": "the quick brown fox jumps over the lazy dog."
+    },
+    {
+      "text": "1+2=3 and π ≈ 3.14159",
+      "ids": [
+        1015,
+        1009,
+        1016,
+        1027,
+        1017,
+        1998,
+        1170,
+        1606,
+        1017,
+        1012,
+        15471,
+        28154
+      ],
+      "decoded": "1 + 2 = 3 and π ≈ 3. 14159"
+    },
+    {
+      "text": "café au lait",
+      "ids": [
+        7668,
+        8740,
+        21110,
+        2102
+      ],
+      "decoded": "cafe au lait"
+    },
+    {
+      "text": "naïve résumé über",
+      "ids": [
+        15743,
+        13746,
+        19169
+      ],
+      "decoded": "naive resume uber"
+    },
+    {
+      "text": "你好世界",
+      "ids": [
+        100,
+        100,
+        1745,
+        100
+      ],
+      "decoded": "[UNK] [UNK] 世 [UNK]"
+    },
+    {
+      "text": "한국어 입력",
+      "ids": [
+        1469,
+        30006,
+        30021,
+        29991,
+        30014,
+        30020,
+        29999,
+        30008,
+        1463,
+        30019,
+        30024,
+        29994,
+        30010,
+        30020
+      ],
+      "decoded": "한국어 입력"
+    },
+    {
+      "text": "🚀 rocket emoji",
+      "ids": [
+        100,
+        7596,
+        7861,
+        29147,
+        2072
+      ],
+      "decoded": "[UNK] rocket emoji"
+    },
+    {
+      "text": "  leading whitespace",
+      "ids": [
+        2877,
+        12461,
+        15327
+      ],
+      "decoded": "leading whitespace"
+    },
+    {
+      "text": "trailing whitespace   ",
+      "ids": [
+        12542,
+        12461,
+        15327
+      ],
+      "decoded": "trailing whitespace"
+    },
+    {
+      "text": "tabs\tand\nnewlines",
+      "ids": [
+        21628,
+        2015,
+        1998,
+        2047,
+        12735
+      ],
+      "decoded": "tabs and newlines"
+    },
+    {
+      "text": "multiple   spaces    in    a    row",
+      "ids": [
+        3674,
+        7258,
+        1999,
+        1037,
+        5216
+      ],
+      "decoded": "multiple spaces in a row"
+    },
+    {
+      "text": "don't can't won't shouldn't",
+      "ids": [
+        2123,
+        1005,
+        1056,
+        2064,
+        1005,
+        1056,
+        2180,
+        1005,
+        1056,
+        5807,
+        1005,
+        1056
+      ],
+      "decoded": "don't can't won't shouldn't"
+    },
+    {
+      "text": ".,!?:;-—()[]{}\"'",
+      "ids": [
+        1012,
+        1010,
+        999,
+        1029,
+        1024,
+        1025,
+        1011,
+        1517,
+        1006,
+        1007,
+        1031,
+        1033,
+        1063,
+        1065,
+        1000,
+        1005
+      ],
+      "decoded": ".,!? : ; - — ( ) [ ] { } \" '"
+    },
+    {
+      "text": "",
+      "ids": [],
+      "decoded": ""
+    },
+    {
+      "text": "a",
+      "ids": [
+        1037
+      ],
+      "decoded": "a"
+    },
+    {
+      "text": "The capital of France is",
+      "ids": [
+        1996,
+        3007,
+        1997,
+        2605,
+        2003
+      ],
+      "decoded": "the capital of france is"
+    }
+  ]
+}

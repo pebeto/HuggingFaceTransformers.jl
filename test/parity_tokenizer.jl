@@ -94,7 +94,11 @@ isempty(unknown) || error(
     "Valid: $(String[first(v) for v in VARIANTS]) or \"all\".",
 )
 
-for (name, fixture) in VARIANTS
-    name in SELECTED || continue
-    _run_variant(name, fixture)
+# Each variant runs inside this outer testset, so a failure is collected rather
+# than thrown mid-loop, which would leave the remaining variants unreported.
+@testset verbose = true "tokenizer parity" begin
+    for (name, fixture) in VARIANTS
+        name in SELECTED || continue
+        _run_variant(name, fixture)
+    end
 end
