@@ -2,7 +2,8 @@ using Test
 using JSON3
 using HuggingFaceTransformers.HFHub: snapshot_download
 using HuggingFaceTransformers.Models:
-    load_weights, Dinov2Config, Dinov2Model, load_state_dict!
+    load_weights, Dinov2Config, Dinov2Model, load_state_dict!, config_from_json,
+    read_config
 
 # DINOv2 parity: the CLS feature (HF `pooler_output`, i.e. the CLS token after
 # the final LayerNorm). The fixture stores the preprocessed pixel tensor, so this
@@ -26,23 +27,11 @@ end
 
 const SELECTED = _selected_variants(get(ENV, "HFT_TEST_PARITY_DINOV2", ""))
 
-function _load_dinov2_config(snapshot_dir::AbstractString)
-    raw = JSON3.read(read(joinpath(snapshot_dir, "config.json"), String))
-    return Dinov2Config(;
-        hidden_size=Int(raw.hidden_size),
-        num_hidden_layers=Int(raw.num_hidden_layers),
-        num_attention_heads=Int(raw.num_attention_heads),
-        intermediate_size=Int(raw.intermediate_size),
-        image_size=Int(get(raw, :image_size, 518)),
-        patch_size=Int(get(raw, :patch_size, 14)),
-        num_channels=Int(get(raw, :num_channels, 3)),
-        layer_norm_eps=Float64(get(raw, :layer_norm_eps, 1.0e-6)),
-        layerscale_value=Float64(get(raw, :layerscale_value, 1.0)),
-        num_register_tokens=Int(get(raw, :num_register_tokens, 0)),
-        qkv_bias=Bool(get(raw, :qkv_bias, true)),
-        use_swiglu_ffn=Bool(get(raw, :use_swiglu_ffn, false)),
-    )
-end
+# The canonical parser lives in Models; the test exercises it rather than keeping
+# a second copy that can drift (this one read `intermediate_size`, which DINOv2's
+# config.json does not have).
+_load_dinov2_config(snapshot_dir::AbstractString) =
+    config_from_json(Dinov2Config, read_config(snapshot_dir))
 
 function _pixels_from_fixture(flat::Vector{Float32}, shape)
     n, c, hh, ww = Int.(shape)

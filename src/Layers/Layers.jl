@@ -10,6 +10,7 @@ module Layers
 
 using Flux
 using NNlib
+using SpecialFunctions: SpecialFunctions  # loads NNlib's gelu_erf method
 using LinearAlgebra
 using Statistics
 using ChainRulesCore:
@@ -640,7 +641,11 @@ end
 # Exact GELU, via the NNlib implementation (uses erf under the hood).
 # BERT, RoBERTa, and GPT-NeoX / Pythia all use this rather than the tanh
 # approximation that GPT-2 uses.
-@inline _gelu_exact(x) = NNlib.gelu(x)
+# NNlib's `gelu` is the tanh approximation (`gelu(x) = gelu_tanh(x)`), while
+# HF's "gelu" for BERT, RoBERTa, ViT, DINOv2, NeoX and Whisper is the erf
+# form. The two differ by ~1e-4 per activation, which compounds through a
+# deep stack into logit errors far above the parity tolerance.
+@inline _gelu_exact(x) = NNlib.gelu_erf(x)
 
 function (m::GeluGatedMLP)(x::AbstractArray)
     g = _gelu_tanh.(m.gate_proj(x))

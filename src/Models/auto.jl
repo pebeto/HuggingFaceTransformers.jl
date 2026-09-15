@@ -364,11 +364,15 @@ function config_from_json(::Type{Dinov2Config}, raw)
         throw(ArgumentError("DINOv2 SwiGLU FFN (giant variant) is not supported yet"))
     archs = _hf_architectures(raw)
     prefix = any(a -> a == "Dinov2Model", archs) ? "" : "dinov2"
+    hidden = _hf_int(raw, :hidden_size, 768)
+    # DINOv2 states the FFN width as a multiple of the hidden size rather than
+    # directly, so every variant but base would be wrong from a fixed default.
+    intermediate = _hf_int(raw, :intermediate_size, hidden * _hf_int(raw, :mlp_ratio, 4))
     return Dinov2Config(;
-        hidden_size=_hf_int(raw, :hidden_size, 768),
+        hidden_size=hidden,
         num_hidden_layers=_hf_int(raw, :num_hidden_layers, 12),
         num_attention_heads=_hf_int(raw, :num_attention_heads, 12),
-        intermediate_size=_hf_int(raw, :intermediate_size, 3072),
+        intermediate_size=intermediate,
         image_size=_hf_int(raw, :image_size, 518),
         patch_size=_hf_int(raw, :patch_size, 14),
         num_channels=_hf_int(raw, :num_channels, 3),
