@@ -252,12 +252,16 @@ end
 function apply_dec(d::WordPieceDecoder, s::AbstractString)
     str = replace(String(s), " " * d.prefix => "")
     if d.cleanup
-        # Drop the space that BertPreTokenizer left before ASCII punctuation,
-        # plus the textbook contractions ("don ' t" → "don't").
-        str = replace(str, r" ([.,!?;:)\]}])" => s"\1")
-        str = replace(str, r"([([{]) " => s"\1")
-        str = replace(str, " ' " => "'")
-        str = replace(str, " n't" => "n't")
+        # Exactly HF's cleanup list, no wider. Extending it to `;`, `:` or
+        # brackets looks reasonable but diverges from the reference decoding,
+        # which keeps their spaces.
+        for (from, to) in (
+            " ." => ".", " ?" => "?", " !" => "!", " ," => ",",
+            " ' " => "'", " n't" => "n't", " 'm" => "'m", " 's" => "'s",
+            " 've" => "'ve", " 're" => "'re",
+        )
+            str = replace(str, from => to)
+        end
     end
     return str
 end

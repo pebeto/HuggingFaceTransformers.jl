@@ -3,17 +3,19 @@ struct BPEModel
     id_to_token::Dict{Int,String}
     merge_ranks::Dict{Tuple{String,String},Int}
     unk_token::Union{Nothing,String}
+    byte_fallback::Bool
 end
 
 function BPEModel(
     vocab::Dict{String,Int},
     merges::Vector{Tuple{String,String}},
-    unk_token::Union{Nothing,AbstractString}=nothing,
+    unk_token::Union{Nothing,AbstractString}=nothing;
+    byte_fallback::Bool=false,
 )
     id_to_token = Dict{Int,String}(id => tok for (tok, id) in vocab)
     merge_ranks = Dict{Tuple{String,String},Int}(p => i - 1 for (i, p) in enumerate(merges))
     unk = unk_token === nothing ? nothing : String(unk_token)
-    return BPEModel(vocab, id_to_token, merge_ranks, unk)
+    return BPEModel(vocab, id_to_token, merge_ranks, unk, byte_fallback)
 end
 
 """
@@ -68,12 +70,30 @@ function token_ids(model::BPEModel, tokens::Vector{String})
     for t in tokens
         id = get(model.vocab, t, nothing)
         if id === nothing
+            if model.byte_fallback && _push_byte_fallback!(out, model, t)
+                continue
+            end
             model.unk_token === nothing && throw(KeyError(t))
             id = model.vocab[model.unk_token]
         end
         push!(out, id)
     end
     return out
+end
+
+# SentencePiece checkpoints (Llama, Phi-3) keep a `<0xNN>` token per byte so any
+# text outside the vocab still round-trips instead of collapsing to `<unk>`.
+# Returns false if the vocab lacks a needed byte token, leaving the caller to
+# fall back to `<unk>`.
+function _push_byte_fallback!(out::Vector{Int}, model::BPEModel, token::AbstractString)
+    ids = Int[]
+    for byte in codeunits(token)
+        id = get(model.vocab, "<0x" * uppercase(string(byte; base=16, pad=2)) * ">", nothing)
+        id === nothing && return false
+        push!(ids, id)
+    end
+    append!(out, ids)
+    return true
 end
 
 """

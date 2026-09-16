@@ -678,3 +678,83 @@ end
         end
     end
 end
+
+@testset verbose = true "SentencePiece-style BPE" begin
+    # Llama-family checkpoints (Phi-3 among them) have no pre-tokenizer. Word
+    # boundaries come from a normalizer that prepends `▁` and rewrites spaces,
+    # and anything outside the vocab decomposes into `<0xNN>` byte tokens.
+    # Dropping either step silently mis-segments every input.
+    function _sp_fixture()
+        vocab = Dict{String,Int}("<unk>" => 0)
+        next = 1
+        for b in 0x00:0xff                      # byte-fallback tokens
+            vocab["<0x" * uppercase(string(b; base=16, pad=2)) * ">"] = next
+            next += 1
+        end
+        for tok in ("▁", "h", "i", "▁h", "▁hi", "▁t", "o")
+            vocab[tok] = next
+            next += 1
+        end
+        return Dict(
+            "normalizer" => Dict(
+                "type" => "Sequence",
+                "normalizers" => [
+                    Dict("type" => "Prepend", "prepend" => "▁"),
+                    Dict(
+                        "type" => "Replace",
+                        "pattern" => Dict("String" => " "),
+                        "content" => "▁",
+                    ),
+                ],
+            ),
+            "model" => Dict(
+                "type" => "BPE",
+                "vocab" => vocab,
+                "merges" => [["▁", "h"], ["▁h", "i"]],
+                "unk_token" => "<unk>",
+                "byte_fallback" => true,
+            ),
+        )
+    end
+
+    @testset "normalizer marks word boundaries" begin
+        mktempdir() do dir
+            path = joinpath(dir, "tokenizer.json")
+            open(io -> JSON3.write(io, _sp_fixture()), path, "w")
+            tk = load_tokenizer(path)
+
+            @test tk.normalizer isa Tokenizers.SequenceNormalizer
+            # "hi" normalizes to "▁hi", which merges to a single token rather than
+            # falling back to <unk>.
+            ids = encode(tk, "hi"; add_special_tokens=false)
+            @test ids == [tk.model.vocab["▁hi"]]
+            # A space becomes `▁`, not an unknown token.
+            @test !any(==(0), encode(tk, "hi hi"; add_special_tokens=false))
+        end
+    end
+
+    @testset "byte fallback replaces unk for out-of-vocab text" begin
+        mktempdir() do dir
+            path = joinpath(dir, "tokenizer.json")
+            open(io -> JSON3.write(io, _sp_fixture()), path, "w")
+            tk = load_tokenizer(path)
+
+            ids = encode(tk, "é"; add_special_tokens=false)
+            # The normalizer prepends `▁`, then é (two UTF-8 bytes, 0xC3 0xA9)
+            # decomposes into its byte tokens.
+            @test ids ==
+                [tk.model.vocab["▁"], tk.model.vocab["<0xC3>"], tk.model.vocab["<0xA9>"]]
+            @test !any(==(0), ids)              # never the unk token
+        end
+    end
+
+    @testset "an unrecognized normalizer refuses rather than degrading" begin
+        mktempdir() do dir
+            spec = _sp_fixture()
+            spec["normalizer"] = Dict("type" => "SomeFutureNormalizer")
+            path = joinpath(dir, "tokenizer.json")
+            open(io -> JSON3.write(io, spec), path, "w")
+            @test_throws ArgumentError load_tokenizer(path)
+        end
+    end
+end

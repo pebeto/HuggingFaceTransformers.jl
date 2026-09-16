@@ -106,3 +106,71 @@ function apply_norm(n::BertNormalizer, s::AbstractString)
 
     return str
 end
+
+"""
+    PrependNormalizer
+
+Prepend a fixed string to the input. SentencePiece checkpoints (Llama, Phi-3,
+Gemma) prepend `▁` so the first word carries the same word-boundary marker as
+every later one.
+"""
+struct PrependNormalizer <: Normalizer
+    prepend::String
+end
+
+apply_norm(n::PrependNormalizer, s::AbstractString) = n.prepend * String(s)
+
+"""
+    ReplaceNormalizer
+
+Literal string substitution. SentencePiece checkpoints pair this with
+[`PrependNormalizer`](@ref) to turn spaces into `▁`, which is what makes a word
+boundary visible to a BPE model that has no pre-tokenizer.
+"""
+struct ReplaceNormalizer <: Normalizer
+    pattern::String
+    content::String
+end
+
+apply_norm(n::ReplaceNormalizer, s::AbstractString) =
+    replace(String(s), n.pattern => n.content)
+
+"""
+    SequenceNormalizer
+
+Apply several normalizers in order, which is how `tokenizer.json` expresses a
+pipeline such as prepend-then-replace.
+"""
+struct SequenceNormalizer <: Normalizer
+    normalizers::Vector{Normalizer}
+end
+
+function apply_norm(n::SequenceNormalizer, s::AbstractString)
+    out = String(s)
+    for step in n.normalizers
+        out = apply_norm(step, out)
+    end
+    return out
+end
+
+"""
+    UnicodeNormalizer
+
+One of the Unicode normalization forms (`NFC`, `NFD`, `NFKC`, `NFKD`).
+"""
+struct UnicodeNormalizer <: Normalizer
+    form::Symbol
+end
+
+apply_norm(n::UnicodeNormalizer, s::AbstractString) =
+    Unicode.normalize(String(s), n.form)
+
+"""
+    LowercaseNormalizer
+
+Unicode-aware lowercasing, as a standalone step rather than a
+[`BertNormalizer`](@ref) flag.
+"""
+struct LowercaseNormalizer <: Normalizer end
+
+apply_norm(::LowercaseNormalizer, s::AbstractString) = lowercase(String(s))

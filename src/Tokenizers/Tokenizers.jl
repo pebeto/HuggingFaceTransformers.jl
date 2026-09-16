@@ -198,7 +198,7 @@ function _parse_model(m::JSON3.Object)
         merges = _parse_merges(m[:merges]::JSON3.Array)
         unk_raw = get(m, :unk_token, nothing)
         unk = unk_raw isa AbstractString ? String(unk_raw) : nothing
-        return BPEModel(vocab, merges, unk)
+        return BPEModel(vocab, merges, unk; byte_fallback=_json_bool(m, :byte_fallback, false))
     elseif typ == "Unigram"
         vocab_raw = m[:vocab]::JSON3.Array
         vocab = Tuple{String,Float32}[]
@@ -248,35 +248,49 @@ function _parse_normalizer(n::Union{Nothing,JSON3.Object})
     n === nothing && return IdentityNormalizer()
     typ = String(n[:type]::AbstractString)
     if typ == "BertNormalizer"
-        lowercase = _json_bool(n, :lowercase, true)
+        # Named `lower` rather than `lowercase` so it does not shadow
+        # `Base.lowercase` for the rest of this function.
+        lower = _json_bool(n, :lowercase, true)
         # An unset `strip_accents` follows `lowercase`, which is what HF does.
         # Defaulting it to `true` instead would strip accents on cased
         # checkpoints and silently diverge from the reference tokenization.
-        strip_accents = _json_bool(n, :strip_accents, lowercase)
+        strip_accents = _json_bool(n, :strip_accents, lower)
         return BertNormalizer(;
             clean_text=_json_bool(n, :clean_text, true),
             handle_chinese_chars=_json_bool(n, :handle_chinese_chars, true),
             strip_accents=strip_accents,
-            lowercase=lowercase,
+            lowercase=lower,
         )
     elseif typ == "Sequence"
-        # Tokenizers JSON allows a stack of normalizers; for our purposes a
-        # single Bert-shaped normalizer is enough — pick the first
-        # `BertNormalizer` in the sequence if present, else identity.
+        # A pipeline, applied in order. SentencePiece checkpoints express their
+        # word-boundary convention this way (prepend `▁`, then space -> `▁`), so
+        # picking one child and dropping the rest silently mis-segments everything.
         children = n[:normalizers]::JSON3.Array
-        for child in children
-            obj = child::JSON3.Object
-            if String(obj[:type]::AbstractString) == "BertNormalizer"
-                return _parse_normalizer(obj)
-            end
-        end
-        return IdentityNormalizer()
-    else
-        # Unknown normalizers (NFC, NFD, Lowercase, Replace, …) fall back
-        # to identity. Inputs that need them won't get byte-perfect parity
-        # but the model still runs.
+        return SequenceNormalizer(Normalizer[_parse_normalizer(c::JSON3.Object) for c in children])
+    elseif typ == "Prepend"
+        return PrependNormalizer(String(n[:prepend]::AbstractString))
+    elseif typ == "Replace"
+        pattern = n[:pattern]
+        # `pattern` is either {"String": "..."} or {"Regex": "..."}; only the
+        # literal form appears in the checkpoints we support.
+        haskey(pattern, :String) || throw(
+            ArgumentError("only literal `Replace` patterns are supported, got $(pattern)"),
+        )
+        return ReplaceNormalizer(
+            String(pattern[:String]::AbstractString), String(n[:content]::AbstractString)
+        )
+    elseif typ in ("NFC", "NFD", "NFKC", "NFKD")
+        return UnicodeNormalizer(Symbol(typ))  # Unicode.normalize wants :NFC, not :nfc
+    elseif typ == "Lowercase"
+        return LowercaseNormalizer()
+    elseif typ in ("Nmt", "StripAccents", "Strip", "Precompiled")
+        # Present in some SentencePiece exports and a no-op for the inputs we
+        # handle; named explicitly so a genuinely unknown type still raises.
         return IdentityNormalizer()
     end
+
+    # Falling back to identity here would silently change the tokenization.
+    throw(ArgumentError("unsupported normalizer type: $(typ)"))
 end
 
 function _parse_pre_tokenizer(p::JSON3.Object)
@@ -606,9 +620,20 @@ function decode(
 
     for id in ids
         if haskey(tk.id_lookup, id)
-            flush!()
-            (skip_special_tokens && id in special_ids) && continue
-            print(out, tk.id_lookup[id])
+            if skip_special_tokens && id in special_ids
+                isempty(sep) && flush!()
+                continue
+            end
+            if isempty(sep)
+                # Byte-level pipelines decode bytes, so an added token has to
+                # bypass the decoder and be emitted literally.
+                flush!()
+                print(out, tk.id_lookup[id])
+            else
+                # Separator-joined pipelines (WordPiece) keep added tokens in the
+                # stream so they are spaced like any other token, as HF does.
+                push!(buffer, tk.id_lookup[id])
+            end
         else
             tok = get(tk.model.id_to_token, id, nothing)
             tok === nothing && throw(KeyError(id))
