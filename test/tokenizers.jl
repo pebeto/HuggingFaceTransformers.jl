@@ -758,3 +758,123 @@ end
         end
     end
 end
+
+@testset verbose = true "encode_batch" begin
+    # A BERT-shaped fixture: [CLS] ... [SEP] around each sequence, and a [PAD]
+    # token so batches can be padded.
+    function _batch_fixture()
+        spec = _fixture_dict()
+        cls, sep, pad = 300, 301, 302
+        spec["added_tokens"] = [
+            Dict("id" => cls, "content" => "[CLS]", "special" => true),
+            Dict("id" => sep, "content" => "[SEP]", "special" => true),
+            Dict("id" => pad, "content" => "[PAD]", "special" => true),
+        ]
+        spec["post_processor"] = Dict(
+            "type" => "TemplateProcessing",
+            "single" => [
+                Dict("SpecialToken" => Dict("id" => "[CLS]", "type_id" => 0)),
+                Dict("Sequence" => Dict("id" => "A", "type_id" => 0)),
+                Dict("SpecialToken" => Dict("id" => "[SEP]", "type_id" => 0)),
+            ],
+            "special_tokens" => Dict(
+                "[CLS]" => Dict("id" => "[CLS]", "ids" => [cls], "tokens" => ["[CLS]"]),
+                "[SEP]" => Dict("id" => "[SEP]", "ids" => [sep], "tokens" => ["[SEP]"]),
+            ),
+        )
+        return spec, cls, sep, pad
+    end
+
+    _write(dir, spec) = (p = joinpath(dir, "tokenizer.json");
+        open(io -> JSON3.write(io, spec), p, "w"); p)
+
+    @testset "pads to the longest and reports the mask" begin
+        mktempdir() do dir
+            spec, cls, sep, pad = _batch_fixture()
+            tk = load_tokenizer(_write(dir, spec))
+            @test pad_token_id(tk) == pad
+
+            ids, mask = encode_batch(tk, ["hi", "hello there"])
+            @test size(ids) == size(mask)
+            @test size(ids, 2) == 2                      # (seq, batch)
+            # Every column starts with [CLS]; the shorter one is padded.
+            @test ids[1, 1] == cls && ids[1, 2] == cls
+            @test all(mask[:, 2])                        # longest row is all real
+            @test !all(mask[:, 1])
+            @test all(ids[.!mask] .== pad)               # padding uses the pad id
+            # The mask marks exactly the real tokens of each row.
+            @test count(mask[:, 1]) == length(encode(tk, "hi"))
+            @test count(mask[:, 2]) == length(encode(tk, "hello there"))
+        end
+    end
+
+    @testset "left padding keeps the sequence flush right" begin
+        mktempdir() do dir
+            spec, cls, _, pad = _batch_fixture()
+            tk = load_tokenizer(_write(dir, spec))
+            ids, mask = encode_batch(tk, ["hi", "hello there"]; pad_side=:left)
+            @test ids[1, 1] == pad                       # short row padded in front
+            @test !mask[1, 1]
+            @test mask[end, 1]                           # and ends flush right
+            @test ids[1, 2] == cls                       # longest row is unpadded
+        end
+    end
+
+    @testset "truncation reserves room for the special tokens" begin
+        mktempdir() do dir
+            spec, cls, sep, _ = _batch_fixture()
+            tk = load_tokenizer(_write(dir, spec))
+            ids, _ = encode_batch(
+                tk, ["hello there world"]; truncation=true, max_length=5
+            )
+            @test size(ids, 1) == 5
+            # Truncating must not cost the trailing separator.
+            @test ids[1, 1] == cls
+            @test ids[5, 1] == sep
+        end
+    end
+
+    @testset "padding to a fixed length" begin
+        mktempdir() do dir
+            spec, _, _, pad = _batch_fixture()
+            tk = load_tokenizer(_write(dir, spec))
+            ids, mask = encode_batch(
+                tk, ["hi"]; padding=:max_length, max_length=8, truncation=true
+            )
+            @test size(ids) == (8, 1)
+            @test count(mask) < 8
+            @test ids[end, 1] == pad
+        end
+    end
+
+    @testset "a checkpoint with no pad token says so" begin
+        mktempdir() do dir
+            # The plain byte-level fixture declares no [PAD].
+            tk = load_tokenizer(_write_fixture(dir))
+            @test isnothing(pad_token_id(tk))
+            @test_throws ArgumentError encode_batch(tk, ["hi", "hello there"])
+            # Naming an id (the EOS is the usual choice) is enough.
+            ids, mask = encode_batch(
+                tk, ["hi", "hello there"]; pad_id=FIXTURE_ENDOFTEXT_ID
+            )
+            @test all(ids[.!mask] .== FIXTURE_ENDOFTEXT_ID)
+            # Equal-length inputs need no pad token at all.
+            @test encode_batch(tk, ["hi", "hi"])[1] isa Matrix{Int}
+        end
+    end
+
+    @testset "argument validation" begin
+        mktempdir() do dir
+            spec, _, _, _ = _batch_fixture()
+            tk = load_tokenizer(_write(dir, spec))
+            @test_throws ArgumentError encode_batch(tk, ["hi"]; padding=:nonsense)
+            @test_throws ArgumentError encode_batch(tk, ["hi"]; pad_side=:middle)
+            @test_throws ArgumentError encode_batch(tk, ["hi"]; padding=:max_length)
+            @test_throws ArgumentError encode_batch(tk, ["hi"]; truncation=true)
+            # max_length smaller than the specials themselves is unsatisfiable.
+            @test_throws ArgumentError encode_batch(
+                tk, ["hi"]; truncation=true, max_length=1
+            )
+        end
+    end
+end

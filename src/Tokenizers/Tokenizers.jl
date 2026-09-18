@@ -11,6 +11,7 @@ module Tokenizers
 using JSON3
 
 export Tokenizer, AddedToken, load_tokenizer, load_wordpiece_from_vocab_txt, encode, decode
+export encode_batch, pad_token_id
 
 include("byte_level.jl")
 include("bpe.jl")
@@ -531,10 +532,114 @@ function encode(tk::Tokenizer, text::AbstractString; add_special_tokens::Bool=tr
         end
     end
 
-    add_special_tokens || return ids
+    return add_special_tokens ? _apply_post(tk, ids) : ids
+end
+
+function _apply_post(tk::Tokenizer, ids::Vector{Int})
     post = tk.post_processor
     isempty(post.prefix_ids) && isempty(post.suffix_ids) && return ids
     return vcat(post.prefix_ids, ids, post.suffix_ids)
+end
+
+_n_special(tk::Tokenizer) =
+    length(tk.post_processor.prefix_ids) + length(tk.post_processor.suffix_ids)
+
+# Checkpoints spell their padding token a few different ways, and decoder-only
+# models usually declare none at all.
+const _PAD_TOKEN_CONTENTS = ("<pad>", "[PAD]", "<|pad|>", "<|padding|>")
+
+"""
+    pad_token_id(tk) -> Union{Nothing, Int}
+
+The id of the checkpoint's padding token, read from the added-tokens table, or
+`nothing` when it declares none. GPT-2 and most decoder-only models have no pad
+token, so [`encode_batch`](@ref) needs an explicit `pad_id` for those, which is
+the same requirement HF imposes.
+"""
+function pad_token_id(tk::Tokenizer)
+    for at in tk.added_tokens
+        at.content in _PAD_TOKEN_CONTENTS && return at.id
+    end
+    return nothing
+end
+
+"""
+    encode_batch(tk, texts; add_special_tokens = true, padding = :longest,
+                 truncation = false, max_length = nothing,
+                 pad_id = pad_token_id(tk), pad_side = :right)
+        -> (ids, mask)
+
+Tokenize several texts into one rectangular batch. `ids` is a `(seq, batch)`
+matrix of token ids, the layout the models take, and `mask` is a `Bool` matrix of
+the same shape that is `true` at real tokens and `false` at padding.
+
+`padding` is `:longest` (pad to the longest sequence in the batch) or
+`:max_length` (pad to `max_length`). `truncation` cuts sequences to `max_length`,
+reserving room for the post-processor's special tokens so a truncated sequence
+still ends the way the model expects. `pad_side` is `:right` for encoders and
+`:left` for decoder generation, where padding on the right would sit between the
+prompt and the first generated token.
+
+Padding a checkpoint with no pad token raises rather than guessing an id; pass
+`pad_id` (the EOS id is the usual choice) to say what to use.
+"""
+function encode_batch(
+    tk::Tokenizer,
+    texts::AbstractVector{<:AbstractString};
+    add_special_tokens::Bool=true,
+    padding::Symbol=:longest,
+    truncation::Bool=false,
+    max_length::Union{Nothing,Integer}=nothing,
+    pad_id::Union{Nothing,Integer}=pad_token_id(tk),
+    pad_side::Symbol=:right,
+)
+    padding in (:longest, :max_length) ||
+        throw(ArgumentError("padding must be :longest or :max_length, got :$(padding)"))
+    pad_side in (:right, :left) ||
+        throw(ArgumentError("pad_side must be :right or :left, got :$(pad_side)"))
+    (padding === :max_length || truncation) && isnothing(max_length) && throw(
+        ArgumentError("padding=:max_length and truncation=true both need max_length"),
+    )
+
+    rows = Vector{Vector{Int}}(undef, length(texts))
+    for (i, text) in enumerate(texts)
+        ids = encode(tk, text; add_special_tokens=false)
+        if truncation
+            # Leave room for the specials so truncation cannot drop the trailing
+            # separator the model expects.
+            room = add_special_tokens ? max_length - _n_special(tk) : max_length
+            room < 0 && throw(
+                ArgumentError(
+                    "max_length=$(max_length) is shorter than the $(_n_special(tk)) " *
+                    "special tokens this tokenizer adds",
+                ),
+            )
+            length(ids) > room && (ids = ids[1:room])
+        end
+        rows[i] = add_special_tokens ? _apply_post(tk, ids) : ids
+    end
+
+    width = padding === :max_length ? Int(max_length) : maximum(length, rows; init=0)
+    if any(r -> length(r) < width, rows) && isnothing(pad_id)
+        throw(
+            ArgumentError(
+                "this tokenizer declares no padding token; pass `pad_id` (the EOS " *
+                "id is the usual choice) to pad a batch",
+            ),
+        )
+    end
+
+    ids = fill(isnothing(pad_id) ? 0 : Int(pad_id), width, length(rows))
+    mask = falses(width, length(rows))
+    for (j, row) in enumerate(rows)
+        n = min(length(row), width)
+        offset = pad_side === :right ? 0 : width - n
+        for i in 1:n
+            ids[offset + i, j] = row[i]
+            mask[offset + i, j] = true
+        end
+    end
+    return ids, mask
 end
 
 """

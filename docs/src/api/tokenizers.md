@@ -17,6 +17,8 @@ AddedToken
 Tokenizer
 decode
 encode
+encode_batch
+pad_token_id
 load_tokenizer
 load_wordpiece_from_vocab_txt
 ```

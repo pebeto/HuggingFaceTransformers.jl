@@ -35,8 +35,29 @@ ids = encode(tokenizer, prompt; add_special_tokens=false)  # template emitted th
 ```
 
 Only the single-sequence form is supported. Pair encoding
-(`[CLS] A [SEP] B [SEP]`), padding, truncation, and offset mapping are not
-implemented yet.
+(`[CLS] A [SEP] B [SEP]`) and offset mapping are not implemented yet.
+
+## Batches
+
+[`Tokenizers.encode_batch`](@ref) tokenizes several texts into one rectangular
+batch, returning `(seq, batch)` ids alongside a `Bool` mask that is `true` at
+real tokens and `false` at padding:
+
+```julia
+ids, mask = encode_batch(tokenizer, ["hi", "hello there"])
+```
+
+`padding` is `:longest` or `:max_length`, `truncation` cuts to `max_length` while
+reserving room for the special tokens, and `pad_side` is `:right` for encoders or
+`:left` for decoder generation, where right padding would sit between the prompt
+and the first generated token.
+
+Decoder-only checkpoints usually declare no padding token, so
+[`Tokenizers.pad_token_id`](@ref) returns `nothing` and padding a ragged batch
+raises. Pass `pad_id` (the EOS id is the usual choice) to say what to pad with.
+
+The mask is not yet threaded through attention, so the models still run one
+sequence at a time; batched inference is the next step.
 
 Three segmentation models are supported:
 
