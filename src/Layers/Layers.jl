@@ -728,11 +728,20 @@ function _sdpa_materialized(q, k_t, v; scale, softcap, drop)
         scores = cap .* tanh.(scores ./ cap)
     end
     if !isnothing(drop)
-        sq, skv = size(drop)
         # Move the Bool mask onto the scores' device (no-op on CPU) and keep it
-        # Bool so Zygote doesn't differentiate back into it.
-        drop_dev = @ignore_derivatives _onlike(scores, drop)
-        scores = scores .+ reshape(drop_dev .* Float32(-1e9), sq, skv, 1)
+        # Bool so Zygote doesn't differentiate back into it. A 2-D mask is shared
+        # by every sequence (causal, sliding window); a 3-D one is per-sequence
+        # and already carries the batch dimension, so it broadcasts as is.
+        bias = @ignore_derivatives begin
+            drop_dev = _onlike(scores, drop)
+            shaped = if ndims(drop) == 2
+                reshape(drop_dev, size(drop, 1), size(drop, 2), 1)
+            else
+                drop_dev
+            end
+            shaped .* Float32(-1e9)
+        end
+        scores = scores .+ bias
     end
     probs = NNlib.softmax(scores; dims=2)
     return batched_mul(probs, v)
@@ -781,7 +790,8 @@ function flash_sdpa(
             s = cap_T .* tanh.(s ./ cap_T)
         end
         if !isnothing(drop)
-            dblk = reshape(drop[:, kv0:kv1], sq, blk, 1)
+            dblk = ndims(drop) == 2 ? reshape(drop[:, kv0:kv1], sq, blk, 1) :
+                   drop[:, kv0:kv1, :]
             s = ifelse.(dblk, T(-Inf), s)
         end
 
@@ -921,7 +931,10 @@ function repeat_kv(x::AbstractArray, group_size::Integer)
     return repeat(x; inner=(1, group_size, 1, 1))
 end
 
-function (m::GQA)(x::AbstractArray; cache=nothing, step=nothing, position_ids=nothing)
+function (m::GQA)(
+    x::AbstractArray; cache=nothing, step=nothing, position_ids=nothing,
+    padding_mask=nothing,
+)
     if !isnothing(cache) && isnothing(step)
         throw(
             ArgumentError(
@@ -998,21 +1011,49 @@ function (m::GQA)(x::AbstractArray; cache=nothing, step=nothing, position_ids=no
     has_window = !isnothing(m.window_size)
     needs_causal_mask = m.causal && seq_len > 1
     needs_window_mask = has_window && seq_len_kv > m.window_size
+    # Key `j`'s position. With a cache the keys are the cache slots, so slot `j`
+    # holds position `j - 1`. Without one the keys are the queries themselves, so
+    # their positions are `position_ids` — which differ from the indices whenever
+    # the caller pads on the left or passes custom positions.
+    key_pos = isnothing(cache) ? position_ids : 0:(seq_len_kv - 1)
     drop = @ignore_derivatives if needs_causal_mask || needs_window_mask
         if has_window && m.causal
             w = m.window_size
             Bool[
-                (j - 1) > position_ids[i] || position_ids[i] - (j - 1) >= w for
+                key_pos[j] > position_ids[i] || position_ids[i] - key_pos[j] >= w for
                 i in 1:seq_len, j in 1:seq_len_kv
             ]
         elseif has_window   # bidirectional + sliding (rare combo)
             w = m.window_size
-            Bool[abs(position_ids[i] - (j - 1)) >= w for i in 1:seq_len, j in 1:seq_len_kv]
+            Bool[abs(position_ids[i] - key_pos[j]) >= w for i in 1:seq_len, j in 1:seq_len_kv]
         else                # causal only
-            Bool[(j - 1) > position_ids[i] for i in 1:seq_len, j in 1:seq_len_kv]
+            Bool[key_pos[j] > position_ids[i] for i in 1:seq_len, j in 1:seq_len_kv]
         end
     else
         nothing
+    end
+
+    # A padding mask marks which *keys* are real, so it varies per sequence and
+    # has to carry a batch dimension. `scores` is flattened as heads-fastest
+    # within each batch element, so each sequence's mask repeats once per head.
+    drop = @ignore_derivatives if isnothing(padding_mask)
+        drop
+    else
+        size(padding_mask, 1) == seq_len_kv || throw(
+            DimensionMismatch(
+                "padding_mask has $(size(padding_mask, 1)) key positions, expected " *
+                "$(seq_len_kv)",
+            ),
+        )
+        size(padding_mask, 2) == batch_size || throw(
+            DimensionMismatch(
+                "padding_mask has $(size(padding_mask, 2)) sequences, expected " *
+                "$(batch_size)",
+            ),
+        )
+        pad_drop = reshape(.!Array(padding_mask), 1, seq_len_kv, batch_size)
+        combined = isnothing(drop) ? repeat(pad_drop, seq_len, 1, 1) : (drop .| pad_drop)
+        repeat(combined; inner=(1, 1, m.num_heads_q))
     end
 
     out_flat = sdpa(q_flat, k_flat_t, v_flat; scale=scale, softcap=m.softcap, drop=drop)

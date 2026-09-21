@@ -91,6 +91,10 @@ using HuggingFaceTransformers
         include("mixtral_model.jl")
     end
 
+    @testset verbose = true "Padding masks" begin
+        include("padding.jl")
+    end
+
     @testset verbose = true "Auto loading" begin
         include("auto.jl")
     end

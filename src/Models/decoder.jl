@@ -57,10 +57,13 @@ struct DecoderLayer{A,N1,N2,M}
 end
 
 function (layer::DecoderLayer)(
-    x::AbstractArray; cache=nothing, step=nothing, position_ids=nothing
+    x::AbstractArray; cache=nothing, step=nothing, position_ids=nothing,
+    padding_mask=nothing,
 )
     h = layer.input_layernorm(x)
-    h = layer.self_attn(h; cache=cache, step=step, position_ids=position_ids)
+    h = layer.self_attn(
+        h; cache=cache, step=step, position_ids=position_ids, padding_mask=padding_mask
+    )
     x = x .+ h
     h = layer.post_attention_layernorm(x)
     h = layer.mlp(h)
@@ -84,10 +87,14 @@ struct DecoderModel{E,L,N}
 end
 
 function (m::DecoderModel)(
-    input_ids::AbstractMatrix{<:Integer}; caches=nothing, step=nothing, position_ids=nothing
+    input_ids::AbstractMatrix{<:Integer}; caches=nothing, step=nothing,
+    position_ids=nothing, padding_mask=nothing,
 )
     h = m.embed_tokens(input_ids)
-    return forward_embeds(m, h; caches=caches, step=step, position_ids=position_ids)
+    return forward_embeds(
+        m, h; caches=caches, step=step, position_ids=position_ids,
+        padding_mask=padding_mask,
+    )
 end
 
 """
@@ -98,11 +105,15 @@ embeddings, skipping token lookup. Used by multimodal models (LLaVA) that splice
 image features into the embedding stream.
 """
 function forward_embeds(
-    m::DecoderModel, h::AbstractArray; caches=nothing, step=nothing, position_ids=nothing
+    m::DecoderModel, h::AbstractArray; caches=nothing, step=nothing,
+    position_ids=nothing, padding_mask=nothing,
 )
     for i in eachindex(m.layers)
         cache_i = isnothing(caches) ? nothing : caches[i]
-        h = m.layers[i](h; cache=cache_i, step=step, position_ids=position_ids)
+        h = m.layers[i](
+            h; cache=cache_i, step=step, position_ids=position_ids,
+            padding_mask=padding_mask,
+        )
     end
     return m.norm(h)
 end

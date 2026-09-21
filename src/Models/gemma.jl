@@ -58,10 +58,13 @@ struct GemmaDecoderLayer{A,N1,N2,N3,N4,M}
 end
 
 function (layer::GemmaDecoderLayer)(
-    x::AbstractArray; cache=nothing, step=nothing, position_ids=nothing
+    x::AbstractArray; cache=nothing, step=nothing, position_ids=nothing,
+    padding_mask=nothing,
 )
     h = layer.input_layernorm(x)
-    h = layer.self_attn(h; cache=cache, step=step, position_ids=position_ids)
+    h = layer.self_attn(
+        h; cache=cache, step=step, position_ids=position_ids, padding_mask=padding_mask
+    )
     h = layer.post_attention_layernorm(h)
     x = x .+ h
 

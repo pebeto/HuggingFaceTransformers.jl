@@ -55,10 +55,14 @@ struct NeoXDecoderLayer{A,N1,N2,M}
 end
 
 function (layer::NeoXDecoderLayer)(
-    x::AbstractArray; cache=nothing, step=nothing, position_ids=nothing
+    x::AbstractArray; cache=nothing, step=nothing, position_ids=nothing,
+    padding_mask=nothing,
 )
     h_attn = layer.input_layernorm(x)
-    h_attn = layer.self_attn(h_attn; cache=cache, step=step, position_ids=position_ids)
+    h_attn = layer.self_attn(
+        h_attn; cache=cache, step=step, position_ids=position_ids,
+        padding_mask=padding_mask,
+    )
     h_mlp = layer.post_attention_layernorm(x)
     h_mlp = layer.mlp(h_mlp)
     return x .+ h_attn .+ h_mlp
