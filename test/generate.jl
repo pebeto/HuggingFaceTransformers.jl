@@ -145,3 +145,75 @@ end
     # Prompt is preserved at the front of the decoded output.
     @test startswith(out, "hello")
 end
+
+@testset verbose = true "batched generate" begin
+    # Prompts of differing length are left-padded so one shared decode step can
+    # advance every row. Positions are the padded indices, which is exact for
+    # rotary models because RoPE depends on query-key position differences.
+    function _batch_lm(; seed=0xC2)
+        cfg = LlamaConfig(;
+            vocab_size=32, hidden_size=16, intermediate_size=32, num_hidden_layers=2,
+            num_attention_heads=4, num_key_value_heads=2, head_dim=4,
+            max_position_embeddings=64, rope_theta=10000.0, tie_word_embeddings=false,
+        )
+        Random.seed!(seed)
+        return LlamaForCausalLM(cfg)
+    end
+
+    PROMPTS = [[3, 7, 11, 5], [9, 2], [4]]
+
+    @testset "greedy matches running each prompt alone" begin
+        # The load-bearing test: padding, masking, position offsets and cache
+        # indexing all have to be right for these to agree token for token.
+        lm = _batch_lm()
+        batched = generate(lm, PROMPTS; max_new_tokens=6)
+        for (b, prompt) in enumerate(PROMPTS)
+            @test batched[b] == generate(lm, prompt; max_new_tokens=6)
+        end
+    end
+
+    @testset "each row stops at its own EOS" begin
+        lm = _batch_lm()
+        free = generate(lm, PROMPTS; max_new_tokens=6)
+        # Whatever the shortest prompt produces first becomes its EOS, so that row
+        # stops immediately while the others run on.
+        eos = free[3][length(PROMPTS[3]) + 1]
+        stopped = generate(lm, PROMPTS; max_new_tokens=6, eos_token_id=eos)
+
+        @test stopped[3] == [PROMPTS[3]; eos]            # EOS is emitted, then stop
+        @test length(stopped[1]) > length(PROMPTS[1]) + 1
+        # Rows that never hit EOS are unaffected by another row finishing.
+        @test stopped[1] == free[1]
+        @test stopped[2] == free[2]
+    end
+
+    @testset "prompts are returned intact" begin
+        lm = _batch_lm()
+        out = generate(lm, PROMPTS; max_new_tokens=4)
+        for (b, prompt) in enumerate(PROMPTS)
+            @test out[b][1:length(prompt)] == prompt
+            @test length(out[b]) <= length(prompt) + 4
+        end
+    end
+
+    @testset "max_new_tokens=0 returns the prompts" begin
+        lm = _batch_lm()
+        @test generate(lm, PROMPTS; max_new_tokens=0) == PROMPTS
+    end
+
+    @testset "argument validation" begin
+        lm = _batch_lm()
+        @test_throws ArgumentError generate(lm, Vector{Int}[]; max_new_tokens=2)
+        @test_throws ArgumentError generate(lm, [[1, 2], Int[]]; max_new_tokens=2)
+        @test_throws ArgumentError generate(lm, PROMPTS; max_new_tokens=-1)
+    end
+
+    @testset "a uniform batch needs no padding at all" begin
+        lm = _batch_lm()
+        same = [[3, 7, 11], [9, 2, 5]]
+        batched = generate(lm, same; max_new_tokens=5)
+        for (b, prompt) in enumerate(same)
+            @test batched[b] == generate(lm, prompt; max_new_tokens=5)
+        end
+    end
+end

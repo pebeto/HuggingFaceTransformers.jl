@@ -56,6 +56,28 @@ reset!(caches)   # zero the cache to reuse it for another sequence
 [`Models.build_caches`](@ref) has a method per architecture, so the cache is
 sized from that model's head count and head dimension.
 
+## Batches
+
+Prompts of differing length generate together by passing a vector of them:
+
+```julia
+outs = generate(lm, [[3, 7, 11], [9, 2]]; max_new_tokens=32)   # one row per prompt
+texts = generate(lm, tokenizer, ["The capital of France is", "Julia is"])
+```
+
+Prompts are padded on the left so every row's last prompt token lands in the same
+column, which lets one shared decode step advance all rows. Positions are the
+padded indices, which is exact for rotary models: RoPE scores depend on the
+difference between query and key positions, so a per-row offset cancels. Greedy
+decoding reproduces the single-prompt path token for token.
+
+Each row stops at its own EOS while the others continue. Models with learned
+absolute position embeddings (GPT-2, BERT) need per-row position ids and are not
+batched yet, since an offset there changes the embedding rather than cancelling.
+
+With `do_sample`, draws are taken per row from the shared `rng`, so the stream
+differs from running each prompt separately even though the distribution matches.
+
 ## Chat templates
 
 [`Generation.ChatTemplate`](@ref) renders the `chat_template` field out of

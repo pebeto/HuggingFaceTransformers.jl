@@ -33,7 +33,7 @@ const DecoderLM = Union{
     NeoXForCausalLM,
     MixtralForCausalLM,
 }
-using ..Tokenizers: Tokenizer, encode, decode
+using ..Tokenizers: Tokenizer, encode, decode, pad_token_id
 
 export generate, speculative_generate, ChatTemplate, apply_chat_template
 
@@ -224,6 +224,112 @@ function generate(
 end
 
 """
+    generate(lm, prompts::AbstractVector{<:AbstractVector{<:Integer}}; kwargs...)
+        -> Vector{Vector{Int}}
+
+Generate for several prompts of differing length in one batch, returning one id
+vector per prompt (prompt tokens included, as the single-prompt method does).
+
+Prompts are padded on the **left** so every row's final prompt token lands in the
+same column, which is what lets one shared decode step advance all rows together.
+Positions are the padded indices, which is exact for rotary models because RoPE
+scores depend on the difference between query and key positions, so a per-row
+offset cancels. Models with learned absolute position embeddings (GPT-2, BERT)
+would need per-row position ids and are not batched yet.
+
+Each row stops at its own EOS while the others continue; finished rows are fed
+`pad_id` and their output discarded. Greedy decoding reproduces the
+single-prompt method exactly. With `do_sample`, draws are taken per row from the
+shared `rng`, so the stream differs from running each prompt separately.
+"""
+function generate(
+    lm::DecoderLM,
+    prompts::AbstractVector{<:AbstractVector{<:Integer}};
+    max_new_tokens::Integer=16,
+    do_sample::Bool=false,
+    temperature::Real=1.0,
+    top_k=nothing,
+    top_p=nothing,
+    repetition_penalty::Real=1.0,
+    eos_token_id=nothing,
+    pad_id::Integer=0,
+    rng::AbstractRNG=Random.default_rng(),
+)
+    isempty(prompts) && throw(ArgumentError("prompts must be non-empty"))
+    any(isempty, prompts) && throw(ArgumentError("every prompt must be non-empty"))
+    max_new_tokens >= 0 ||
+        throw(ArgumentError("max_new_tokens must be ≥ 0, got $(max_new_tokens)"))
+
+    rows = [Int[Int(id) for id in p] for p in prompts]
+    max_new_tokens == 0 && return rows
+
+    batch = length(rows)
+    width = maximum(length, rows)
+    eos_set = _normalize_eos(eos_token_id)
+
+    # Left padding: each row is flushed right so column `width` holds every row's
+    # last prompt token.
+    ids = fill(Int(pad_id), width, batch)
+    mask = falses(width, batch)
+    for (b, row) in enumerate(rows)
+        offset = width - length(row)
+        for (i, id) in enumerate(row)
+            ids[offset + i, b] = id
+            mask[offset + i, b] = true
+        end
+    end
+
+    caches = build_caches(lm, width + max_new_tokens, batch)
+    logits = lm(
+        ids;
+        caches=caches,
+        step=1,
+        position_ids=collect(0:(width - 1)),
+        padding_mask=mask,
+    )
+    last_logits = [collect(logits[:, end, b]) for b in 1:batch]
+
+    finished = falses(batch)
+    for t in 1:max_new_tokens
+        next = fill(Int(pad_id), 1, batch)
+        for b in 1:batch
+            finished[b] && continue
+            id = _sample_step(
+                last_logits[b],
+                rows[b];
+                do_sample=do_sample,
+                temperature=temperature,
+                top_k=top_k,
+                top_p=top_p,
+                repetition_penalty=repetition_penalty,
+                rng=rng,
+            )
+            push!(rows[b], id)
+            next[1, b] = id
+            id in eos_set && (finished[b] = true)
+        end
+
+        (all(finished) || t == max_new_tokens) && break
+
+        # The new column is a real position for every row: a finished row's token
+        # is ignored, and rows never attend across the batch.
+        mask = vcat(mask, trues(1, batch))
+        logits = lm(
+            next;
+            caches=caches,
+            step=width + t,
+            position_ids=[width + t - 1],
+            padding_mask=mask,
+        )
+        for b in 1:batch
+            finished[b] || (last_logits[b] = collect(logits[:, 1, b]))
+        end
+    end
+
+    return rows
+end
+
+"""
     generate(lm, tokenizer, prompt::AbstractString; kwargs...) -> String
 
 Tokenize → generate → detokenize. The REPL-friendly entry point.
@@ -232,6 +338,27 @@ function generate(lm::DecoderLM, tokenizer::Tokenizer, prompt::AbstractString; k
     ids = encode(tokenizer, prompt)
     out_ids = generate(lm, ids; kwargs...)
     return decode(tokenizer, out_ids)
+end
+
+"""
+    generate(lm, tokenizer, prompts::AbstractVector{<:AbstractString}; kwargs...)
+        -> Vector{String}
+
+Batched tokenize → generate → detokenize. `pad_id` defaults to the tokenizer's
+padding token, falling back to 0 for the decoder-only checkpoints that declare
+none; the padded positions are masked out either way, so the value only matters
+if a row's own output is read before masking.
+"""
+function generate(
+    lm::DecoderLM,
+    tokenizer::Tokenizer,
+    prompts::AbstractVector{<:AbstractString};
+    pad_id::Union{Nothing,Integer}=pad_token_id(tokenizer),
+    kwargs...,
+)
+    ids = [encode(tokenizer, p) for p in prompts]
+    outs = generate(lm, ids; pad_id=isnothing(pad_id) ? 0 : pad_id, kwargs...)
+    return [decode(tokenizer, o) for o in outs]
 end
 
 include("speculative.jl")
