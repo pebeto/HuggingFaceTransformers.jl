@@ -42,7 +42,8 @@ struct GPT2Model{TE,PE,L,N}
 end
 
 function (m::GPT2Model)(
-    input_ids::AbstractMatrix{<:Integer}; caches=nothing, step=nothing, position_ids=nothing
+    input_ids::AbstractMatrix{<:Integer}; caches=nothing, step=nothing,
+    position_ids=nothing, padding_mask=nothing,
 )
     # `input_ids` is (seq, batch) — matches TokenEmbedding's convention.
     seq_len = size(input_ids, 1)
@@ -53,14 +54,31 @@ function (m::GPT2Model)(
 
     # Token embedding: (hidden, seq, batch)
     h = m.embed_tokens(input_ids)
-    # Position embedding looked up via the same TokenEmbedding mechanism:
-    # (hidden, seq). Broadcast over the batch dim.
-    pe = m.embed_positions(position_ids)
-    h = h .+ reshape(pe, size(pe, 1), size(pe, 2), 1)
+    if isnothing(padding_mask)
+        # Position embedding looked up via the same TokenEmbedding mechanism:
+        # (hidden, seq). Broadcast over the batch dim.
+        pe = m.embed_positions(position_ids)
+        h = h .+ reshape(pe, size(pe, 1), size(pe, 2), 1)
+    else
+        # GPT-2's positions are learned embeddings, so a left-padded row cannot
+        # reuse the padded indices the way a rotary model can: an offset here
+        # changes the vector instead of cancelling. Count each row's real tokens
+        # instead, as HF does. The mask covers every key seen so far, so the last
+        # `seq_len` rows of the running count are this call's positions, which
+        # makes the same expression right for prefill and for each decode step.
+        counts = cumsum(Array(padding_mask); dims=1) .- 1   # integers: AD leaves them alone
+        row_positions = max.(counts[(end - seq_len + 1):end, :], 0)
+        h = h .+ m.embed_positions(row_positions)          # (hidden, seq, batch)
+    end
 
+    # Attention still orders by the shared padded indices, which is correct: the
+    # padding mask removes the pads, and GPT-2 has no rotary term to disturb.
     for i in eachindex(m.layers)
         cache_i = isnothing(caches) ? nothing : caches[i]
-        h = m.layers[i](h; cache=cache_i, step=step, position_ids=position_ids)
+        h = m.layers[i](
+            h; cache=cache_i, step=step, position_ids=position_ids,
+            padding_mask=padding_mask,
+        )
     end
     return m.norm(h)
 end

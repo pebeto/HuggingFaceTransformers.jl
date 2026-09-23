@@ -66,14 +66,15 @@ texts = generate(lm, tokenizer, ["The capital of France is", "Julia is"])
 ```
 
 Prompts are padded on the left so every row's last prompt token lands in the same
-column, which lets one shared decode step advance all rows. Positions are the
-padded indices, which is exact for rotary models: RoPE scores depend on the
-difference between query and key positions, so a per-row offset cancels. Greedy
-decoding reproduces the single-prompt path token for token.
+column, which lets one shared decode step advance all rows. Attention orders by
+the padded indices, which is exact for rotary models: RoPE scores depend on the
+difference between query and key positions, so a per-row offset cancels. GPT-2's
+positions are learned embeddings, where an offset would change the vector rather
+than cancel, so its trunk counts each row's real tokens from the mask instead.
+Greedy decoding reproduces the single-prompt path token for token for every
+supported decoder.
 
-Each row stops at its own EOS while the others continue. Models with learned
-absolute position embeddings (GPT-2, BERT) need per-row position ids and are not
-batched yet, since an offset there changes the embedding rather than cancelling.
+Each row stops at its own EOS while the others continue.
 
 With `do_sample`, draws are taken per row from the shared `rng`, so the stream
 differs from running each prompt separately even though the distribution matches.

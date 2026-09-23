@@ -90,7 +90,8 @@ struct GemmaModel{E,L,N}
 end
 
 function (m::GemmaModel)(
-    input_ids::AbstractMatrix{<:Integer}; caches=nothing, step=nothing, position_ids=nothing
+    input_ids::AbstractMatrix{<:Integer}; caches=nothing, step=nothing,
+    position_ids=nothing, padding_mask=nothing,
 )
     h = m.embed_tokens(input_ids)
     # Gemma scales token embeddings by sqrt(hidden_size). This is the only
@@ -99,7 +100,10 @@ function (m::GemmaModel)(
     h = h .* sqrt(Float32(hidden_dim))
     for i in eachindex(m.layers)
         cache_i = isnothing(caches) ? nothing : caches[i]
-        h = m.layers[i](h; cache=cache_i, step=step, position_ids=position_ids)
+        h = m.layers[i](
+            h; cache=cache_i, step=step, position_ids=position_ids,
+            padding_mask=padding_mask,
+        )
     end
     return m.norm(h)
 end

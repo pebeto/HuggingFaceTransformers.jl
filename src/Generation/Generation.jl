@@ -232,10 +232,12 @@ vector per prompt (prompt tokens included, as the single-prompt method does).
 
 Prompts are padded on the **left** so every row's final prompt token lands in the
 same column, which is what lets one shared decode step advance all rows together.
-Positions are the padded indices, which is exact for rotary models because RoPE
-scores depend on the difference between query and key positions, so a per-row
-offset cancels. Models with learned absolute position embeddings (GPT-2, BERT)
-would need per-row position ids and are not batched yet.
+Attention orders by the padded indices, which is exact for rotary models because
+RoPE scores depend on the difference between query and key positions, so a
+per-row offset cancels. GPT-2's positions are learned embeddings instead, so an
+offset would change the vector; its trunk counts each row's real tokens from the
+padding mask rather than reusing the padded index. Every model in the supported
+decoder set batches.
 
 Each row stops at its own EOS while the others continue; finished rows are fed
 `pad_id` and their output discarded. Greedy decoding reproduces the

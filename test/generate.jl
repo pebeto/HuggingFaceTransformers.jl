@@ -208,6 +208,48 @@ end
         @test_throws ArgumentError generate(lm, PROMPTS; max_new_tokens=-1)
     end
 
+    @testset "Gemma batches, sliding window included" begin
+        # Gemma has its own trunk, so it needs the mask threaded separately. The
+        # window of 4 engages on the 6-token prompt, and both softcaps are live.
+        cfg = GemmaConfig(;
+            vocab_size=32, hidden_size=16, intermediate_size=32, num_hidden_layers=2,
+            num_attention_heads=4, num_key_value_heads=2, head_dim=4,
+            max_position_embeddings=64, sliding_window=4, attn_logit_softcapping=50.0,
+            final_logit_softcapping=30.0, query_pre_attn_scalar=4,
+        )
+        Random.seed!(0xD2)
+        lm = GemmaForCausalLM(cfg)
+        prompts = [[3, 7, 11, 5, 9, 2], [9, 2], [4]]
+        batched = generate(lm, prompts; max_new_tokens=6)
+        for (b, prompt) in enumerate(prompts)
+            @test batched[b] == generate(lm, prompt; max_new_tokens=6)
+        end
+    end
+
+    @testset "GPT-2 batches with per-row learned positions" begin
+        # GPT-2's positions are learned embeddings, so an offset changes the vector
+        # rather than cancelling as it does under RoPE. Each left-padded row has to
+        # count its own real tokens.
+        cfg = GPT2Config(;
+            vocab_size=32, hidden_size=16, intermediate_size=32, num_hidden_layers=2,
+            num_attention_heads=4, max_position_embeddings=64,
+        )
+        Random.seed!(0xD1)
+        lm = GPT2ForCausalLM(cfg)
+        batched = generate(lm, PROMPTS; max_new_tokens=6)
+        for (b, prompt) in enumerate(PROMPTS)
+            @test batched[b] == generate(lm, prompt; max_new_tokens=6)
+        end
+
+        # Guard against a vacuous pass: padding must genuinely perturb GPT-2, so
+        # treating the pads as real tokens has to give a different answer.
+        ids = [0 3; 0 7; 9 11; 2 5]                       # row 1 is two pads + [9, 2]
+        real = Bool[0 1; 0 1; 1 1; 1 1]
+        solo = lm(reshape([9, 2], :, 1))[:, :, 1]
+        @test isapprox(lm(ids; padding_mask=real)[:, 3:4, 1], solo; rtol=1e-5)
+        @test !isapprox(lm(ids; padding_mask=trues(4, 2))[:, 3:4, 1], solo; rtol=1e-3)
+    end
+
     @testset "a uniform batch needs no padding at all" begin
         lm = _batch_lm()
         same = [[3, 7, 11], [9, 2, 5]]
