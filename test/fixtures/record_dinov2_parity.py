@@ -14,15 +14,18 @@ Why these choices (matches the other record_*_parity.py scripts):
   HuggingFaceTransformers's naive softmax attention.
 - torch_dtype=torch.float32: parity is asserted in fp32.
 
-The fixture stores a seeded random `pixel_values` tensor at the model's native
-resolution (image decode/resize is out of scope) and HF's `pooler_output` (the
-CLS token after the final LayerNorm). Note: at native resolution the pixel
-tensor is large (dinov2-base is 518x518, ~0.8M floats), so the fixture is a few
-MB; it is generated locally and not committed.
+The input is `pixel_pattern` from parity_inputs.py, a closed-form tensor the
+Julia side regenerates bit for bit, so the fixture stores only its shape and the
+model's outputs. Storing the tensor itself made this file several megabytes.
 """
 import json
 import os
 import sys
+
+# The shared input patterns live beside this script. Added explicitly so the
+# recorder still finds them when run in isolated mode (`python -I`).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from parity_inputs import pixel_pattern  # noqa: E402
 
 import torch
 from transformers import AutoModel
@@ -50,8 +53,7 @@ def main(variant):
     model.eval()
 
     size = model.config.image_size
-    gen = torch.Generator().manual_seed(0)
-    pixel_values = torch.randn(1, 3, size, size, generator=gen)
+    pixel_values = torch.from_numpy(pixel_pattern(3, size, size))
     with torch.no_grad():
         out = model(pixel_values=pixel_values)
     pooler = out.pooler_output[0].float().cpu()   # CLS after final LayerNorm
@@ -59,7 +61,7 @@ def main(variant):
     fixture = {
         "repo_id": repo_id,
         "pixel_shape": list(pixel_values.shape),
-        "pixel_values": pixel_values.flatten().tolist(),
+        "input": "pixel_pattern",
         "pooler_output": [float(x) for x in pooler.tolist()],
         "tolerance": TOLERANCE,
     }

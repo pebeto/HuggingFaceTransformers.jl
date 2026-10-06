@@ -4,10 +4,9 @@ using HuggingFaceTransformers.HFHub: snapshot_download
 using HuggingFaceTransformers.Models:
     load_weights, ViTConfig, ViTForImageClassification, load_state_dict!
 
-# ViT image-classification parity against HF. The fixture stores the already
-# preprocessed `pixel_values` tensor (image decode/resize is out of scope), so
-# this verifies the model forward, not the image pipeline. Record with
-# `record_vit_parity.py`.
+# ViT image-classification parity against HF. Both sides feed the same
+# closed-form pixel tensor, so this verifies the model forward rather than an
+# image pipeline. Record with `record_vit_parity.py`.
 const VARIANTS = (("base", "vit_base_patch16_224_parity.json"),)
 
 const FIXTURES_DIR = joinpath(@__DIR__, "fixtures")
@@ -44,11 +43,12 @@ function _load_vit_config(snapshot_dir::AbstractString)
     )
 end
 
-# Rebuild the (C, H, W, N) model input from a numpy (N, C, H, W) C-order flat.
-function _pixels_from_fixture(flat::Vector{Float32}, shape)
-    n, c, hh, ww = Int.(shape)
-    a = reshape(flat, ww, hh, c, n)       # column-major undo of C-order
-    return permutedims(a, (3, 2, 1, 4))   # (C, H, W, N)
+# The input is regenerated rather than stored; see test/parity_inputs.jl.
+include("parity_inputs.jl")
+
+function _pixels_from_fixture(shape)
+    _, c, hh, ww = Int.(shape)
+    return pixel_pattern(c, hh, ww)
 end
 
 function _run_variant(name::AbstractString, fixture_filename::AbstractString)
@@ -61,7 +61,6 @@ function _run_variant(name::AbstractString, fixture_filename::AbstractString)
 
     fixture = JSON3.read(read(fixture_path, String))
     repo_id = String(fixture.repo_id)
-    flat = Float32[Float32(x) for x in fixture.pixel_values]
     expected_argmax = Int(fixture.argmax_label)
     expected_top_indices = Int[Int(x) for x in fixture.top_indices]
     expected_top_logits = Float32[Float32(x) for x in fixture.top_logits]
@@ -74,7 +73,7 @@ function _run_variant(name::AbstractString, fixture_filename::AbstractString)
         m = ViTForImageClassification(cfg)
         load_state_dict!(m, load_weights(snapshot_dir))
 
-        pixels = _pixels_from_fixture(flat, fixture.pixel_shape)
+        pixels = _pixels_from_fixture(fixture.pixel_shape)
         logits = collect(m(pixels)[:, 1])
 
         @test argmax(logits) - 1 == expected_argmax

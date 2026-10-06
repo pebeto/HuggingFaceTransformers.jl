@@ -14,14 +14,18 @@ Why these choices (matches the other record_*_parity.py scripts):
   HuggingFaceTransformers's naive softmax attention.
 - torch_dtype=torch.float32: parity is asserted in fp32.
 
-The fixture stores a seeded random `pixel_values` tensor rather than a real
-image: image decode/resize is out of HuggingFaceTransformers's scope, so the Julia side feeds
-this exact tensor and we verify the model forward. `pixel_values` is saved as a
-C-order flat list plus its `(N, C, H, W)` shape.
+The input is `pixel_pattern` from parity_inputs.py, a closed-form tensor the
+Julia side regenerates bit for bit, so the fixture stores only its shape and the
+model's outputs. Storing the tensor itself made this file several megabytes.
 """
 import json
 import os
 import sys
+
+# The shared input patterns live beside this script. Added explicitly so the
+# recorder still finds them when run in isolated mode (`python -I`).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from parity_inputs import pixel_pattern  # noqa: E402
 
 import torch
 from transformers import AutoModelForImageClassification
@@ -50,8 +54,7 @@ def main(variant):
     model.eval()
 
     size = model.config.image_size
-    gen = torch.Generator().manual_seed(0)
-    pixel_values = torch.randn(1, 3, size, size, generator=gen)
+    pixel_values = torch.from_numpy(pixel_pattern(3, size, size))
     with torch.no_grad():
         logits = model(pixel_values=pixel_values).logits[0].float().cpu()
 
@@ -59,7 +62,7 @@ def main(variant):
     fixture = {
         "repo_id": repo_id,
         "pixel_shape": list(pixel_values.shape),
-        "pixel_values": pixel_values.flatten().tolist(),
+        "input": "pixel_pattern",
         "argmax_label": int(logits.argmax()),
         "top_indices": [int(i) for i in top.indices.tolist()],
         "top_logits": [float(v) for v in top.values.tolist()],

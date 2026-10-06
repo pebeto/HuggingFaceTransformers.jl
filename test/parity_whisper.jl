@@ -5,9 +5,9 @@ using HuggingFaceTransformers.Models:
     load_weights, WhisperConfig, WhisperModel, load_state_dict!
 
 # Whisper parity: the teacher-forced forward (input_features + decoder_input_ids
-# → logits). The fixture stores the preprocessed log-mel features (audio → mel is
-# out of scope), so this verifies the encoder-decoder without an audio frontend.
-# Record with `record_whisper_parity.py`.
+# → logits). Both sides feed the same closed-form log-mel-like tensor, so this
+# isolates the encoder-decoder from the audio frontend, which has its own parity
+# test in whisper_features.jl. Record with `record_whisper_parity.py`.
 const VARIANTS = (("base", "whisper_base_parity.json"),)
 
 const FIXTURES_DIR = joinpath(@__DIR__, "fixtures")
@@ -45,11 +45,12 @@ function _load_whisper_config(snapshot_dir::AbstractString)
     )
 end
 
-# Rebuild (num_mel_bins, frames, N) from a numpy (N, mel, frames) C-order flat.
-function _features_from_fixture(flat::Vector{Float32}, shape)
-    n, mel, frames = Int.(shape)
-    a = reshape(flat, frames, mel, n)
-    return permutedims(a, (2, 1, 3))
+# The input is regenerated rather than stored; see test/parity_inputs.jl.
+include("parity_inputs.jl")
+
+function _features_from_fixture(shape)
+    _, mel, frames = Int.(shape)
+    return feature_pattern(mel, frames)
 end
 
 function _run_variant(name::AbstractString, fixture_filename::AbstractString)
@@ -62,9 +63,7 @@ function _run_variant(name::AbstractString, fixture_filename::AbstractString)
 
     fixture = JSON3.read(read(fixture_path, String))
     repo_id = String(fixture.repo_id)
-    features = _features_from_fixture(
-        Float32[Float32(x) for x in fixture.input_features], fixture.feature_shape
-    )
+    features = _features_from_fixture(fixture.feature_shape)
     ids = reshape(Int[Int(x) for x in fixture.decoder_input_ids], :, 1)
     expected_argmax = Int(fixture.argmax_token_id)
     expected_top_indices = Int[Int(x) for x in fixture.top_indices]

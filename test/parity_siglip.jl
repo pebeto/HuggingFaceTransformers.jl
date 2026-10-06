@@ -9,10 +9,10 @@ using HuggingFaceTransformers.Models:
     SiglipTextConfig,
     load_state_dict!
 
-# SigLIP parity: the full image + text → logits path. The fixture stores the
-# preprocessed pixel tensor and the tokenized (padded to 64) text ids, so this
-# verifies both towers and the contrastive head without an image or SentencePiece
-# dependency. Record with `record_siglip_parity.py`.
+# SigLIP parity: the full image + text → logits path. Both sides feed the same
+# closed-form pixel tensor, and the fixture stores the tokenized (padded to 64)
+# text ids, so this verifies both towers and the contrastive head without an
+# image or SentencePiece dependency. Record with `record_siglip_parity.py`.
 const VARIANTS = (("base", "siglip_base_patch16_224_parity.json"),)
 
 const FIXTURES_DIR = joinpath(@__DIR__, "fixtures")
@@ -58,10 +58,12 @@ function _load_siglip_config(snapshot_dir::AbstractString)
     )
 end
 
-function _pixels_from_fixture(flat::Vector{Float32}, shape)
-    n, c, hh, ww = Int.(shape)
-    a = reshape(flat, ww, hh, c, n)
-    return permutedims(a, (3, 2, 1, 4))
+# The input is regenerated rather than stored; see test/parity_inputs.jl.
+include("parity_inputs.jl")
+
+function _pixels_from_fixture(shape)
+    _, c, hh, ww = Int.(shape)
+    return pixel_pattern(c, hh, ww)
 end
 
 function _run_variant(name::AbstractString, fixture_filename::AbstractString)
@@ -74,9 +76,7 @@ function _run_variant(name::AbstractString, fixture_filename::AbstractString)
 
     fixture = JSON3.read(read(fixture_path, String))
     repo_id = String(fixture.repo_id)
-    pixels = _pixels_from_fixture(
-        Float32[Float32(x) for x in fixture.pixel_values], fixture.pixel_shape
-    )
+    pixels = _pixels_from_fixture(fixture.pixel_shape)
     # input_ids is a list of per-text id rows; stack as (seq, n_texts).
     ids = reduce(hcat, [Int[Int(x) for x in row] for row in fixture.input_ids])
     expected = Float32[Float32(x) for x in fixture.logits_per_image]

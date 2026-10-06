@@ -14,13 +14,18 @@ Why these choices (matches the other record_*_parity.py scripts):
   HuggingFaceTransformers's naive softmax attention.
 - torch_dtype=torch.float32: parity is asserted in fp32.
 
-The fixture stores a seeded random `pixel_values` tensor (image decode/resize is
-out of scope) plus the tokenizer's padded (max_length=64) `input_ids`, so the
-Julia side feeds both verbatim and verifies the full image + text → logits path.
+The input is `pixel_pattern` from parity_inputs.py, a closed-form tensor the
+Julia side regenerates bit for bit, so the fixture stores only its shape and the
+model's outputs. Storing the tensor itself made this file several megabytes.
 """
 import json
 import os
 import sys
+
+# The shared input patterns live beside this script. Added explicitly so the
+# recorder still finds them when run in isolated mode (`python -I`).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from parity_inputs import pixel_pattern  # noqa: E402
 
 import torch
 from transformers import AutoModel, AutoTokenizer
@@ -50,8 +55,7 @@ def main(variant):
     tokenizer = AutoTokenizer.from_pretrained(repo_id)
 
     size = model.config.vision_config.image_size
-    gen = torch.Generator().manual_seed(0)
-    pixel_values = torch.randn(1, 3, size, size, generator=gen)
+    pixel_values = torch.from_numpy(pixel_pattern(3, size, size))
 
     max_len = model.config.text_config.max_position_embeddings
     text_inputs = tokenizer(TEXTS, padding="max_length", max_length=max_len,
@@ -65,7 +69,7 @@ def main(variant):
         "repo_id": repo_id,
         "texts": TEXTS,
         "pixel_shape": list(pixel_values.shape),
-        "pixel_values": pixel_values.flatten().tolist(),
+        "input": "pixel_pattern",
         "input_ids": text_inputs.input_ids.tolist(),   # (n_texts, max_len)
         "logits_per_image": [float(x) for x in logits_per_image.tolist()],
         "argmax_text": int(logits_per_image.argmax()),

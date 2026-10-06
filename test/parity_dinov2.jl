@@ -6,7 +6,7 @@ using HuggingFaceTransformers.Models:
     read_config
 
 # DINOv2 parity: the CLS feature (HF `pooler_output`, i.e. the CLS token after
-# the final LayerNorm). The fixture stores the preprocessed pixel tensor, so this
+# the final LayerNorm). Both sides feed the same closed-form pixel tensor, so this
 # verifies the backbone forward without an image pipeline. Record with
 # `record_dinov2_parity.py`.
 const VARIANTS = (("base", "dinov2_base_parity.json"),)
@@ -33,10 +33,12 @@ const SELECTED = _selected_variants(get(ENV, "HFT_TEST_PARITY_DINOV2", ""))
 _load_dinov2_config(snapshot_dir::AbstractString) =
     config_from_json(Dinov2Config, read_config(snapshot_dir))
 
-function _pixels_from_fixture(flat::Vector{Float32}, shape)
-    n, c, hh, ww = Int.(shape)
-    a = reshape(flat, ww, hh, c, n)
-    return permutedims(a, (3, 2, 1, 4))
+# The input is regenerated rather than stored; see test/parity_inputs.jl.
+include("parity_inputs.jl")
+
+function _pixels_from_fixture(shape)
+    _, c, hh, ww = Int.(shape)
+    return pixel_pattern(c, hh, ww)
 end
 
 function _run_variant(name::AbstractString, fixture_filename::AbstractString)
@@ -49,9 +51,7 @@ function _run_variant(name::AbstractString, fixture_filename::AbstractString)
 
     fixture = JSON3.read(read(fixture_path, String))
     repo_id = String(fixture.repo_id)
-    pixels = _pixels_from_fixture(
-        Float32[Float32(x) for x in fixture.pixel_values], fixture.pixel_shape
-    )
+    pixels = _pixels_from_fixture(fixture.pixel_shape)
     expected = Float32[Float32(x) for x in fixture.pooler_output]
     tolerance = Float32(get(fixture, :tolerance, 1.0e-2))
 

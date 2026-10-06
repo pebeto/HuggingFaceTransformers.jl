@@ -14,15 +14,19 @@ Why these choices (matches the other record_*_parity.py scripts):
   HuggingFaceTransformers's naive softmax attention.
 - torch_dtype=torch.float32: parity is asserted in fp32.
 
-The fixture stores a seeded random `input_features` tensor (audio → log-mel is
-out of scope) plus a fixed `decoder_input_ids` prompt, and the last-position
-logits. `input_features` is a C-order flat list plus its `(N, mel, frames)`
-shape; at native size it is ~0.24M floats, so the fixture is a few MB and is
-generated locally, not committed.
+The input is `feature_pattern` from parity_inputs.py, a closed-form log-mel-like
+tensor the Julia side regenerates bit for bit, so the fixture stores only its
+shape, the decoder prompt and the last-position logits. Storing the tensor
+itself made this file several megabytes.
 """
 import json
 import os
 import sys
+
+# The shared input patterns live beside this script. Added explicitly so the
+# recorder still finds them when run in isolated mode (`python -I`).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from parity_inputs import feature_pattern  # noqa: E402
 
 import torch
 from transformers import WhisperForConditionalGeneration
@@ -54,8 +58,7 @@ def main(variant):
 
     n_mels = model.config.num_mel_bins
     frames = 2 * model.config.max_source_positions   # conv2 halves the length
-    gen = torch.Generator().manual_seed(0)
-    input_features = torch.randn(1, n_mels, frames, generator=gen)
+    input_features = torch.from_numpy(feature_pattern(n_mels, frames))
     decoder_input_ids = torch.tensor([DECODER_INPUT_IDS], dtype=torch.long)
 
     with torch.no_grad():
@@ -66,7 +69,7 @@ def main(variant):
     fixture = {
         "repo_id": repo_id,
         "feature_shape": list(input_features.shape),
-        "input_features": input_features.flatten().tolist(),
+        "input": "feature_pattern",
         "decoder_input_ids": DECODER_INPUT_IDS,
         "argmax_token_id": int(logits.argmax()),
         "top_indices": [int(i) for i in top.indices.tolist()],
