@@ -22,6 +22,9 @@ ViTForImageClassification
 ViTModel
 WhisperConfig
 WhisperModel
+WhisperFeatureExtractor
+load_feature_extractor
+mel_filter_bank
 dinov2_state_dict_map
 forward_from_features
 generate_multimodal

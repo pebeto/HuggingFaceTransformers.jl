@@ -79,6 +79,32 @@ Each row stops at its own EOS while the others continue.
 With `do_sample`, draws are taken per row from the shared `rng`, so the stream
 differs from running each prompt separately even though the distribution matches.
 
+## Speech
+
+Whisper goes from raw audio to text with a feature extractor in front:
+
+```julia
+using HuggingFaceTransformers
+using HuggingFaceTransformers.HFHub: snapshot_download
+using HuggingFaceTransformers.Tokenizers: load_tokenizer, decode
+using HuggingFaceTransformers.Models: load_feature_extractor, transcribe
+
+dir = snapshot_download("openai/whisper-base")
+model, tokenizer = load(dir), load_tokenizer(dir)
+fe = load_feature_extractor(dir)
+
+features = reshape(fe(samples), 80, 3000, 1)   # samples: 16 kHz mono
+prompt = [50258, 50259, 50359, 50363]           # SOT, English, transcribe, no timestamps
+ids = transcribe(model, features, prompt)
+println(decode(tokenizer, ids[(length(prompt) + 1):end]; skip_special_tokens=true))
+```
+
+[`Models.WhisperFeatureExtractor`](@ref) reproduces HF's pipeline: a centred STFT
+under a periodic Hann window, a Slaney mel projection, `log10`, and Whisper's
+clamp and rescale. On a LibriSpeech sample this transcribes token for token what
+HF does. Audio is padded or truncated to 30 s. Decoding audio files is not in the
+package, so read them with a library of your choice and resample to 16 kHz.
+
 ## Chat templates
 
 [`Generation.ChatTemplate`](@ref) renders the `chat_template` field out of

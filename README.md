@@ -142,8 +142,8 @@ ids = generate(
 
 Token IDs are 0-indexed to match HF, and the return value is the full
 `[prompt..., generated...]` sequence. The two-argument form
-`generate(lm, tokenizer, prompt)` tokenizes and detokenizes around it.
-Generation is batch-1.
+`generate(lm, tokenizer, prompt)` tokenizes and detokenizes around it. Pass a
+vector of prompts to generate them as one left-padded batch.
 
 The KV-cache is preallocated as
 `(head_dim, n_kv_heads, max_seq, batch)` and mutated in place, feature-first so
@@ -342,12 +342,12 @@ Python scripts. `HFT_TEST_JET=1` adds a JET smoke pass, and
 ## Rough edges
 
 - No `AutoModel` equivalent. You choose the config type and populate it.
-- Generation is batch-1, and there is no continuous batching.
+- There is no continuous batching; a batch runs until its last row finishes.
 - Vision models take `pixel_values` directly. Image decoding and preprocessing
   are not in the package.
-- Whisper's `transcribe` takes log-mel features, so the audio frontend is on
-  you, and its decoder recomputes each step rather than using a KV cache,
-  making cost quadratic in output length.
+- Whisper's `transcribe` recomputes the decoder each step rather than using a
+  KV cache, making cost quadratic in output length. Audio decoding is not in
+  the package: pass 16 kHz mono samples to `WhisperFeatureExtractor`.
 - LLaVA expects a vision tower that returns patch features with the CLS token
   already dropped. SigLIP fits; a CLIP tower is not implemented, which is what
   llava-1.5 end-to-end parity is waiting on.

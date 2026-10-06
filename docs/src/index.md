@@ -113,12 +113,13 @@ and Mixtral's top-k expert routing are all handled inside these types.
   hand, and checkpoints we cannot represent faithfully are refused rather than
   approximated: Phi-3's longrope variants and DINOv2-giant's SwiGLU FFN both
   throw.
-- Generation is batch-1, and there is no continuous batching.
+- There is no continuous batching; a batch runs until its last row finishes.
 - Vision models take `pixel_values` directly. Image decoding and preprocessing
   are not in the package.
-- Whisper's [`transcribe`](@ref) takes log-mel features, so the audio frontend
-  is on you, and its decoder recomputes each step rather than using a KV cache,
-  making cost quadratic in output length.
+- Whisper's [`transcribe`](@ref) recomputes the decoder each step rather than
+  using a KV cache, making cost quadratic in output length. Audio decoding is not
+  in the package: pass 16 kHz mono samples to
+  [`Models.WhisperFeatureExtractor`](@ref).
 - LLaVA expects a vision tower that returns patch features with the CLS token
   already dropped. SigLIP fits; a CLIP tower is not implemented, which is what
   llava-1.5 end-to-end parity is waiting on.

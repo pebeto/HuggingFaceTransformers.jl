@@ -54,6 +54,7 @@ export SiglipConfig, SiglipVisionConfig, SiglipTextConfig
 export SiglipVisionModel, SiglipTextModel, SiglipModel, siglip_state_dict_map
 export Dinov2Config, Dinov2Model, dinov2_state_dict_map
 export WhisperConfig, WhisperModel, whisper_state_dict_map, transcribe
+export WhisperFeatureExtractor, mel_filter_bank, load_feature_extractor
 export LlavaForConditionalGeneration, LlavaMultiModalProjector, llava_state_dict_map
 export forward_from_features, generate_multimodal, forward_embeds
 export LoRALinear, LoraConfig, lora_wrap, merge_lora, lora_scaling
@@ -80,6 +81,7 @@ include("vit.jl")
 include("siglip.jl")
 include("dinov2.jl")
 include("whisper.jl")
+include("whisper_features.jl")
 include("llava.jl")
 include("lora.jl")
 include("mixtral.jl")

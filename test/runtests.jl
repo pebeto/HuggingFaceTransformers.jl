@@ -83,6 +83,10 @@ using HuggingFaceTransformers
         include("whisper.jl")
     end
 
+    @testset verbose = true "Whisper features" begin
+        include("whisper_features.jl")
+    end
+
     @testset verbose = true "LLaVA" begin
         include("llava.jl")
     end
