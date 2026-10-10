@@ -14,7 +14,7 @@ with a leaner dependency tree and a focus on decoder LLMs.
 
 Every architecture below except LLaVA has a numeric-parity test that compares
 logits against a reference recorded from `transformers` in Python. The CPU
-suite is 1463 assertions and runs in about 90 seconds.
+suite is 1840 assertions and runs in about three and a half minutes.
 
 ## Installation
 
@@ -31,31 +31,20 @@ GPT-2 needs no access token, which makes it the shortest end-to-end example.
 Roughly 0.5 GB downloads to `~/.cache/huggingface/hub` on first run.
 
 ```julia
+using HuggingFaceTransformers
 using HuggingFaceTransformers.HFHub: snapshot_download
 using HuggingFaceTransformers.Tokenizers: load_tokenizer
-using HuggingFaceTransformers.Models:
-    GPT2Config, GPT2ForCausalLM, load_weights, load_state_dict!
 using HuggingFaceTransformers.Generation: generate
-using JSON3
 
-dir = snapshot_download("gpt2")
-raw = JSON3.read(read(joinpath(dir, "config.json"), String))
+lm = load("gpt2")
+tokenizer = load_tokenizer(snapshot_download("gpt2"))
 
-cfg = GPT2Config(;
-    vocab_size=Int(raw.vocab_size),
-    hidden_size=Int(raw.n_embd),
-    intermediate_size=4 * Int(raw.n_embd),
-    num_hidden_layers=Int(raw.n_layer),
-    num_attention_heads=Int(raw.n_head),
-    max_position_embeddings=Int(raw.n_positions),
-)
-
-lm = GPT2ForCausalLM(cfg)
-load_state_dict!(lm, load_weights(dir))
-
-tokenizer = load_tokenizer(dir)
 println(generate(lm, tokenizer, "The Julia language is"; max_new_tokens=32))
 ```
+
+`load` reads `config.json` to pick the architecture, so no config type is named
+and no field is copied by hand. The download is cached, which is why asking for
+the snapshot directory a second time costs nothing.
 
 Gated repositories (Llama and Gemma among them) need a token in `HF_TOKEN`, or
 a `huggingface-cli login` done once. The package reads the same
@@ -63,15 +52,20 @@ a `huggingface-cli login` done once. The package reads the same
 
 ## Loading a checkpoint
 
-Loading is four explicit steps, and the middle one is manual:
+`load(repo_or_dir)` downloads the repository, reads the architecture out of
+`config.json`, builds the matching config and model, and loads the weights.
+Keywords reach the model constructor, so an embedding checkpoint that wants mean
+pooling is `load("intfloat/e5-small-v2"; pooling=:mean)`. The architectures it
+dispatches on are listed in `Models.AUTO_ARCHITECTURES`.
+
+For an architecture `load` does not know, or to change a hyperparameter, do the
+same work by hand in four steps:
 
 1. `snapshot_download(repo_id)` resolves the revision and fetches
    `config.json`, the tokenizer files, and the weights into the Python-compatible
    cache layout. Already-cached blobs are reused.
-2. You build the config struct yourself from `config.json`. There is no
-   `AutoConfig` equivalent that guesses the architecture, so you pick the
-   `*Config` type and fill in the fields. Each file under `examples/` shows
-   this for one family.
+2. Build the config struct with `config_from_json(GPT2Config, read_config(dir))`,
+   or construct it yourself with the fields you want changed.
 3. Construct the model from the config, which allocates the parameters.
 4. `load_state_dict!(model, load_weights(dir))` walks a pure-data mapping table
    from HF parameter names to Julia layer addresses, transposing or slicing
@@ -209,6 +203,25 @@ v = embed(model, tokenizer, "hello world")
 `mean_pool`, `cls_pool`, and `l2_normalize` functions are exported if you want
 to pool the trunk output yourself.
 
+## Images
+
+```julia
+using HuggingFaceTransformers.Models: load_image_processor
+import FileIO        # exports a `load` of its own, so keep it qualified
+
+dir = snapshot_download("google/vit-base-patch16-224")
+model, processor = load(dir), load_image_processor(dir)
+logits = model(processor(FileIO.load("cats.jpg")))     # pixel_values: (3, 224, 224, 1)
+```
+
+`load_image_processor` reads `preprocessor_config.json` for the ViT, SigLIP,
+DINOv2 (Bit), and CLIP processors. The processor it returns takes a decoded
+color image, or a `(3, height, width)` `UInt8` array, and resizes, crops, and
+normalizes it into the `(channels, height, width, batch)` layout the vision
+models take. The resize
+reproduces torchvision's fixed-point uint8 kernel, so `pixel_values` equal HF's
+bit for bit.
+
 ## Tokenizers
 
 `load_tokenizer(path)` reads `tokenizer.json` and handles three model types
@@ -341,10 +354,10 @@ Python scripts. `HFT_TEST_JET=1` adds a JET smoke pass, and
 
 ## Rough edges
 
-- No `AutoModel` equivalent. You choose the config type and populate it.
 - There is no continuous batching; a batch runs until its last row finishes.
-- Vision models take `pixel_values` directly. Image decoding and preprocessing
-  are not in the package.
+- Image files are decoded by FileIO, JpegTurbo, or Images.jl rather than this
+  package; `ImageProcessor` takes over from the decoded image. Only the ViT,
+  SigLIP, Bit (DINOv2), and CLIP processors are implemented.
 - Whisper's `transcribe` recomputes the decoder each step rather than using a
   KV cache, making cost quadratic in output length. Audio decoding is not in
   the package: pass 16 kHz mono samples to `WhisperFeatureExtractor`.

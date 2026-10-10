@@ -114,8 +114,9 @@ and Mixtral's top-k expert routing are all handled inside these types.
   approximated: Phi-3's longrope variants and DINOv2-giant's SwiGLU FFN both
   throw.
 - There is no continuous batching; a batch runs until its last row finishes.
-- Vision models take `pixel_values` directly. Image decoding and preprocessing
-  are not in the package.
+- Image files are decoded by FileIO, JpegTurbo, or Images.jl rather than this
+  package; [`Models.ImageProcessor`](@ref) takes over from the decoded image.
+  Only the ViT, SigLIP, Bit (DINOv2), and CLIP processors are implemented.
 - Whisper's [`transcribe`](@ref) recomputes the decoder each step rather than
   using a KV cache, making cost quadratic in output length. Audio decoding is not
   in the package: pass 16 kHz mono samples to

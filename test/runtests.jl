@@ -87,6 +87,10 @@ using HuggingFaceTransformers
         include("whisper_features.jl")
     end
 
+    @testset verbose = true "Image processor" begin
+        include("image_processor.jl")
+    end
+
     @testset verbose = true "LLaVA" begin
         include("llava.jl")
     end

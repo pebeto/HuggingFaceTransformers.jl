@@ -4,7 +4,7 @@ CurrentModule = HuggingFaceTransformers.Models
 
 # Vision, audio, and multimodal
 
-Image towers, the Whisper encoder-decoder, and the LLaVA wrapper that splices projected image features into text embeddings.
+Image towers and the processor that prepares their input, the Whisper encoder-decoder and its feature extractor, and the LLaVA wrapper that splices projected image features into text embeddings.
 
 ```@docs
 Dinov2Config
@@ -24,6 +24,8 @@ WhisperConfig
 WhisperModel
 WhisperFeatureExtractor
 load_feature_extractor
+ImageProcessor
+load_image_processor
 mel_filter_bank
 dinov2_state_dict_map
 forward_from_features

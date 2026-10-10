@@ -36,6 +36,7 @@ makedocs(;
         "Guide" => [
             "guide/loading.md",
             "guide/generation.md",
+            "guide/images.md",
             "guide/tokenizers.md",
             "guide/performance.md",
             "guide/finetuning.md",

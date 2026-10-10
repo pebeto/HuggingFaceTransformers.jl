@@ -27,3 +27,15 @@ def feature_pattern(mel_bins, frames):
     m, t = np.meshgrid(np.arange(mel_bins), np.arange(frames), indexing="ij")
     v = 0.6 * np.sin(0.19 * m + 0.031 * t) + 0.4 * np.cos(0.07 * m - 0.013 * t)
     return v.astype(np.float32)[None]
+
+
+def image_pattern(height, width):
+    """An (H, W, 3) uint8 image, the channels-last layout decoded images come in.
+
+    Integer arithmetic only, so both languages agree on every byte. The quadratic
+    phase runs smooth near the origin and wraps from 255 to 0 increasingly often
+    further out, so a resize sees both gradients and hard edges (which make the
+    bicubic kernel overshoot and clip).
+    """
+    h, w, c = np.meshgrid(np.arange(height), np.arange(width), np.arange(3), indexing="ij")
+    return ((3 * h * h + 5 * w * w + 7 * h * w + 71 * c + 11) % 256).astype(np.uint8)

@@ -6,7 +6,8 @@ CurrentModule = HuggingFaceTransformers
 
 [`Generation.generate`](@ref) mirrors the keyword arguments of HuggingFace's
 `model.generate`. Token IDs are 0-indexed to match HF, and the return value is
-the full `[prompt..., generated...]` sequence. Generation is batch-1.
+the full `[prompt..., generated...]` sequence. A vector of prompts generates as
+one batch, as covered under Batches below.
 
 ```julia
 ids = generate(

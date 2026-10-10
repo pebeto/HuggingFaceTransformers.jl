@@ -29,3 +29,17 @@ function feature_pattern(mel_bins::Integer, frames::Integer)
     end
     return f
 end
+
+"""
+    image_pattern(height, width) -> Array{UInt8,3}
+
+`(3, H, W)` bytes, where `img[c+1, h+1, w+1]` equals the NumPy array's
+`[h, w, c]`. Integer arithmetic only, so every byte matches the Python side.
+"""
+function image_pattern(height::Integer, width::Integer)
+    img = Array{UInt8,3}(undef, 3, height, width)
+    for c in 0:2, h in 0:(height - 1), w in 0:(width - 1)
+        img[c + 1, h + 1, w + 1] = (3h^2 + 5w^2 + 7h * w + 71c + 11) % 256
+    end
+    return img
+end
