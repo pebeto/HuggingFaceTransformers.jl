@@ -1,5 +1,6 @@
 using Test
 using HuggingFaceTransformers.Generation: ChatTemplate, apply_chat_template
+using JSON3
 
 @testset verbose = true "building blocks" begin
     @testset "literals & basic output" begin
@@ -87,7 +88,8 @@ using HuggingFaceTransformers.Generation: ChatTemplate, apply_chat_template
 
     @testset "filters" begin
         @test apply_chat_template("{{ '  hi  ' | trim }}", []) == "hi"
-        @test apply_chat_template("{{ x | tojson }}", []; x=Dict("a" => 1)) == "{\"a\":1}"
+        # Python's `json.dumps` spacing, which is what HF's `tojson` produces.
+        @test apply_chat_template("{{ x | tojson }}", []; x=Dict("a" => 1)) == "{\"a\": 1}"
         # chained
         @test apply_chat_template("{{ '  hi  ' | trim | trim }}", []) == "hi"
     end
@@ -105,6 +107,73 @@ using HuggingFaceTransformers.Generation: ChatTemplate, apply_chat_template
 
     @testset "comments {# … #}" begin
         @test apply_chat_template("a{# comment #}b", []) == "ab"
+    end
+end
+
+@testset verbose = true "Python and HF-environment semantics" begin
+    act(src; kw...) = apply_chat_template(src, []; kw...)
+
+    @testset "namespace survives the loop" begin
+        src = "{% set ns = namespace(n=0) %}{% for x in xs %}{% set ns.n = ns.n + x %}{% endfor %}{{ ns.n }}"
+        @test act(src; xs=[1, 2, 3]) == "6"
+        # A plain `set` inside a loop stays inside it, as in Jinja.
+        @test act("{% set n = 0 %}{% for x in xs %}{% set n = x %}{% endfor %}{{ n }}"; xs=[1, 2]) == "0"
+        @test_throws ArgumentError act("{% set d.n = 1 %}"; d=Dict("n" => 0))
+    end
+
+    @testset "Python indexing and slicing" begin
+        @test act("{{ xs[::-1] | tojson }}"; xs=[1, 2, 3]) == "[3, 2, 1]"
+        @test act("{{ xs[-2:] | tojson }}"; xs=[1, 2, 3]) == "[2, 3]"
+        @test act("{{ xs[:10] | tojson }}"; xs=[1, 2, 3]) == "[1, 2, 3]"
+        @test act("{{ xs[2:0:-1] | tojson }}"; xs=[1, 2, 3]) == "[3, 2]"
+        @test act("{{ xs[-1] }}"; xs=[1, 2, 3]) == "3"
+        @test act("{{ s[1:5:2] }}{{ s[-1] }}"; s="abcdéf") == "bdf"
+    end
+
+    @testset "string methods" begin
+        @test act("{{ s.startswith('<a>') and s.endswith('</a>') }}"; s="<a>x</a>") == "True"
+        @test act("{{ s.split('</t>')[0].rstrip('\\n') }}|{{ s.split('</t>')[-1].lstrip('\\n') }}";
+            s="one\n</t>\ntwo") == "one|two"
+        @test act("{{ s.strip('\\n') }}|{{ s.strip() }}"; s="\n x \n") == " x |x"
+        @test act("{{ s.split() | length }}"; s=" a  b c ") == "3"
+        @test act("{{ s.split(',', 1) | tojson }}"; s="a,b,c") == "[\"a\", \"b,c\"]"
+        @test act("{{ s.upper() }}{{ s.lower() }}{{ s.replace('b', 'x') }}"; s="aB") == "ABabaB"
+        @test act("{{ d.get('k', 'none') }}{{ d.get('z', 'dflt') }}"; d=Dict("k" => "v")) == "vdflt"
+        @test_throws ArgumentError act("{{ s.zfill(3) }}"; s="1")
+    end
+
+    @testset "tests" begin
+        @test act("{{ x is string }}{{ n is string }}"; x="a", n=1) == "TrueFalse"
+        @test act("{{ f is false }}{{ u is false }}{{ 0 is false }}"; f=false) == "TrueFalseFalse"
+        @test act("{{ 1 is number }}{{ t is number }}{{ t is boolean }}"; t=true) == "TrueFalseTrue"
+        @test act("{{ d is mapping }}{{ xs is sequence }}"; d=Dict(), xs=[1]) == "TrueTrue"
+        @test act("{{ u is undefined }}") == "True"
+    end
+
+    @testset "loop controls and loop variables" begin
+        src = "{% for x in xs %}{% if x == 2 %}{% continue %}{% endif %}" *
+            "{% if x == 4 %}{% break %}{% endif %}{{ x }}{% endfor %}"
+        @test act(src; xs=[1, 2, 3, 4, 5]) == "13"
+        @test act("{% for x in xs %}{{ loop.revindex0 }}{% endfor %}"; xs=[1, 2, 3]) == "210"
+        @test_throws ArgumentError act("{% break %}")
+        # Iterating a mapping yields its keys.
+        @test act("{% for k in d %}{{ k }}{% endfor %}"; d=Dict("only" => 1)) == "only"
+    end
+
+    @testset "trim_blocks and lstrip_blocks, as HF configures Jinja" begin
+        # Expected strings come from Jinja2 with trim_blocks=True, lstrip_blocks=True.
+        @test act("{% if true %}\n    hello\n{% endif %}\nbye") == "    hello\nbye"
+        @test act("a\n    {% if true %}\n  b\n    {%+ if true %}c{% endif %}\n{% endif +%}\nz") ==
+            "a\n  b\n    c\nz"
+        @test act("x {% if true %}y{% endif %} w") == "x y w"
+        @test act("  {# note #}\nq") == "q"
+        @test act("{{ 'v' }}\n  {% if true %}t{% endif %}") == "v\nt"
+    end
+
+    @testset "tojson is Python's json.dumps" begin
+        x = Dict("a" => Any[1.5, 1.0e-5, 1.0e16, 1.0e15, 0.0001, nothing, true, "é\"\n\t\x01"])
+        @test act("{{ x | tojson }}"; x) ==
+            "{\"a\": [1.5, 1e-05, 1e+16, 1000000000000000.0, 0.0001, null, true, \"é\\\"\\n\\t\\u0001\"]}"
     end
 end
 
@@ -280,5 +349,29 @@ end
         # Skipping an absent branch is intended; dereferencing one is a template bug.
         @test_throws ArgumentError apply_chat_template("{{ missing.attr }}", [])
         @test_throws ArgumentError apply_chat_template("{{ a.b.c }}", []; a=Dict())
+    end
+end
+
+const _CHAT_TEMPLATE_FIXTURE = joinpath(@__DIR__, "fixtures", "chat_template_parity.json")
+
+@testset verbose = true "matches HF's apply_chat_template" begin
+    # The fixture carries each template's source next to HF's rendering, so this
+    # runs offline. Messages stay JSON3 objects, which keep key order the way the
+    # Python dicts did; `tojson` output depends on it.
+    if !isfile(_CHAT_TEMPLATE_FIXTURE)
+        @info "Skipping chat template parity: run " *
+            "`python3 test/fixtures/record_chat_template_parity.py`"
+    else
+        for tmpl in JSON3.read(read(_CHAT_TEMPLATE_FIXTURE, String)).templates
+            template = ChatTemplate(String(tmpl.template))
+            @testset "$(tmpl.name): $(case.name)" for case in tmpl.cases
+                kwargs = Dict{Symbol,Any}(Symbol(k) => v for (k, v) in get(case, :kwargs, Dict()))
+                isnothing(get(case, :tools, nothing)) || (kwargs[:tools] = case.tools)
+                rendered = template(
+                    case.messages; add_generation_prompt=case.add_generation_prompt, kwargs...
+                )
+                @test rendered == case.expected
+            end
+        end
     end
 end

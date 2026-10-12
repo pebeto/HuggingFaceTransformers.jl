@@ -1,9 +1,10 @@
 #!/usr/bin/env julia
-# HuggingFaceTransformers.jl REPL chat against a Qwen2 / Qwen2.5 model.
+# HuggingFaceTransformers.jl REPL chat against a Qwen2 / Qwen2.5 / Qwen3 model.
 #
 # Usage:
 #   julia --project=. examples/repl_chat_qwen.jl
 #   julia --project=. examples/repl_chat_qwen.jl Qwen/Qwen2.5-1.5B-Instruct
+#   julia --project=. examples/repl_chat_qwen.jl Qwen/Qwen3-0.6B
 #
 # Authentication: most Qwen2.5 models are open weights, no HF token needed.
 #

@@ -77,7 +77,7 @@ a `huggingface-cli login` done once. The package reads the same
 | --- | --- | --- |
 | Llama 3.x | [`LlamaForCausalLM`](@ref) | `Llama-3.2-1B/3B-Instruct`, `Llama-3.1-8B/70B-Instruct` |
 | Mistral | [`MistralForCausalLM`](@ref) | `Mistral-7B-Instruct-v0.2`, `v0.3` |
-| Qwen2 / Qwen2.5 | [`QwenForCausalLM`](@ref) | `Qwen2.5-0.5B/1.5B/3B/7B-Instruct` |
+| Qwen2 / Qwen2.5 / Qwen3 | [`QwenForCausalLM`](@ref) | `Qwen2.5-0.5B/1.5B/3B/7B-Instruct`, `Qwen3-0.6B` |
 | Gemma 2 | [`GemmaForCausalLM`](@ref) | `gemma-2-2b/9b/27b-it` |
 | Phi-3 | [`Phi3ForCausalLM`](@ref) | `Phi-3-mini-4k-instruct`, `Phi-3-medium-4k-instruct` |
 | GPT-2 | [`GPT2ForCausalLM`](@ref) | `gpt2`, `gpt2-medium`, `gpt2-large`, `gpt2-xl` |
@@ -85,8 +85,9 @@ a `huggingface-cli login` done once. The package reads the same
 | Mixtral (sparse MoE) | [`MixtralForCausalLM`](@ref) | `Mixtral-8x7B/8x22B-Instruct-v0.1` |
 
 Llama 3 RoPE scaling, Mistral and Gemma sliding-window attention, Gemma's logit
-softcapping, Phi-3's fused QKV, NeoX's partial RoPE and parallel-residual block,
-and Mixtral's top-k expert routing are all handled inside these types.
+softcapping, Qwen3's per-head query and key norms, Phi-3's fused QKV, NeoX's
+partial RoPE and parallel-residual block, and Mixtral's top-k expert routing are
+all handled inside these types.
 
 ### Encoders and embeddings
 

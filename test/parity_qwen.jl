@@ -2,17 +2,18 @@ using Test
 using JSON3
 using HuggingFaceTransformers.HFHub: snapshot_download
 using HuggingFaceTransformers.Tokenizers: load_tokenizer, encode
-using HuggingFaceTransformers.Models:
-    load_weights, QwenForCausalLM, QwenConfig, load_state_dict!
+using HuggingFaceTransformers.Models: QwenForCausalLM, load_pretrained
 
 # Variant label → fixture filename. Each fixture is recorded once via
-# test/fixtures/record_qwen_parity.py. Picked variants span both branches
-# of the tied-embeddings flag (small variants tie, larger don't).
+# test/fixtures/record_qwen_parity.py. The Qwen2.5 variants span both branches
+# of the tied-embeddings flag (small variants tie, larger don't); Qwen3 adds the
+# bias-free attention with per-head query/key norms.
 const VARIANTS = (
     ("0.5B", "qwen2_5_0_5b_instruct_parity.json"),
     ("1.5B", "qwen2_5_1_5b_instruct_parity.json"),
     ("3B", "qwen2_5_3b_instruct_parity.json"),
     ("7B", "qwen2_5_7b_instruct_parity.json"),
+    ("Qwen3-0.6B", "qwen3_0_6b_parity.json"),
 )
 
 const FIXTURES_DIR = joinpath(@__DIR__, "fixtures")
@@ -31,44 +32,10 @@ end
 
 const SELECTED = _selected_variants(get(ENV, "HFT_TEST_PARITY_QWEN", ""))
 
-function _load_qwen_config(snapshot_dir::AbstractString)
-    raw = JSON3.read(read(joinpath(snapshot_dir, "config.json"), String))
-
-    head_dim = if haskey(raw, :head_dim)
-        Int(raw.head_dim)
-    else
-        Int(raw.hidden_size) ÷ Int(raw.num_attention_heads)
-    end
-
-    # Qwen2 honors sliding_window only when use_sliding_window is true.
-    use_sw = Bool(get(raw, :use_sliding_window, false))
-    sliding_window =
-        if use_sw && haskey(raw, :sliding_window) && raw.sliding_window !== nothing
-            Int(raw.sliding_window)
-        else
-            nothing
-        end
-
-    return QwenConfig(;
-        vocab_size=Int(raw.vocab_size),
-        hidden_size=Int(raw.hidden_size),
-        intermediate_size=Int(raw.intermediate_size),
-        num_hidden_layers=Int(raw.num_hidden_layers),
-        num_attention_heads=Int(raw.num_attention_heads),
-        num_key_value_heads=Int(get(raw, :num_key_value_heads, raw.num_attention_heads)),
-        head_dim=head_dim,
-        max_position_embeddings=Int(raw.max_position_embeddings),
-        rope_theta=Float64(get(raw, :rope_theta, 1_000_000.0)),
-        rms_norm_eps=Float64(get(raw, :rms_norm_eps, 1.0e-6)),
-        tie_word_embeddings=Bool(get(raw, :tie_word_embeddings, false)),
-        sliding_window=sliding_window,
-    )
-end
-
 function _run_variant(name::AbstractString, fixture_filename::AbstractString)
     fixture_path = joinpath(FIXTURES_DIR, fixture_filename)
     if !isfile(fixture_path)
-        @info "Skipping Qwen2.5-$(name) parity: fixture $(fixture_path) " *
+        @info "Skipping Qwen $(name) parity: fixture $(fixture_path) " *
             "not present. Generate it with " *
             "`python3 test/fixtures/record_qwen_parity.py $(name)`."
         return nothing
@@ -85,7 +52,7 @@ function _run_variant(name::AbstractString, fixture_filename::AbstractString)
 
     snapshot_dir = snapshot_download(repo_id; verbose=false)
 
-    @testset verbose = true "Qwen2.5-$(name) ($(repo_id))" begin
+    @testset verbose = true "Qwen $(name) ($(repo_id))" begin
         @testset "tokenizer matches HF byte-for-byte (no BOS)" begin
             tk = load_tokenizer(snapshot_dir)
             ids = encode(tk, prompt)
@@ -93,9 +60,9 @@ function _run_variant(name::AbstractString, fixture_filename::AbstractString)
         end
 
         @testset "last-position logits within $(tolerance)" begin
-            cfg = _load_qwen_config(snapshot_dir)
-            lm = QwenForCausalLM(cfg)
-            load_state_dict!(lm, load_weights(snapshot_dir))
+            # Through the auto path, so config parsing is part of what is checked.
+            lm = load_pretrained(snapshot_dir)
+            @test lm isa QwenForCausalLM
 
             input_mat = reshape(expected_ids, :, 1)
             logits = lm(input_mat; step=1)

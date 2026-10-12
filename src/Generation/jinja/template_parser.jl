@@ -42,6 +42,9 @@ function _parse_one(p::BlockParser)
             return _parse_for(p)
         elseif word == "set"
             return _parse_set(p)
+        elseif word == "break" || word == "continue"
+            p.pos += 1
+            return LoopControlNode(Symbol(word))
         else
             throw(ArgumentError("unsupported statement at top level: $(strip(content))"))
         end
@@ -76,7 +79,7 @@ end
 
 function _parse_for(p::BlockParser)
     _, content = p.blocks[p.pos]
-    m = match(r"^for\s+(\w+)\s+in\s+(.+)$", strip(content))
+    m = match(r"^for\s+(\w+)\s+in\s+(.+)$"s, strip(content))
     isnothing(m) && throw(ArgumentError("invalid for statement: $(content)"))
     var_cap = m.captures[1]::AbstractString
     iter_cap = m.captures[2]::AbstractString
@@ -92,10 +95,12 @@ end
 
 function _parse_set(p::BlockParser)
     _, content = p.blocks[p.pos]
-    m = match(r"^set\s+(\w+)\s*=\s*(.+)$", strip(content))
+    m = match(r"^set\s+(\w+)(?:\.(\w+))?\s*=\s*(.+)$"s, strip(content))
     isnothing(m) && throw(ArgumentError("invalid set statement: $(content)"))
     name_cap = m.captures[1]::AbstractString
-    expr_cap = m.captures[2]::AbstractString
+    attr_cap = m.captures[2]
+    expr_cap = m.captures[3]::AbstractString
     p.pos += 1
-    return SetNode(String(name_cap), parse_expression(expr_cap))
+    attr = isnothing(attr_cap) ? nothing : String(attr_cap)
+    return SetNode(String(name_cap), attr, parse_expression(expr_cap))
 end

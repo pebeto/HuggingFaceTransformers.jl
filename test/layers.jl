@@ -184,6 +184,8 @@ end
 
     # 1. Verify trainable parameters
     @test keys(Flux.Optimisers.trainable(gqa)) == (:wq, :wk, :wv, :wo)
+    qk = GQA(hidden_dim, num_heads_q, num_heads_k, head_dim, rope; qk_norm_eps=1.0e-6)
+    @test keys(Flux.Optimisers.trainable(qk)) == (:wq, :wk, :wv, :wo, :q_norm, :k_norm)
 
     # 2. Causal masking check (gradients of output at step t with respect to input at step > t should be 0)
     # Output of token 1: y[:, 1, 1]
@@ -372,6 +374,8 @@ end
             5.0f0,             # softcap
             nothing,           # query_scale
             true,              # causal
+            nothing,           # q_norm
+            nothing,           # k_norm
         )
         x = randn(Float32, hidden_dim, 4, 1) .* 10   # large inputs → big scores
         out_raw = gqa_raw(x)
@@ -397,6 +401,8 @@ end
             nothing,
             Float32(sqrt(head_dim)),
             true,              # causal
+            nothing,           # q_norm
+            nothing,           # k_norm
         )
         x = randn(Float32, hidden_dim, 4, 1)
         @test gqa_default(x) ≈ gqa_match(x)
@@ -415,6 +421,8 @@ end
             nothing,
             Float32(2.0 * sqrt(head_dim)),
             true,              # causal
+            nothing,           # q_norm
+            nothing,           # k_norm
         )
         @test !(gqa_default(x) ≈ gqa_other(x))
     end
@@ -450,6 +458,8 @@ end
             nothing,                     # softcap
             nothing,                     # query_scale
             true,                        # causal
+            nothing,                     # q_norm
+            nothing,                     # k_norm
         )
 
         x = rand(Float32, hidden_dim, 5, 1)
@@ -472,6 +482,8 @@ end
             nothing,                     # softcap
             nothing,                     # query_scale
             true,                        # causal
+            nothing,                     # q_norm
+            nothing,                     # k_norm
         )
 
         x = rand(Float32, hidden_dim, 5, 1)

@@ -18,6 +18,7 @@ struct SliceExpr <: TmplExpr
     obj::TmplExpr
     start::Union{Nothing,TmplExpr}
     stop::Union{Nothing,TmplExpr}
+    step::Union{Nothing,TmplExpr}
 end
 struct BinOpExpr <: TmplExpr
     op::Symbol
@@ -44,6 +45,13 @@ end
 struct CallExpr <: TmplExpr
     func::String
     args::Vector{TmplExpr}
+    kwargs::Vector{Pair{String,TmplExpr}}
+end
+# `obj.name(args...)`: a Python method on a string or dict.
+struct MethodCallExpr <: TmplExpr
+    obj::TmplExpr
+    name::String
+    args::Vector{TmplExpr}
 end
 
 abstract type TmplNode end
@@ -65,5 +73,9 @@ struct ForNode <: TmplNode
 end
 struct SetNode <: TmplNode
     name::String
+    attr::Union{Nothing,String}   # `set ns.attr = ...` assigns into a namespace
     expr::TmplExpr
+end
+struct LoopControlNode <: TmplNode
+    kind::Symbol                  # :break or :continue
 end

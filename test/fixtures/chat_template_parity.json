@@ -1,0 +1,434 @@
+{
+ "templates": [
+  {
+   "name": "qwen3",
+   "repo_id": "Qwen/Qwen3-0.6B",
+   "template": "{%- if tools %}\n    {{- '<|im_start|>system\\n' }}\n    {%- if messages[0].role == 'system' %}\n        {{- messages[0].content + '\\n\\n' }}\n    {%- endif %}\n    {{- \"# Tools\\n\\nYou may call one or more functions to assist with the user query.\\n\\nYou are provided with function signatures within <tools></tools> XML tags:\\n<tools>\" }}\n    {%- for tool in tools %}\n        {{- \"\\n\" }}\n        {{- tool | tojson }}\n    {%- endfor %}\n    {{- \"\\n</tools>\\n\\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\\n<tool_call>\\n{\\\"name\\\": <function-name>, \\\"arguments\\\": <args-json-object>}\\n</tool_call><|im_end|>\\n\" }}\n{%- else %}\n    {%- if messages[0].role == 'system' %}\n        {{- '<|im_start|>system\\n' + messages[0].content + '<|im_end|>\\n' }}\n    {%- endif %}\n{%- endif %}\n{%- set ns = namespace(multi_step_tool=true, last_query_index=messages|length - 1) %}\n{%- for message in messages[::-1] %}\n    {%- set index = (messages|length - 1) - loop.index0 %}\n    {%- if ns.multi_step_tool and message.role == \"user\" and message.content is string and not(message.content.startswith('<tool_response>') and message.content.endswith('</tool_response>')) %}\n        {%- set ns.multi_step_tool = false %}\n        {%- set ns.last_query_index = index %}\n    {%- endif %}\n{%- endfor %}\n{%- for message in messages %}\n    {%- if message.content is string %}\n        {%- set content = message.content %}\n    {%- else %}\n        {%- set content = '' %}\n    {%- endif %}\n    {%- if (message.role == \"user\") or (message.role == \"system\" and not loop.first) %}\n        {{- '<|im_start|>' + message.role + '\\n' + content + '<|im_end|>' + '\\n' }}\n    {%- elif message.role == \"assistant\" %}\n        {%- set reasoning_content = '' %}\n        {%- if message.reasoning_content is string %}\n            {%- set reasoning_content = message.reasoning_content %}\n        {%- else %}\n            {%- if '</think>' in content %}\n                {%- set reasoning_content = content.split('</think>')[0].rstrip('\\n').split('<think>')[-1].lstrip('\\n') %}\n                {%- set content = content.split('</think>')[-1].lstrip('\\n') %}\n            {%- endif %}\n        {%- endif %}\n        {%- if loop.index0 > ns.last_query_index %}\n            {%- if loop.last or (not loop.last and reasoning_content) %}\n                {{- '<|im_start|>' + message.role + '\\n<think>\\n' + reasoning_content.strip('\\n') + '\\n</think>\\n\\n' + content.lstrip('\\n') }}\n            {%- else %}\n                {{- '<|im_start|>' + message.role + '\\n' + content }}\n            {%- endif %}\n        {%- else %}\n            {{- '<|im_start|>' + message.role + '\\n' + content }}\n        {%- endif %}\n        {%- if message.tool_calls %}\n            {%- for tool_call in message.tool_calls %}\n                {%- if (loop.first and content) or (not loop.first) %}\n                    {{- '\\n' }}\n                {%- endif %}\n                {%- if tool_call.function %}\n                    {%- set tool_call = tool_call.function %}\n                {%- endif %}\n                {{- '<tool_call>\\n{\"name\": \"' }}\n                {{- tool_call.name }}\n                {{- '\", \"arguments\": ' }}\n                {%- if tool_call.arguments is string %}\n                    {{- tool_call.arguments }}\n                {%- else %}\n                    {{- tool_call.arguments | tojson }}\n                {%- endif %}\n                {{- '}\\n</tool_call>' }}\n            {%- endfor %}\n        {%- endif %}\n        {{- '<|im_end|>\\n' }}\n    {%- elif message.role == \"tool\" %}\n        {%- if loop.first or (messages[loop.index0 - 1].role != \"tool\") %}\n            {{- '<|im_start|>user' }}\n        {%- endif %}\n        {{- '\\n<tool_response>\\n' }}\n        {{- content }}\n        {{- '\\n</tool_response>' }}\n        {%- if loop.last or (messages[loop.index0 + 1].role != \"tool\") %}\n            {{- '<|im_end|>\\n' }}\n        {%- endif %}\n    {%- endif %}\n{%- endfor %}\n{%- if add_generation_prompt %}\n    {{- '<|im_start|>assistant\\n' }}\n    {%- if enable_thinking is defined and enable_thinking is false %}\n        {{- '<think>\\n\\n</think>\\n\\n' }}\n    {%- endif %}\n{%- endif %}",
+   "cases": [
+    {
+     "name": "system_and_user",
+     "messages": [
+      {
+       "role": "system",
+       "content": "You are terse."
+      },
+      {
+       "role": "user",
+       "content": "Name a prime."
+      }
+     ],
+     "add_generation_prompt": true,
+     "expected": "<|im_start|>system\nYou are terse.<|im_end|>\n<|im_start|>user\nName a prime.<|im_end|>\n<|im_start|>assistant\n"
+    },
+    {
+     "name": "thinking_disabled",
+     "messages": [
+      {
+       "role": "user",
+       "content": "Hi!\nTwo lines."
+      }
+     ],
+     "add_generation_prompt": true,
+     "kwargs": {
+      "enable_thinking": false
+     },
+     "expected": "<|im_start|>user\nHi!\nTwo lines.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
+    },
+    {
+     "name": "history_with_inline_thinking",
+     "messages": [
+      {
+       "role": "user",
+       "content": "What is 2+2?"
+      },
+      {
+       "role": "assistant",
+       "content": "<think>\nAdd them.\n</think>\n\n4"
+      },
+      {
+       "role": "user",
+       "content": "And 3+3?"
+      }
+     ],
+     "add_generation_prompt": true,
+     "expected": "<|im_start|>user\nWhat is 2+2?<|im_end|>\n<|im_start|>assistant\n4<|im_end|>\n<|im_start|>user\nAnd 3+3?<|im_end|>\n<|im_start|>assistant\n"
+    },
+    {
+     "name": "reasoning_content_last_turn",
+     "messages": [
+      {
+       "role": "user",
+       "content": "Pick a color."
+      },
+      {
+       "role": "assistant",
+       "reasoning_content": "\nAny will do.\n",
+       "content": "Blue."
+      }
+     ],
+     "add_generation_prompt": false,
+     "expected": "<|im_start|>user\nPick a color.<|im_end|>\n<|im_start|>assistant\n<think>\nAny will do.\n</think>\n\nBlue.<|im_end|>\n"
+    },
+    {
+     "name": "tools_and_calls",
+     "messages": [
+      {
+       "role": "system",
+       "content": "Use tools when helpful."
+      },
+      {
+       "role": "user",
+       "content": "Weather in Lima and Cusco?"
+      },
+      {
+       "role": "assistant",
+       "content": "",
+       "tool_calls": [
+        {
+         "type": "function",
+         "function": {
+          "name": "get_weather",
+          "arguments": {
+           "city": "Lima"
+          }
+         }
+        },
+        {
+         "type": "function",
+         "function": {
+          "name": "get_weather",
+          "arguments": "{\"city\": \"Cusco\", \"days\": 2}"
+         }
+        }
+       ]
+      },
+      {
+       "role": "tool",
+       "content": "{\"temp\": 19.5}"
+      },
+      {
+       "role": "tool",
+       "content": "{\"temp\": 11}"
+      },
+      {
+       "role": "assistant",
+       "content": "Lima 19.5 °C, Cusco 11 °C."
+      },
+      {
+       "role": "user",
+       "content": "Thanks"
+      }
+     ],
+     "tools": [
+      {
+       "type": "function",
+       "function": {
+        "name": "get_weather",
+        "description": "Current weather for a city, in °C. Say \"unknown\" if unsure.",
+        "parameters": {
+         "type": "object",
+         "properties": {
+          "city": {
+           "type": "string",
+           "description": "City name, e.g. Lima"
+          },
+          "precision": {
+           "type": "number",
+           "default": 0.5
+          },
+          "days": {
+           "type": "integer",
+           "minimum": 1,
+           "maximum": 7
+          }
+         },
+         "required": [
+          "city"
+         ]
+        }
+       }
+      }
+     ],
+     "add_generation_prompt": true,
+     "expected": "<|im_start|>system\nUse tools when helpful.\n\n# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>\n{\"type\": \"function\", \"function\": {\"name\": \"get_weather\", \"description\": \"Current weather for a city, in °C. Say \\\"unknown\\\" if unsure.\", \"parameters\": {\"type\": \"object\", \"properties\": {\"city\": {\"type\": \"string\", \"description\": \"City name, e.g. Lima\"}, \"precision\": {\"type\": \"number\", \"default\": 0.5}, \"days\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 7}}, \"required\": [\"city\"]}}}\n</tools>\n\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n<tool_call>\n{\"name\": <function-name>, \"arguments\": <args-json-object>}\n</tool_call><|im_end|>\n<|im_start|>user\nWeather in Lima and Cusco?<|im_end|>\n<|im_start|>assistant\n<tool_call>\n{\"name\": \"get_weather\", \"arguments\": {\"city\": \"Lima\"}}\n</tool_call>\n<tool_call>\n{\"name\": \"get_weather\", \"arguments\": {\"city\": \"Cusco\", \"days\": 2}}\n</tool_call><|im_end|>\n<|im_start|>user\n<tool_response>\n{\"temp\": 19.5}\n</tool_response>\n<tool_response>\n{\"temp\": 11}\n</tool_response><|im_end|>\n<|im_start|>assistant\nLima 19.5 °C, Cusco 11 °C.<|im_end|>\n<|im_start|>user\nThanks<|im_end|>\n<|im_start|>assistant\n"
+    },
+    {
+     "name": "assistant_text_then_call",
+     "messages": [
+      {
+       "role": "user",
+       "content": "Check Lima."
+      },
+      {
+       "role": "assistant",
+       "content": "Checking.",
+       "tool_calls": [
+        {
+         "type": "function",
+         "function": {
+          "name": "get_weather",
+          "arguments": {
+           "city": "Lima",
+           "precision": 1e-05
+          }
+         }
+        }
+       ]
+      },
+      {
+       "role": "tool",
+       "content": "sunny"
+      }
+     ],
+     "tools": [
+      {
+       "type": "function",
+       "function": {
+        "name": "get_weather",
+        "description": "Current weather for a city, in °C. Say \"unknown\" if unsure.",
+        "parameters": {
+         "type": "object",
+         "properties": {
+          "city": {
+           "type": "string",
+           "description": "City name, e.g. Lima"
+          },
+          "precision": {
+           "type": "number",
+           "default": 0.5
+          },
+          "days": {
+           "type": "integer",
+           "minimum": 1,
+           "maximum": 7
+          }
+         },
+         "required": [
+          "city"
+         ]
+        }
+       }
+      }
+     ],
+     "add_generation_prompt": true,
+     "expected": "<|im_start|>system\n# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>\n{\"type\": \"function\", \"function\": {\"name\": \"get_weather\", \"description\": \"Current weather for a city, in °C. Say \\\"unknown\\\" if unsure.\", \"parameters\": {\"type\": \"object\", \"properties\": {\"city\": {\"type\": \"string\", \"description\": \"City name, e.g. Lima\"}, \"precision\": {\"type\": \"number\", \"default\": 0.5}, \"days\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 7}}, \"required\": [\"city\"]}}}\n</tools>\n\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n<tool_call>\n{\"name\": <function-name>, \"arguments\": <args-json-object>}\n</tool_call><|im_end|>\n<|im_start|>user\nCheck Lima.<|im_end|>\n<|im_start|>assistant\nChecking.\n<tool_call>\n{\"name\": \"get_weather\", \"arguments\": {\"city\": \"Lima\", \"precision\": 1e-05}}\n</tool_call><|im_end|>\n<|im_start|>user\n<tool_response>\nsunny\n</tool_response><|im_end|>\n<|im_start|>assistant\n"
+    }
+   ]
+  },
+  {
+   "name": "qwen2.5",
+   "repo_id": "Qwen/Qwen2.5-0.5B-Instruct",
+   "template": "{%- if tools %}\n    {{- '<|im_start|>system\\n' }}\n    {%- if messages[0]['role'] == 'system' %}\n        {{- messages[0]['content'] }}\n    {%- else %}\n        {{- 'You are Qwen, created by Alibaba Cloud. You are a helpful assistant.' }}\n    {%- endif %}\n    {{- \"\\n\\n# Tools\\n\\nYou may call one or more functions to assist with the user query.\\n\\nYou are provided with function signatures within <tools></tools> XML tags:\\n<tools>\" }}\n    {%- for tool in tools %}\n        {{- \"\\n\" }}\n        {{- tool | tojson }}\n    {%- endfor %}\n    {{- \"\\n</tools>\\n\\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\\n<tool_call>\\n{\\\"name\\\": <function-name>, \\\"arguments\\\": <args-json-object>}\\n</tool_call><|im_end|>\\n\" }}\n{%- else %}\n    {%- if messages[0]['role'] == 'system' %}\n        {{- '<|im_start|>system\\n' + messages[0]['content'] + '<|im_end|>\\n' }}\n    {%- else %}\n        {{- '<|im_start|>system\\nYou are Qwen, created by Alibaba Cloud. You are a helpful assistant.<|im_end|>\\n' }}\n    {%- endif %}\n{%- endif %}\n{%- for message in messages %}\n    {%- if (message.role == \"user\") or (message.role == \"system\" and not loop.first) or (message.role == \"assistant\" and not message.tool_calls) %}\n        {{- '<|im_start|>' + message.role + '\\n' + message.content + '<|im_end|>' + '\\n' }}\n    {%- elif message.role == \"assistant\" %}\n        {{- '<|im_start|>' + message.role }}\n        {%- if message.content %}\n            {{- '\\n' + message.content }}\n        {%- endif %}\n        {%- for tool_call in message.tool_calls %}\n            {%- if tool_call.function is defined %}\n                {%- set tool_call = tool_call.function %}\n            {%- endif %}\n            {{- '\\n<tool_call>\\n{\"name\": \"' }}\n            {{- tool_call.name }}\n            {{- '\", \"arguments\": ' }}\n            {{- tool_call.arguments | tojson }}\n            {{- '}\\n</tool_call>' }}\n        {%- endfor %}\n        {{- '<|im_end|>\\n' }}\n    {%- elif message.role == \"tool\" %}\n        {%- if (loop.index0 == 0) or (messages[loop.index0 - 1].role != \"tool\") %}\n            {{- '<|im_start|>user' }}\n        {%- endif %}\n        {{- '\\n<tool_response>\\n' }}\n        {{- message.content }}\n        {{- '\\n</tool_response>' }}\n        {%- if loop.last or (messages[loop.index0 + 1].role != \"tool\") %}\n            {{- '<|im_end|>\\n' }}\n        {%- endif %}\n    {%- endif %}\n{%- endfor %}\n{%- if add_generation_prompt %}\n    {{- '<|im_start|>assistant\\n' }}\n{%- endif %}\n",
+   "cases": [
+    {
+     "name": "system_and_user",
+     "messages": [
+      {
+       "role": "system",
+       "content": "You are terse."
+      },
+      {
+       "role": "user",
+       "content": "Name a prime."
+      }
+     ],
+     "add_generation_prompt": true,
+     "expected": "<|im_start|>system\nYou are terse.<|im_end|>\n<|im_start|>user\nName a prime.<|im_end|>\n<|im_start|>assistant\n"
+    },
+    {
+     "name": "thinking_disabled",
+     "messages": [
+      {
+       "role": "user",
+       "content": "Hi!\nTwo lines."
+      }
+     ],
+     "add_generation_prompt": true,
+     "kwargs": {
+      "enable_thinking": false
+     },
+     "expected": "<|im_start|>system\nYou are Qwen, created by Alibaba Cloud. You are a helpful assistant.<|im_end|>\n<|im_start|>user\nHi!\nTwo lines.<|im_end|>\n<|im_start|>assistant\n"
+    },
+    {
+     "name": "history_with_inline_thinking",
+     "messages": [
+      {
+       "role": "user",
+       "content": "What is 2+2?"
+      },
+      {
+       "role": "assistant",
+       "content": "<think>\nAdd them.\n</think>\n\n4"
+      },
+      {
+       "role": "user",
+       "content": "And 3+3?"
+      }
+     ],
+     "add_generation_prompt": true,
+     "expected": "<|im_start|>system\nYou are Qwen, created by Alibaba Cloud. You are a helpful assistant.<|im_end|>\n<|im_start|>user\nWhat is 2+2?<|im_end|>\n<|im_start|>assistant\n<think>\nAdd them.\n</think>\n\n4<|im_end|>\n<|im_start|>user\nAnd 3+3?<|im_end|>\n<|im_start|>assistant\n"
+    },
+    {
+     "name": "reasoning_content_last_turn",
+     "messages": [
+      {
+       "role": "user",
+       "content": "Pick a color."
+      },
+      {
+       "role": "assistant",
+       "reasoning_content": "\nAny will do.\n",
+       "content": "Blue."
+      }
+     ],
+     "add_generation_prompt": false,
+     "expected": "<|im_start|>system\nYou are Qwen, created by Alibaba Cloud. You are a helpful assistant.<|im_end|>\n<|im_start|>user\nPick a color.<|im_end|>\n<|im_start|>assistant\nBlue.<|im_end|>\n"
+    },
+    {
+     "name": "tools_and_calls",
+     "messages": [
+      {
+       "role": "system",
+       "content": "Use tools when helpful."
+      },
+      {
+       "role": "user",
+       "content": "Weather in Lima and Cusco?"
+      },
+      {
+       "role": "assistant",
+       "content": "",
+       "tool_calls": [
+        {
+         "type": "function",
+         "function": {
+          "name": "get_weather",
+          "arguments": {
+           "city": "Lima"
+          }
+         }
+        },
+        {
+         "type": "function",
+         "function": {
+          "name": "get_weather",
+          "arguments": "{\"city\": \"Cusco\", \"days\": 2}"
+         }
+        }
+       ]
+      },
+      {
+       "role": "tool",
+       "content": "{\"temp\": 19.5}"
+      },
+      {
+       "role": "tool",
+       "content": "{\"temp\": 11}"
+      },
+      {
+       "role": "assistant",
+       "content": "Lima 19.5 °C, Cusco 11 °C."
+      },
+      {
+       "role": "user",
+       "content": "Thanks"
+      }
+     ],
+     "tools": [
+      {
+       "type": "function",
+       "function": {
+        "name": "get_weather",
+        "description": "Current weather for a city, in °C. Say \"unknown\" if unsure.",
+        "parameters": {
+         "type": "object",
+         "properties": {
+          "city": {
+           "type": "string",
+           "description": "City name, e.g. Lima"
+          },
+          "precision": {
+           "type": "number",
+           "default": 0.5
+          },
+          "days": {
+           "type": "integer",
+           "minimum": 1,
+           "maximum": 7
+          }
+         },
+         "required": [
+          "city"
+         ]
+        }
+       }
+      }
+     ],
+     "add_generation_prompt": true,
+     "expected": "<|im_start|>system\nUse tools when helpful.\n\n# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>\n{\"type\": \"function\", \"function\": {\"name\": \"get_weather\", \"description\": \"Current weather for a city, in °C. Say \\\"unknown\\\" if unsure.\", \"parameters\": {\"type\": \"object\", \"properties\": {\"city\": {\"type\": \"string\", \"description\": \"City name, e.g. Lima\"}, \"precision\": {\"type\": \"number\", \"default\": 0.5}, \"days\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 7}}, \"required\": [\"city\"]}}}\n</tools>\n\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n<tool_call>\n{\"name\": <function-name>, \"arguments\": <args-json-object>}\n</tool_call><|im_end|>\n<|im_start|>user\nWeather in Lima and Cusco?<|im_end|>\n<|im_start|>assistant\n<tool_call>\n{\"name\": \"get_weather\", \"arguments\": {\"city\": \"Lima\"}}\n</tool_call>\n<tool_call>\n{\"name\": \"get_weather\", \"arguments\": \"{\\\"city\\\": \\\"Cusco\\\", \\\"days\\\": 2}\"}\n</tool_call><|im_end|>\n<|im_start|>user\n<tool_response>\n{\"temp\": 19.5}\n</tool_response>\n<tool_response>\n{\"temp\": 11}\n</tool_response><|im_end|>\n<|im_start|>assistant\nLima 19.5 °C, Cusco 11 °C.<|im_end|>\n<|im_start|>user\nThanks<|im_end|>\n<|im_start|>assistant\n"
+    },
+    {
+     "name": "assistant_text_then_call",
+     "messages": [
+      {
+       "role": "user",
+       "content": "Check Lima."
+      },
+      {
+       "role": "assistant",
+       "content": "Checking.",
+       "tool_calls": [
+        {
+         "type": "function",
+         "function": {
+          "name": "get_weather",
+          "arguments": {
+           "city": "Lima",
+           "precision": 1e-05
+          }
+         }
+        }
+       ]
+      },
+      {
+       "role": "tool",
+       "content": "sunny"
+      }
+     ],
+     "tools": [
+      {
+       "type": "function",
+       "function": {
+        "name": "get_weather",
+        "description": "Current weather for a city, in °C. Say \"unknown\" if unsure.",
+        "parameters": {
+         "type": "object",
+         "properties": {
+          "city": {
+           "type": "string",
+           "description": "City name, e.g. Lima"
+          },
+          "precision": {
+           "type": "number",
+           "default": 0.5
+          },
+          "days": {
+           "type": "integer",
+           "minimum": 1,
+           "maximum": 7
+          }
+         },
+         "required": [
+          "city"
+         ]
+        }
+       }
+      }
+     ],
+     "add_generation_prompt": true,
+     "expected": "<|im_start|>system\nYou are Qwen, created by Alibaba Cloud. You are a helpful assistant.\n\n# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>\n{\"type\": \"function\", \"function\": {\"name\": \"get_weather\", \"description\": \"Current weather for a city, in °C. Say \\\"unknown\\\" if unsure.\", \"parameters\": {\"type\": \"object\", \"properties\": {\"city\": {\"type\": \"string\", \"description\": \"City name, e.g. Lima\"}, \"precision\": {\"type\": \"number\", \"default\": 0.5}, \"days\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 7}}, \"required\": [\"city\"]}}}\n</tools>\n\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n<tool_call>\n{\"name\": <function-name>, \"arguments\": <args-json-object>}\n</tool_call><|im_end|>\n<|im_start|>user\nCheck Lima.<|im_end|>\n<|im_start|>assistant\nChecking.\n<tool_call>\n{\"name\": \"get_weather\", \"arguments\": {\"city\": \"Lima\", \"precision\": 1e-05}}\n</tool_call><|im_end|>\n<|im_start|>user\n<tool_response>\nsunny\n</tool_response><|im_end|>\n<|im_start|>assistant\n"
+    }
+   ]
+  }
+ ]
+}

@@ -3,7 +3,7 @@ using Random
 using Flux
 using HuggingFaceTransformers.Models
 using HuggingFaceTransformers.Models:
-    build_caches, qwen_state_dict_map, load_state_dict!, load_into!
+    build_caches, qwen_state_dict_map, load_state_dict!, load_into!, _resolve
 
 function _qwen_synthetic_state_dict(cfg::QwenConfig)
     out = Dict{String,Array{Float32}}()
@@ -163,4 +163,75 @@ end
     out1 = lm1(ids)
     out2 = lm2(ids)
     @test !(out1 ≈ out2)
+end
+
+# Qwen3: no attention bias, per-head RMSNorm on queries and keys, and a head_dim
+# that does not divide the hidden size (4 heads x 8 = 32 != 16).
+function _tiny_qwen3_config()
+    return QwenConfig(;
+        vocab_size=64, hidden_size=16, intermediate_size=32, num_hidden_layers=2,
+        num_attention_heads=4, num_key_value_heads=2, head_dim=8,
+        max_position_embeddings=16, tie_word_embeddings=true, qkv_bias=false, qk_norm=true,
+    )
+end
+
+@testset verbose = true "Qwen3" begin
+    Random.seed!(0x0306)
+    cfg = _tiny_qwen3_config()
+    lm = QwenForCausalLM(cfg)
+    attn = lm.model.layers[1].self_attn
+
+    @test isnothing(attn.wq.bias) && isnothing(attn.wo.bias)
+    @test size(attn.wq.weight) == (32, 16)
+    @test size(attn.q_norm.weight) == (8,) && size(attn.k_norm.weight) == (8,)
+    @test isnothing(QwenForCausalLM(_tiny_qwen_config()).model.layers[1].self_attn.q_norm)
+
+    @testset "every mapped weight loads" begin
+        sd = Dict{String,Array{Float32}}()
+        for (key, (path, transform)) in qwen_state_dict_map(cfg)
+            dims = size(_resolve(lm, path))
+            sd[key] = randn(Float32, transform === :transpose ? reverse(dims) : dims)
+        end
+        fresh = QwenForCausalLM(cfg)
+        load_state_dict!(fresh, sd)
+        @test fresh.model.layers[2].self_attn.k_norm.weight == sd["model.layers.1.self_attn.k_norm.weight"]
+        @test fresh.lm_head.weight == permutedims(fresh.model.embed_tokens.weight, (2, 1))
+    end
+
+    @testset "queries and keys are normalized before the scores" begin
+        # RMSNorm is scale-invariant, so scaling q_proj and k_proj changes nothing
+        # once the norms are in place, and changes the scores without them.
+        ids = rand(0:(cfg.vocab_size - 1), 5, 1)
+        before = lm(ids)
+        scaled = deepcopy(lm)
+        for layer in scaled.model.layers
+            layer.self_attn.wq.weight .*= 7
+            layer.self_attn.wk.weight .*= 7
+        end
+        @test isapprox(scaled(ids), before; rtol=1.0e-4)
+
+        plain = QwenForCausalLM(_tiny_qwen_config())
+        plain_scaled = deepcopy(plain)
+        for layer in plain_scaled.model.layers
+            layer.self_attn.wq.weight .*= 7
+            layer.self_attn.wk.weight .*= 7
+        end
+        @test !isapprox(plain_scaled(ids), plain(ids); rtol=1.0e-2)
+    end
+
+    @testset "KV-cache prefill→decode parity" begin
+        ids = rand(0:(cfg.vocab_size - 1), 4, 1)
+        out_full = lm(ids)
+        caches = build_caches(lm, cfg.max_position_embeddings, 1)
+        lm(ids[1:3, :]; caches=caches, step=1)
+        out_decode = lm(ids[4:4, :]; caches=caches, step=4)
+        @test isapprox(out_full[:, 4:4, :], out_decode; atol=1.0e-4)
+    end
+
+    @testset "gradients reach the norms" begin
+        ids = rand(0:(cfg.vocab_size - 1), 4, 1)
+        grads = Flux.gradient(m -> sum(m(ids)), lm)[1]
+        g = grads.model.layers[1].self_attn.q_norm.weight
+        @test !isnothing(g) && any(!iszero, g)
+    end
 end

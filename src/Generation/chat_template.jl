@@ -5,21 +5,28 @@ Parses `source` once at construction. Calling the result against a
 message list renders the template against a context dict built from
 the messages and any extra keyword arguments.
 
-Supports the Jinja2 subset needed to render simplified Llama-3,
-Qwen2.5, and Mistral chat templates from `tokenizer_config.json`:
+Supports the Jinja2 subset HF chat templates use, under HF's environment
+settings (`trim_blocks` and `lstrip_blocks` on). The Qwen3 and Qwen2.5 templates
+render byte for byte as `apply_chat_template` does.
 
-- Statements: `if` / `elif` / `else` / `endif`, `for` / `endfor`, `set`.
-- Expressions: literals (string / int / bool / `none`), variables,
-  attribute and item access, slicing, arithmetic + comparison + logical
-  operators, `in` / `not in`, `is defined` / `is not defined`.
-- Filters: `|trim`, `|tojson` (no filter arguments).
-- The `raise_exception("msg")` function.
-- Loop variables `loop.first`, `loop.last`, `loop.index`,
-  `loop.index0`, `loop.length`.
-- Whitespace control: `{%- … -%}` and `{{- … -}}`.
+- Statements: `if` / `elif` / `else`, `for` with `break` / `continue`, `set`,
+  and `set ns.attr = ...` on a `namespace(...)`.
+- Expressions: string / int / bool / `none` literals, variables, attribute and
+  item access, Python indexing and slicing (negative indices, steps),
+  arithmetic, comparison and logical operators, `in` / `not in`, and the
+  string methods templates call (`startswith`, `endswith`, `split`, `strip`,
+  `lstrip`, `rstrip`, `upper`, `lower`, `replace`) plus a mapping's `get`.
+- Tests: `defined`, `undefined`, `none`, `true`, `false`, `boolean`, `string`,
+  `number`, `integer`, `float`, `mapping`, `sequence`, `iterable`.
+- Filters: `trim`, `length` / `count`, and `tojson`, which writes what Python's
+  `json.dumps` does (spaces after `,` and `:`, keys in mapping order).
+- Functions: `raise_exception("msg")`, `namespace(...)`.
+- Loop variables: `loop.index`, `index0`, `revindex`, `revindex0`, `first`,
+  `last`, `length`, `previtem`, `nextitem`.
+- Whitespace control: `-` and `+` modifiers on tags.
 
-Not supported: tuple / list / dict literals, float literals, macros,
-includes, custom filters, custom tests, slicing with a step.
+Not supported: list / dict literals, float literals, filter arguments, macros,
+includes, `for` tuple unpacking, and `strftime_now`.
 """
 struct ChatTemplate
     ast::Vector{TmplNode}
@@ -35,7 +42,8 @@ function (t::ChatTemplate)(messages; add_generation_prompt::Bool=true, kwargs...
         ctx[String(k)] = v
     end
     io = IOBuffer()
-    _render_nodes!(io, t.ast, ctx)
+    signal = _render_nodes!(io, t.ast, ctx)
+    isnothing(signal) || throw(ArgumentError("`$(signal)` outside a for loop"))
     return String(take!(io))
 end
 

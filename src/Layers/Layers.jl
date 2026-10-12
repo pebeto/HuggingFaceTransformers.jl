@@ -844,7 +844,7 @@ function ChainRulesCore.rrule(
 end
 
 """
-    GQA{Q, K, V, O, R}
+    GQA{Q, K, V, O, R, N}
 
 Grouped-Query Attention (GQA) layer. Partitions queries into groups sharing key/value heads.
 Accepts an optional `KVCache` to update/retrieve past keys and values.
@@ -852,8 +852,11 @@ Accepts an optional `KVCache` to update/retrieve past keys and values.
 When `window_size` is set, attention is restricted to a sliding window of the
 `window_size` most-recent positions (inclusive of the current query), matching
 Mistral's sliding-window attention. `nothing` (the default) is plain causal.
+
+`q_norm` and `k_norm` are per-head `RMSNorm`s over `head_dim`, applied to the
+projected queries and keys before RoPE (Qwen3), or `nothing`.
 """
-struct GQA{Q,K,V,O,R}
+struct GQA{Q,K,V,O,R,N}
     wq::Q
     wk::K
     wv::V
@@ -866,6 +869,8 @@ struct GQA{Q,K,V,O,R}
     softcap::Union{Nothing,Float32}      # Attention-score softcap (Gemma2).
     query_scale::Union{Nothing,Float32}  # Override for the `sqrt(head_dim)` divisor.
     causal::Bool                         # false for BERT-style bidirectional attention.
+    q_norm::N
+    k_norm::N
 end
 
 """
@@ -886,6 +891,9 @@ independent because Qwen2 wants `qkv_bias=true, wo_bias=false`.
 `causal=false` (default `true`) disables the causal mask, so every query
 sees every key. Used by encoder-only models (BERT, RoBERTa) where
 attention is bidirectional.
+
+`qk_norm_eps`, when set, adds a per-head `RMSNorm` with that epsilon on the
+queries and on the keys, as Qwen3 does.
 """
 function GQA(
     hidden_dim::Integer,
@@ -899,6 +907,7 @@ function GQA(
     softcap::Union{Nothing,Real}=nothing,
     query_scale::Union{Nothing,Real}=nothing,
     causal::Bool=true,
+    qk_norm_eps::Union{Nothing,Real}=nothing,
     init=Flux.glorot_uniform,
 )
     wq = Linear(hidden_dim, num_heads_q * head_dim; bias=qkv_bias, init=init)
@@ -908,6 +917,8 @@ function GQA(
     win = isnothing(window_size) ? nothing : Int(window_size)
     sc = isnothing(softcap) ? nothing : Float32(softcap)
     qs = isnothing(query_scale) ? nothing : Float32(query_scale)
+    q_norm = isnothing(qk_norm_eps) ? nothing : RMSNorm(head_dim, qk_norm_eps)
+    k_norm = isnothing(qk_norm_eps) ? nothing : RMSNorm(head_dim, qk_norm_eps)
     return GQA(
         wq,
         wk,
@@ -921,6 +932,8 @@ function GQA(
         sc,
         qs,
         causal,
+        q_norm,
+        k_norm,
     )
 end
 
@@ -955,6 +968,10 @@ function (m::GQA)(
     q = reshape(q, m.head_dim, m.num_heads_q, seq_len, batch_size)
     k = reshape(k, m.head_dim, m.num_heads_k, seq_len, batch_size)
     v = reshape(v, m.head_dim, m.num_heads_k, seq_len, batch_size)
+    if !isnothing(m.q_norm)
+        q = m.q_norm(q)
+        k = m.k_norm(k)
+    end
 
     # Compute position ids if not specified — 0-indexed to match HF's RoPE convention.
     # `step` is a 1-indexed Julia cache slot; the corresponding absolute position is `step - 1`.
@@ -1066,7 +1083,11 @@ function (m::GQA)(
 end
 
 Flux.@layer GQA
-Flux.Optimisers.trainable(m::GQA) = (; wq=m.wq, wk=m.wk, wv=m.wv, wo=m.wo)
+function Flux.Optimisers.trainable(m::GQA)
+    projections = (; wq=m.wq, wk=m.wk, wv=m.wv, wo=m.wo)
+    isnothing(m.q_norm) && return projections
+    return (; projections..., q_norm=m.q_norm, k_norm=m.k_norm)
+end
 
 """
     checkpoint(f, args...)

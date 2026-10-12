@@ -121,7 +121,8 @@ end
 Flux.@layer DecoderModel
 
 """
-    _decoder_state_dict_map(num_hidden_layers, tie_word_embeddings; qkv_bias=false) -> Dict
+    _decoder_state_dict_map(num_hidden_layers, tie_word_embeddings;
+                            qkv_bias=false, o_bias=false, qk_norm=false) -> Dict
 
 Pure-data state-dict map for any HF decoder-only LM whose parameter naming
 matches the Llama / Mistral / Qwen convention (`model.embed_tokens.weight`,
@@ -131,7 +132,8 @@ matches the Llama / Mistral / Qwen convention (`model.embed_tokens.weight`,
 
 `qkv_bias=true` additionally emits entries for `q_proj.bias`, `k_proj.bias`,
 and `v_proj.bias`, which Qwen2 and Qwen2.5 need because they bias QKV but not
-the output projection.
+the output projection. `o_bias=true` adds `o_proj.bias`, and `qk_norm=true` adds
+Qwen3's `q_norm.weight` and `k_norm.weight`.
 
 [`llama_state_dict_map`](@ref), [`mistral_state_dict_map`](@ref), and
 [`qwen_state_dict_map`](@ref) delegate here so a fix to the path table benefits
@@ -139,7 +141,11 @@ every consumer. Phi-3 also delegates here for its non-fused entries, handling
 the fused `qkv_proj` and `gate_up_proj` separately at load time.
 """
 function _decoder_state_dict_map(
-    num_hidden_layers::Integer, tie_word_embeddings::Bool; qkv_bias::Bool=false
+    num_hidden_layers::Integer,
+    tie_word_embeddings::Bool;
+    qkv_bias::Bool=false,
+    o_bias::Bool=false,
+    qk_norm::Bool=false,
 )
     out = Dict{String,Tuple{Tuple,Symbol}}()
 
@@ -173,6 +179,19 @@ function _decoder_state_dict_map(
             )
             out["$(hf_prefix).self_attn.v_proj.bias"] = (
                 (layer_path..., :self_attn, :wv, :bias), :as_is
+            )
+        end
+        if o_bias
+            out["$(hf_prefix).self_attn.o_proj.bias"] = (
+                (layer_path..., :self_attn, :wo, :bias), :as_is
+            )
+        end
+        if qk_norm
+            out["$(hf_prefix).self_attn.q_norm.weight"] = (
+                (layer_path..., :self_attn, :q_norm, :weight), :as_is
+            )
+            out["$(hf_prefix).self_attn.k_norm.weight"] = (
+                (layer_path..., :self_attn, :k_norm, :weight), :as_is
             )
         end
         out["$(hf_prefix).post_attention_layernorm.weight"] = (

@@ -137,27 +137,71 @@ function config_from_json(::Type{MistralConfig}, raw)
     )
 end
 
+# The RoPE base is `rope_theta`, or since transformers 5 a key inside
+# `rope_parameters`. Scaled variants (YaRN, dynamic NTK) raise rather than load
+# as plain RoPE, which would be silently wrong past the trained context.
+function _plain_rope_theta(raw, default::Real)
+    params = _hf(raw, :rope_parameters, nothing)
+    for scaling in (params, _hf(raw, :rope_scaling, nothing))
+        isnothing(scaling) && continue
+        kind = _hf_str(scaling, :rope_type, _hf_str(scaling, :type, "default"))
+        kind == "default" ||
+            throw(ArgumentError("RoPE scaling `$(kind)` is not implemented for this model"))
+    end
+    theta = _hf(raw, :rope_theta, nothing)
+    if isnothing(theta) && !isnothing(params)
+        theta = _hf(params, :rope_theta, nothing)
+    end
+    return Float64(something(theta, default))
+end
+
 function config_from_json(::Type{QwenConfig}, raw)
     hidden = _hf_req_int(raw, :hidden_size)
     heads = _hf_req_int(raw, :num_attention_heads)
-    # Qwen gates its window on a separate flag, so a stated `sliding_window` is
-    # inert unless `use_sliding_window` is also set. The flag itself has no field.
-    window =
-        _hf_bool(raw, :use_sliding_window, false) ? _hf_opt_int(raw, :sliding_window) :
-        nothing
+    layers = _hf_req_int(raw, :num_hidden_layers)
+    qwen3 =
+        _hf_str(raw, :model_type, "") == "qwen3" ||
+        "Qwen3ForCausalLM" in _hf_architectures(raw)
+    # Qwen2 biases Q/K/V but never `o_proj`; Qwen3's `attention_bias` covers all
+    # four and is off in every released checkpoint.
+    bias = qwen3 ? _hf_bool(raw, :attention_bias, false) : true
+
+    # A layer slides when `use_sliding_window` is set and its index reaches
+    # `max_window_layers`; newer configs spell the outcome out as `layer_types`.
+    window = _hf_bool(raw, :use_sliding_window, false) ? _hf_opt_int(raw, :sliding_window) : nothing
+    first_sliding = _hf_int(raw, :max_window_layers, 28)
+    kinds = _hf(raw, :layer_types, nothing)
+    if !isnothing(kinds)
+        sliding = findall(==("sliding_attention"), collect(kinds))
+        if isempty(sliding)
+            window = nothing
+        else
+            first_sliding = first(sliding) - 1
+            sliding == first(sliding):layers || throw(
+                ArgumentError("sliding layers must be the trailing ones, got $(collect(kinds))"),
+            )
+            window = _hf_req_int(raw, :sliding_window)
+        end
+    end
+    first_sliding >= layers && (window = nothing)
+
     return QwenConfig(;
         vocab_size=_hf_req_int(raw, :vocab_size),
         hidden_size=hidden,
         intermediate_size=_hf_req_int(raw, :intermediate_size),
-        num_hidden_layers=_hf_req_int(raw, :num_hidden_layers),
+        num_hidden_layers=layers,
         num_attention_heads=heads,
         num_key_value_heads=_kv_heads(raw, heads),
         head_dim=_head_dim(raw, hidden, heads),
         max_position_embeddings=_hf_req_int(raw, :max_position_embeddings),
-        rope_theta=_hf_float(raw, :rope_theta, 1_000_000.0),
+        rope_theta=_plain_rope_theta(raw, 1_000_000.0),
         rms_norm_eps=_hf_float(raw, :rms_norm_eps, 1.0e-6),
         tie_word_embeddings=_hf_bool(raw, :tie_word_embeddings, false),
         sliding_window=window,
+        max_window_layers=isnothing(window) ? 0 : first_sliding,
+        qkv_bias=bias,
+        o_bias=qwen3 && bias,
+        qk_norm=qwen3,
     )
 end
 
@@ -459,6 +503,7 @@ const AUTO_ARCHITECTURES = Dict{String,Tuple{Any,Any}}(
     "LlamaForCausalLM" => (LlamaConfig, LlamaForCausalLM),
     "MistralForCausalLM" => (MistralConfig, MistralForCausalLM),
     "Qwen2ForCausalLM" => (QwenConfig, QwenForCausalLM),
+    "Qwen3ForCausalLM" => (QwenConfig, QwenForCausalLM),
     "Gemma2ForCausalLM" => (GemmaConfig, GemmaForCausalLM),
     "Phi3ForCausalLM" => (Phi3Config, Phi3ForCausalLM),
     "GPT2LMHeadModel" => (GPT2Config, GPT2ForCausalLM),
@@ -482,6 +527,7 @@ const _MODEL_TYPE_FALLBACK = Dict{String,String}(
     "llama" => "LlamaForCausalLM",
     "mistral" => "MistralForCausalLM",
     "qwen2" => "Qwen2ForCausalLM",
+    "qwen3" => "Qwen3ForCausalLM",
     "gemma2" => "Gemma2ForCausalLM",
     "phi3" => "Phi3ForCausalLM",
     "gpt2" => "GPT2LMHeadModel",

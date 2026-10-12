@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Record reference logits for HuggingFaceTransformers.jl's Qwen2.5 parity tests.
+"""Record reference logits for HuggingFaceTransformers.jl's Qwen parity tests.
 
 Usage:
     python3 test/fixtures/record_qwen_parity.py [VARIANT]
 
-VARIANT is one of: 0.5B, 1.5B, 3B, 7B (default: 0.5B).
+VARIANT is one of: 0.5B, 1.5B, 3B, 7B (Qwen2.5 Instruct), or Qwen3-0.6B
+(default: 0.5B).
 
 Requirements:
     pip install transformers torch
@@ -15,6 +16,7 @@ Resource cost (fp32 weights + activations):
     1.5B: ~6 GB download,  ~7 GB RAM     (tied embeddings)
     3B:   ~12 GB download, ~14 GB RAM    (untied)
     7B:   ~30 GB download, ~32 GB RAM    (untied; 32 GB system recommended)
+    Qwen3-0.6B: ~1.5 GB download (bf16), ~3 GB RAM (tied embeddings)
 
 Why these choices (matches record_llama_parity.py / record_mistral_parity.py):
 - attn_implementation="eager": disables SDPA / FlashAttention so the
@@ -35,6 +37,7 @@ VARIANTS = {
     "1.5B": ("Qwen/Qwen2.5-1.5B-Instruct", "qwen2_5_1_5b_instruct_parity.json"),
     "3B":   ("Qwen/Qwen2.5-3B-Instruct",   "qwen2_5_3b_instruct_parity.json"),
     "7B":   ("Qwen/Qwen2.5-7B-Instruct",   "qwen2_5_7b_instruct_parity.json"),
+    "Qwen3-0.6B": ("Qwen/Qwen3-0.6B", "qwen3_0_6b_parity.json"),
 }
 
 PROMPT = "The capital of France is"

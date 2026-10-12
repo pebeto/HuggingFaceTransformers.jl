@@ -88,11 +88,13 @@ function _parse_compare(p)
                 _consume!(p)
                 negated = true
             end
-            # `none` lexes as a literal rather than a name, so `x is none` needs
-            # its own arm; every other test (`defined`) arrives as a name.
+            # `none`, `true` and `false` lex as literals rather than names, so
+            # those tests need their own arms; the rest arrive as names.
             test_name = if _check(p, :none)
                 _consume!(p)
                 "none"
+            elseif _check(p, :bool)
+                _consume!(p).value ? "true" : "false"
             else
                 _eat!(p, :name).value
             end
@@ -149,37 +151,44 @@ function _parse_postfix(p)
             e = AttrExpr(e, name_tok.value)
         elseif _check(p, :lbracket)
             _consume!(p)
+            # `[i]`, or a Python slice `[start:stop:step]` with every part optional.
+            first_expr = _check(p, :colon) ? nothing : _parse_or(p)
             if _check(p, :colon)
                 _consume!(p)
-                stop = _check(p, :rbracket) ? nothing : _parse_or(p)
-                _eat!(p, :rbracket)
-                e = SliceExpr(e, nothing, stop)
-            else
-                first_expr = _parse_or(p)
+                stop = _check(p, :colon) || _check(p, :rbracket) ? nothing : _parse_or(p)
+                step = nothing
                 if _check(p, :colon)
                     _consume!(p)
-                    stop = _check(p, :rbracket) ? nothing : _parse_or(p)
-                    _eat!(p, :rbracket)
-                    e = SliceExpr(e, first_expr, stop)
-                else
-                    _eat!(p, :rbracket)
-                    e = ItemExpr(e, first_expr)
+                    step = _check(p, :rbracket) ? nothing : _parse_or(p)
                 end
+                _eat!(p, :rbracket)
+                e = SliceExpr(e, first_expr, stop, step)
+            else
+                _eat!(p, :rbracket)
+                e = ItemExpr(e, first_expr)
             end
         elseif _check(p, :lparen)
             _consume!(p)
             args = TmplExpr[]
-            if !_check(p, :rparen)
-                push!(args, _parse_or(p))
-                while _check(p, :comma)
+            kwargs = Pair{String,TmplExpr}[]
+            while !_check(p, :rparen)
+                if _check(p, :name) && _peek(p, 1).kind === :assign
+                    name = _consume!(p).value
                     _consume!(p)
+                    push!(kwargs, name => _parse_or(p))
+                else
                     push!(args, _parse_or(p))
                 end
+                _check(p, :rparen) || _eat!(p, :comma)
             end
             _eat!(p, :rparen)
-            e isa NameExpr ||
-                throw(ArgumentError("can only call by name, got $(typeof(e))"))
-            e = CallExpr(e.name, args)
+            if e isa NameExpr
+                e = CallExpr(e.name, args, kwargs)
+            elseif e isa AttrExpr && isempty(kwargs)
+                e = MethodCallExpr(e.obj, e.name, args)
+            else
+                throw(ArgumentError("cannot call $(typeof(e)) with these arguments"))
+            end
         else
             break
         end

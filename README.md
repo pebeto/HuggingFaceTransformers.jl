@@ -14,7 +14,7 @@ with a leaner dependency tree and a focus on decoder LLMs.
 
 Every architecture below except LLaVA has a numeric-parity test that compares
 logits against a reference recorded from `transformers` in Python. The CPU
-suite is 1840 assertions and runs in about three and a half minutes.
+suite is 1917 assertions and runs in about four minutes.
 
 ## Installation
 
@@ -87,7 +87,7 @@ friends) if you want to inspect or extend the wiring.
 | --- | --- | --- |
 | Llama 3.x | `LlamaForCausalLM` | `Llama-3.2-1B/3B-Instruct`, `Llama-3.1-8B/70B-Instruct` |
 | Mistral | `MistralForCausalLM` | `Mistral-7B-Instruct-v0.2`, `v0.3` |
-| Qwen2 / Qwen2.5 | `QwenForCausalLM` | `Qwen2.5-0.5B/1.5B/3B/7B-Instruct` |
+| Qwen2 / Qwen2.5 / Qwen3 | `QwenForCausalLM` | `Qwen2.5-0.5B/1.5B/3B/7B-Instruct`, `Qwen3-0.6B` |
 | Gemma 2 | `GemmaForCausalLM` | `gemma-2-2b/9b/27b-it` |
 | Phi-3 | `Phi3ForCausalLM` | `Phi-3-mini-4k-instruct`, `Phi-3-medium-4k-instruct` |
 | GPT-2 | `GPT2ForCausalLM` | `gpt2`, `gpt2-medium`, `gpt2-large`, `gpt2-xl` |
@@ -95,8 +95,9 @@ friends) if you want to inspect or extend the wiring.
 | Mixtral (sparse MoE) | `MixtralForCausalLM` | `Mixtral-8x7B/8x22B-Instruct-v0.1` |
 
 Llama 3 RoPE scaling, Mistral and Gemma sliding-window attention, Gemma's
-logit softcapping, Phi-3's fused QKV, NeoX's partial RoPE and parallel-residual
-block, and Mixtral's top-k expert routing are all handled inside these types.
+logit softcapping, Qwen3's per-head query and key norms, Phi-3's fused QKV,
+NeoX's partial RoPE and parallel-residual block, and Mixtral's top-k expert
+routing are all handled inside these types.
 
 ### Encoders and embeddings
 
@@ -153,8 +154,9 @@ reset!(caches)
 ### Chat templates
 
 `ChatTemplate` renders the `chat_template` field out of `tokenizer_config.json`
-through a small Jinja2 interpreter, which covers the Llama-3, Qwen2.5, and
-Mistral templates:
+through a small Jinja2 interpreter. It follows HF's Jinja environment, and the
+Qwen3 and Qwen2.5 templates render byte for byte as `apply_chat_template` does,
+tools and thinking blocks included:
 
 ```julia
 tk_cfg = JSON3.read(read(joinpath(dir, "tokenizer_config.json"), String))
@@ -320,7 +322,7 @@ argument.
 | --- | --- |
 | `repl_chat.jl` | Llama-3.x chat, including the download and chat templating |
 | `repl_chat_mistral.jl` | Mistral chat with the `[INST]` template |
-| `repl_chat_qwen.jl` | Qwen2 / Qwen2.5 chat |
+| `repl_chat_qwen.jl` | Qwen2 / Qwen2.5 / Qwen3 chat |
 | `repl_chat_gemma.jl` | Gemma 2 chat |
 | `repl_chat_phi3.jl` | Phi-3 chat |
 | `repl_chat_mixtral.jl` | Mixtral chat |

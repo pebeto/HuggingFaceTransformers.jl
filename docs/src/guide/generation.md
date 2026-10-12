@@ -109,8 +109,11 @@ package, so read them with a library of your choice and resample to 16 kHz.
 ## Chat templates
 
 [`Generation.ChatTemplate`](@ref) renders the `chat_template` field out of
-`tokenizer_config.json` through a small Jinja2 interpreter, which covers the
-Llama-3, Qwen2.5, and Mistral templates.
+`tokenizer_config.json` through a small Jinja2 interpreter that follows HF's
+Jinja environment. The Qwen3 and Qwen2.5 templates are checked against
+`apply_chat_template` and render byte for byte, tools and thinking blocks
+included. Keyword arguments become template variables, so `enable_thinking=false`
+turns off Qwen3's thinking.
 
 ```julia
 tk_cfg = JSON3.read(read(joinpath(dir, "tokenizer_config.json"), String))
@@ -126,16 +129,22 @@ prompt = template(
 )
 ```
 
-Supported: `if`/`elif`/`else`, `for`, `set`, attribute and item access, slicing,
-arithmetic and comparison and logical operators, `in`, `is defined`, `is none`,
-the `trim` and `tojson` filters, `raise_exception`, the `loop.*` variables, and
-whitespace control.
+Supported: `if`/`elif`/`else`, `for` with `break` and `continue`, `set` including
+`namespace()` attributes, attribute and item access, Python indexing and slicing
+(negative indices, steps), arithmetic and comparison and logical operators, `in`,
+the common tests (`defined`, `none`, `string`, `mapping`, `false`, ...), the string
+methods templates call (`startswith`, `split`, `strip`, ...), the `trim`,
+`length` and `tojson` filters, `raise_exception`, the `loop.*` variables, and
+whitespace control. As in HF, `trim_blocks` and `lstrip_blocks` are on, and
+`tojson` writes what Python's `json.dumps` does (`{"a": 1}`, with spaces).
 
 Undefined names and missing members follow Jinja: they are falsy in a test and
 render as empty, rather than raising. That is what lets the tool-capable
 templates the modern instruct models ship (Qwen, Llama 3.1+, Mistral v0.3) render
 for ordinary chat, since their `{% if tools %}` sections are simply skipped when
-you pass no tools. Tool calling itself is still out of scope. Reaching *through*
+you pass no tools. When you do pass `tools`, schemas, tool calls and tool
+responses render as HF renders them. Turning the model's tool-call output back
+into a call is up to you. Reaching *through*
 an undefined value (`missing.attr`) does raise, because that is a template bug
 rather than a branch to skip, and an undefined value is distinct from `none`: a
 variable explicitly set to `none` is still defined.

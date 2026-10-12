@@ -94,17 +94,79 @@ end
     ).sliding_window == 4096
 end
 
-@testset "Qwen gates sliding_window on use_sliding_window" begin
+@testset "Qwen slides only the layers HF slides" begin
     base = [
         "vocab_size" => 32, "hidden_size" => 64, "intermediate_size" => 128,
-        "num_hidden_layers" => 2, "num_attention_heads" => 8,
+        "num_hidden_layers" => 4, "num_attention_heads" => 8,
         "max_position_embeddings" => 512, "sliding_window" => 4096,
     ]
     # Qwen2.5 states a window but leaves the flag off, so the window is inert.
     @test isnothing(config_from_json(QwenConfig, _cfg(base...)).sliding_window)
-    @test config_from_json(
-        QwenConfig, _cfg(base..., "use_sliding_window" => true)
-    ).sliding_window == 4096
+    # With the flag on, layers from `max_window_layers` (default 28) onwards slide,
+    # which for a 4-layer model is none of them.
+    @test isnothing(
+        config_from_json(QwenConfig, _cfg(base..., "use_sliding_window" => true)).sliding_window,
+    )
+    cfg = config_from_json(
+        QwenConfig, _cfg(base..., "use_sliding_window" => true, "max_window_layers" => 1)
+    )
+    @test cfg.sliding_window == 4096 && cfg.max_window_layers == 1
+    windows = [layer.self_attn.window_size for layer in QwenForCausalLM(cfg).model.layers]
+    @test windows == [nothing, 4096, 4096, 4096]
+
+    # Newer configs spell the outcome out per layer.
+    kinds = ["full_attention", "full_attention", "sliding_attention", "sliding_attention"]
+    cfg = config_from_json(QwenConfig, _cfg(base..., "layer_types" => kinds))
+    @test cfg.sliding_window == 4096 && cfg.max_window_layers == 2
+    @test isnothing(
+        config_from_json(QwenConfig, _cfg(base..., "layer_types" => fill("full_attention", 4))).sliding_window,
+    )
+    @test_throws ArgumentError config_from_json(
+        QwenConfig, _cfg(base..., "layer_types" => reverse(kinds))
+    )
+end
+
+@testset "Qwen3 drops the bias and normalizes queries and keys" begin
+    base = [
+        "vocab_size" => 32, "hidden_size" => 64, "intermediate_size" => 128,
+        "num_hidden_layers" => 2, "num_attention_heads" => 4, "num_key_value_heads" => 2,
+        "head_dim" => 32, "max_position_embeddings" => 512,
+    ]
+    qwen2 = config_from_json(QwenConfig, _cfg(base..., "model_type" => "qwen2"))
+    @test qwen2.qkv_bias && !qwen2.o_bias && !qwen2.qk_norm
+
+    qwen3 = config_from_json(QwenConfig, _cfg(base..., "model_type" => "qwen3"))
+    @test !qwen3.qkv_bias && !qwen3.o_bias && qwen3.qk_norm
+    @test qwen3.head_dim == 32                       # not hidden ÷ heads = 16
+    biased = config_from_json(
+        QwenConfig, _cfg(base..., "architectures" => ["Qwen3ForCausalLM"], "attention_bias" => true)
+    )
+    @test biased.qkv_bias && biased.o_bias
+
+    keys3 = keys(qwen_state_dict_map(qwen3))
+    @test "model.layers.1.self_attn.q_norm.weight" in keys3
+    @test "model.layers.1.self_attn.k_norm.weight" in keys3
+    @test !("model.layers.0.self_attn.q_proj.bias" in keys3)
+    @test "model.layers.0.self_attn.o_proj.bias" in keys(qwen_state_dict_map(biased))
+    @test !("model.layers.0.self_attn.q_norm.weight" in keys(qwen_state_dict_map(qwen2)))
+end
+
+@testset "RoPE base from either spelling, scaling refused" begin
+    base = [
+        "vocab_size" => 32, "hidden_size" => 64, "intermediate_size" => 128,
+        "num_hidden_layers" => 2, "num_attention_heads" => 8,
+        "max_position_embeddings" => 512,
+    ]
+    @test config_from_json(QwenConfig, _cfg(base..., "rope_theta" => 5.0e5)).rope_theta == 5.0e5
+    nested = Dict("rope_type" => "default", "rope_theta" => 2.0e5)
+    @test config_from_json(QwenConfig, _cfg(base..., "rope_parameters" => nested)).rope_theta == 2.0e5
+    @test config_from_json(QwenConfig, _cfg(base...)).rope_theta == 1.0e6
+    @test_throws ArgumentError config_from_json(
+        QwenConfig, _cfg(base..., "rope_scaling" => Dict("rope_type" => "yarn", "factor" => 4.0))
+    )
+    @test_throws ArgumentError config_from_json(
+        QwenConfig, _cfg(base..., "rope_parameters" => Dict("rope_type" => "yarn", "rope_theta" => 1.0e6))
+    )
 end
 
 @testset "Gemma optional softcaps" begin
