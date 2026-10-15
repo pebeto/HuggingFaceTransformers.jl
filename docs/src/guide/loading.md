@@ -101,8 +101,14 @@ load_state_dict!(lm, load_weights(dir))
 
 `load_weights` accepts a directory, a single `.safetensors` file, or a
 `model.safetensors.index.json` for sharded checkpoints. Tensors come back as
-mmap-backed views by default; pass `mmap=false` to copy eagerly, which helps
+lazy views over a memory map by default, so nothing is read until a parameter
+is filled from it; pass `mmap=false` to read everything up front, which helps
 when the cache is on slow storage and the weights are headed to a GPU anyway.
+
+`snapshot_download` honours `HF_HUB_OFFLINE=1` as the Python library does,
+returning the cached snapshot without touching the network. It never modifies
+an entry already in a snapshot, so a cache written by another user or tool is
+safe to load from.
 PyTorch `.bin` pickles are not read at all.
 
 ## Inspecting the wiring

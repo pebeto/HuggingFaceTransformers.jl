@@ -14,6 +14,10 @@ GemmaConfig
 GemmaDecoderLayer
 GemmaForCausalLM
 GemmaModel
+GptOssConfig
+GptOssExperts
+GptOssForCausalLM
+GptOssMLP
 LlamaConfig
 LlamaForCausalLM
 LlamaRopeScaling
@@ -21,6 +25,7 @@ MistralConfig
 MistralForCausalLM
 MixtralConfig
 MixtralForCausalLM
+MXFP4Weights
 NeoXConfig
 NeoXDecoderLayer
 NeoXForCausalLM
@@ -28,8 +33,10 @@ Phi3Config
 Phi3ForCausalLM
 QwenConfig
 QwenForCausalLM
+decode_mxfp4!
 gemma_state_dict_map
 gpt2_state_dict_map
+gpt_oss_state_dict_map
 llama_state_dict_map
 mistral_state_dict_map
 mixtral_state_dict_map

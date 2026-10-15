@@ -29,6 +29,7 @@ export KVCache,
     GemmaRMSNorm,
     LayerNorm,
     RoPE,
+    YarnRopeScaling,
     Linear,
     SiLUGatedMLP,
     GeluGatedMLP,
@@ -243,11 +244,59 @@ softcap(x::AbstractArray, ::Nothing) = x
     RoPE{F}
 
 Rotary Position Embeddings (RoPE) layer. Computes positional rotations using frequency buffers `inv_freq`.
-Supports Llama 3 scaling/wavelength-interpolation if constructed with the appropriate scaling parameters.
+Supports Llama 3 scaling/wavelength-interpolation and YaRN if constructed with the appropriate scaling parameters.
+
+`attention_scaling` multiplies the rotated channels, which is how YaRN scales the
+cos/sin tables in HF; it is `1` otherwise.
 """
 struct RoPE{F}
     inv_freq::F
     rotary_dim::Union{Nothing,Int}
+    attention_scaling::Float32
+end
+
+RoPE(inv_freq, rotary_dim) = RoPE(inv_freq, rotary_dim, 1.0f0)
+# The scale stays Float32 when `convert_eltype` rebuilds the layer in another
+# precision, like GQA's softcap.
+RoPE(inv_freq, rotary_dim, s::Real) = RoPE(inv_freq, rotary_dim, Float32(s))
+
+"""
+    YarnRopeScaling(; factor, original_max_position_embeddings, beta_fast = 32,
+                    beta_slow = 1, truncate = true, attention_factor = nothing)
+
+YaRN context extension (Peng et al., 2023), as HF's `rope_type = "yarn"`
+computes it: frequencies whose wavelength exceeds the original context are
+interpolated by `factor`, short ones are kept, the band between `beta_fast` and
+`beta_slow` rotations blends the two, and the cos/sin tables are scaled by
+`attention_factor` (`0.1 ln(factor) + 1` when not given). Pass it to
+[`RoPE`](@ref) as `yarn`.
+"""
+Base.@kwdef struct YarnRopeScaling
+    factor::Float64
+    original_max_position_embeddings::Int
+    beta_fast::Float64 = 32.0
+    beta_slow::Float64 = 1.0
+    truncate::Bool = true
+    attention_factor::Union{Nothing,Float64} = nothing
+end
+
+function _yarn_inv_freq(dim::Int, base::Real, y::YarnRopeScaling)
+    attention = something(y.attention_factor, y.factor <= 1 ? 1.0 : 0.1 * log(y.factor) + 1.0)
+    # The dimension at which a frequency completes `rotations` turns over the
+    # original context.
+    correction(rotations) = dim * log(y.original_max_position_embeddings / (rotations * 2π)) / (2 * log(base))
+    low, high = correction(y.beta_fast), correction(y.beta_slow)
+    if y.truncate
+        low, high = floor(low), ceil(high)
+    end
+    low, high = max(low, 0), min(high, dim - 1)
+    high == low && (high += 0.001)
+
+    pos_freqs = base .^ ((0:2:(dim - 1)) ./ dim)
+    extrapolation = 1 ./ pos_freqs
+    interpolation = 1 ./ (y.factor .* pos_freqs)
+    keep = 1 .- clamp.(((0:(dim ÷ 2 - 1)) .- low) ./ (high - low), 0, 1)
+    return interpolation .* (1 .- keep) .+ extrapolation .* keep, attention
 end
 
 """
@@ -261,7 +310,7 @@ first `rotary_dim` channels of each head are rotated and the rest pass
 through. When `nothing` (the default) the full head is rotated.
 
 If scaling parameters are provided, applies Llama 3 NTK-style frequency
-scaling.
+scaling. `yarn`, a [`YarnRopeScaling`](@ref), applies YaRN instead.
 """
 function RoPE(
     dim::Integer;
@@ -271,7 +320,13 @@ function RoPE(
     low_freq_factor::Union{Nothing,Real}=nothing,
     high_freq_factor::Union{Nothing,Real}=nothing,
     old_context_len::Union{Nothing,Integer}=nothing,
+    yarn::Union{Nothing,YarnRopeScaling}=nothing,
 )
+    if !isnothing(yarn)
+        rdim = isnothing(rotary_dim) ? Int(dim) : Int(rotary_dim)
+        inv_freq, attention = _yarn_inv_freq(rdim, base, yarn)
+        return RoPE(Float32.(inv_freq), isnothing(rotary_dim) ? nothing : rdim, Float32(attention))
+    end
     # Compute inv_freq against the rotated portion only — partial RoPE
     # keeps the unrotated tail unchanged, so its frequencies don't matter.
     rdim = isnothing(rotary_dim) ? Int(dim) : Int(rotary_dim)
@@ -345,10 +400,12 @@ function _rope_tables(
     end
 end
 
+_scale_rotated(x, s::Float32) = isone(s) ? x : x .* s
+
 function (m::RoPE)(x::AbstractArray, position_ids::AbstractVector)
     # Full rotation path: either rotary_dim is unset, or it equals head_dim.
     if isnothing(m.rotary_dim) || m.rotary_dim == size(x, 1)
-        return _rope_rotate(m.inv_freq, x, position_ids)
+        return _scale_rotated(_rope_rotate(m.inv_freq, x, position_ids), m.attention_scaling)
     end
 
     # Partial RoPE (GPT-NeoX / Pythia): rotate the first rotary_dim
@@ -356,7 +413,7 @@ function (m::RoPE)(x::AbstractArray, position_ids::AbstractVector)
     rdim = m.rotary_dim
     x_rot = copy(selectdim(x, 1, 1:rdim))            # copy, not Array: stay on-device
     x_pass = copy(selectdim(x, 1, (rdim + 1):size(x, 1)))
-    rotated = _rope_rotate(m.inv_freq, x_rot, position_ids)
+    rotated = _scale_rotated(_rope_rotate(m.inv_freq, x_rot, position_ids), m.attention_scaling)
     return cat(rotated, x_pass; dims=1)
 end
 
@@ -717,11 +774,22 @@ function sdpa(
     scale,
     softcap=nothing,
     drop=nothing,
+    sinks=nothing,
 )
-    return _sdpa_materialized(q, k_t, v; scale=scale, softcap=softcap, drop=drop)
+    return _sdpa_materialized(q, k_t, v; scale=scale, softcap=softcap, drop=drop, sinks=sinks)
 end
 
-function _sdpa_materialized(q, k_t, v; scale, softcap, drop)
+# Softmax over each score row plus one extra logit per slice: an attention sink
+# (gpt-oss) that takes a share of the probability mass and is then dropped, so a
+# query can attend to nothing in particular.
+function _softmax_with_sinks(scores, sinks)
+    s = reshape(sinks, 1, 1, :)
+    m = max.(maximum(scores; dims=2), s)
+    e = exp.(scores .- m)
+    return e ./ (sum(e; dims=2) .+ exp.(s .- m))
+end
+
+function _sdpa_materialized(q, k_t, v; scale, softcap, drop, sinks=nothing)
     scores = batched_mul(q, k_t) ./ scale
     if !isnothing(softcap)
         cap = softcap
@@ -743,12 +811,12 @@ function _sdpa_materialized(q, k_t, v; scale, softcap, drop)
         end
         scores = scores .+ bias
     end
-    probs = NNlib.softmax(scores; dims=2)
+    probs = isnothing(sinks) ? NNlib.softmax(scores; dims=2) : _softmax_with_sinks(scores, sinks)
     return batched_mul(probs, v)
 end
 
 """
-    flash_sdpa(q, k_t, v; scale, softcap=nothing, drop=nothing, block_size=128)
+    flash_sdpa(q, k_t, v; scale, softcap=nothing, drop=nothing, sinks=nothing, block_size=128)
 
 Tiled FlashAttention forward: same arguments and result as [`sdpa`](@ref),
 but streams the key/value sequence in `block_size` chunks via the
@@ -763,6 +831,7 @@ function flash_sdpa(
     scale,
     softcap=nothing,
     drop=nothing,
+    sinks=nothing,
     block_size::Integer=128,
 )
     sq, d, batch = size(q, 1), size(q, 2), size(q, 3)
@@ -774,8 +843,14 @@ function flash_sdpa(
     scale_T = T(scale)
     cap_T = isnothing(softcap) ? nothing : T(softcap)
 
+    # A sink is a key seen before any other: it seeds the running max and
+    # contributes exp(0) = 1 to the denominator, with nothing to the output.
     m_run = fill!(similar(qT, T, sq, 1, batch), T(-Inf))
     l_run = fill!(similar(qT, T, sq, 1, batch), zero(T))
+    if !isnothing(sinks)
+        m_run .= reshape(T.(sinks), 1, 1, batch)
+        fill!(l_run, one(T))
+    end
     acc = fill!(similar(qT, T, sq, d, batch), zero(T))
 
     kv0 = 1
@@ -832,9 +907,10 @@ function ChainRulesCore.rrule(
     scale,
     softcap=nothing,
     drop=nothing,
+    sinks=nothing,
     block_size::Integer=128,
 )
-    materialized(a, b, c) = _sdpa_materialized(a, b, c; scale, softcap, drop)
+    materialized(a, b, c) = _sdpa_materialized(a, b, c; scale, softcap, drop, sinks)
     out, back = rrule_via_ad(config, materialized, q, k_t, v)
     function flash_sdpa_pullback(Δ)
         _, dq, dk_t, dv = back(Δ)
@@ -854,9 +930,11 @@ When `window_size` is set, attention is restricted to a sliding window of the
 Mistral's sliding-window attention. `nothing` (the default) is plain causal.
 
 `q_norm` and `k_norm` are per-head `RMSNorm`s over `head_dim`, applied to the
-projected queries and keys before RoPE (Qwen3), or `nothing`.
+projected queries and keys before RoPE (Qwen3), or `nothing`. `sinks` holds one
+learned logit per query head that joins each softmax and is then dropped
+(gpt-oss), or `nothing`.
 """
-struct GQA{Q,K,V,O,R,N}
+struct GQA{Q,K,V,O,R,N,S}
     wq::Q
     wk::K
     wv::V
@@ -871,6 +949,7 @@ struct GQA{Q,K,V,O,R,N}
     causal::Bool                         # false for BERT-style bidirectional attention.
     q_norm::N
     k_norm::N
+    sinks::S
 end
 
 """
@@ -893,7 +972,8 @@ sees every key. Used by encoder-only models (BERT, RoBERTa) where
 attention is bidirectional.
 
 `qk_norm_eps`, when set, adds a per-head `RMSNorm` with that epsilon on the
-queries and on the keys, as Qwen3 does.
+queries and on the keys, as Qwen3 does. `sinks=true` adds a learned attention
+sink per query head, as gpt-oss does.
 """
 function GQA(
     hidden_dim::Integer,
@@ -908,6 +988,7 @@ function GQA(
     query_scale::Union{Nothing,Real}=nothing,
     causal::Bool=true,
     qk_norm_eps::Union{Nothing,Real}=nothing,
+    sinks::Bool=false,
     init=Flux.glorot_uniform,
 )
     wq = Linear(hidden_dim, num_heads_q * head_dim; bias=qkv_bias, init=init)
@@ -934,6 +1015,7 @@ function GQA(
         causal,
         q_norm,
         k_norm,
+        sinks ? zeros(Float32, num_heads_q) : nothing,
     )
 end
 
@@ -1073,7 +1155,11 @@ function (m::GQA)(
         repeat(combined; inner=(1, 1, m.num_heads_q))
     end
 
-    out_flat = sdpa(q_flat, k_flat_t, v_flat; scale=scale, softcap=m.softcap, drop=drop)
+    # Heads are fastest within each batch element, so the sinks repeat per sequence.
+    sinks = isnothing(m.sinks) ? nothing : repeat(m.sinks, batch_size)
+    out_flat = sdpa(
+        q_flat, k_flat_t, v_flat; scale=scale, softcap=m.softcap, drop=drop, sinks=sinks
+    )
 
     out_perm = reshape(out_flat, seq_len, m.head_dim, m.num_heads_q, batch_size)
     out = permutedims(out_perm, (2, 3, 1, 4))
@@ -1084,9 +1170,10 @@ end
 
 Flux.@layer GQA
 function Flux.Optimisers.trainable(m::GQA)
-    projections = (; wq=m.wq, wk=m.wk, wv=m.wv, wo=m.wo)
-    isnothing(m.q_norm) && return projections
-    return (; projections..., q_norm=m.q_norm, k_norm=m.k_norm)
+    params = (; wq=m.wq, wk=m.wk, wv=m.wv, wo=m.wo)
+    isnothing(m.q_norm) || (params = (; params..., q_norm=m.q_norm, k_norm=m.k_norm))
+    isnothing(m.sinks) || (params = (; params..., sinks=m.sinks))
+    return params
 end
 
 """

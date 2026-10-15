@@ -119,6 +119,18 @@ hardware. `test/gpu.jl` runs everywhere and covers the device path on JLArrays.
 
 ## Memory notes
 
+Loading copies each tensor once: [`Models.load_weights`](@ref) returns lazy views
+over a memory map of the checkpoint, and each parameter is filled straight from
+the file.
+
+gpt-oss goes further and never copies its experts. They stay in MXFP4, as the
+file stores them, behind [`Models.MXFP4Weights`](@ref), and each expert is
+decoded into a reusable `Float32` buffer only when a token is routed to it.
+gpt-oss-20b then needs about 13 GB for its experts, held as page cache the
+kernel can evict and reread, plus about 7 GB for its other weights. Decoding
+every routed expert on every step is what bounds its speed, about 1.5 s per
+token on a 24-thread CPU; start Julia with `-t auto` so the decode is threaded.
+
 A few allocations are sized for correctness rather than minimum footprint:
 
 - Sliding-window models allocate `max_seq` cache slots regardless of the window,

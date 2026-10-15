@@ -16,6 +16,9 @@ using JSON3
 export RepoRef, parse_repo, download_file, snapshot_download, default_cache_dir
 
 const DEFAULT_REVISION = "main"
+
+# `HF_HUB_OFFLINE=1` keeps the Python library off the network; honour it too.
+_offline() = lowercase(strip(get(ENV, "HF_HUB_OFFLINE", ""))) in ("1", "true", "yes", "on")
 const DEFAULT_ENDPOINT = "https://huggingface.co"
 
 const _METADATA_FILES = (
@@ -195,7 +198,7 @@ end
 
 """
     download_file(repo_id, filename; revision="main", cache_dir=default_cache_dir(),
-                  token=default_token(), local_files_only=false, verbose=false) -> String
+                  token=default_token(), local_files_only=_offline(), verbose=false) -> String
 
 Download `filename` from `repo_id` at `revision` and return the absolute
 path to it inside the Python-compatible cache layout:
@@ -203,8 +206,11 @@ path to it inside the Python-compatible cache layout:
     <cache_dir>/models--<org>--<repo>/snapshots/<commit>/<filename>
 
 If the blob is already cached it is reused; the function only does a HEAD
-request and creates the snapshot symlink. Pass `local_files_only=true` to
-skip the network entirely and return the cached path (or error).
+request, and an entry already in the snapshot is left exactly as it is (a cache
+written by another user or tool may not be ours to modify). Pass
+`local_files_only=true`, or set `HF_HUB_OFFLINE=1` as for the Python library, to
+skip the network entirely and return the cached path. A repository that was never
+cached raises an error; a file missing from a cached snapshot raises `KeyError`.
 """
 function download_file(
     repo_id::AbstractString,
@@ -212,7 +218,7 @@ function download_file(
     revision::AbstractString=DEFAULT_REVISION,
     cache_dir::AbstractString=default_cache_dir(),
     token::Union{AbstractString,Nothing}=default_token(),
-    local_files_only::Bool=false,
+    local_files_only::Bool=_offline(),
     verbose::Bool=false,
 )
     ref = RepoRef(String(repo_id), String(revision))
@@ -226,8 +232,7 @@ function download_file(
         )
         cached_commit = strip(read(refs_file, String))
         snapshot_path = joinpath(repo_folder, "snapshots", cached_commit, filename)
-        ispath(snapshot_path) ||
-            error("local_files_only=true but $snapshot_path is missing from the cache")
+        ispath(snapshot_path) || throw(KeyError("$(ref.repo_id)@$(cached_commit):$filename"))
         return snapshot_path
     end
 
@@ -251,15 +256,19 @@ function download_file(
         end
     end
 
-    mkpath(dirname(snapshot_path))
-    if ispath(snapshot_path) || islink(snapshot_path)
-        rm(snapshot_path; force=true)
+    # A snapshot is keyed by commit, so an entry that resolves is already this
+    # file. Only a missing or dangling link is (re)made.
+    if !ispath(snapshot_path)
+        mkpath(dirname(snapshot_path))
+        islink(snapshot_path) && rm(snapshot_path)
+        _link_blob(blob_path, snapshot_path)
     end
-    _link_blob(blob_path, snapshot_path)
 
-    mkpath(dirname(refs_file))
-    open(refs_file, "w") do io
-        return print(io, meta.commit)
+    if !isfile(refs_file) || strip(read(refs_file, String)) != meta.commit
+        mkpath(dirname(refs_file))
+        open(refs_file, "w") do io
+            return print(io, meta.commit)
+        end
     end
 
     return snapshot_path
@@ -282,20 +291,24 @@ end
 
 """
     snapshot_download(repo_id; revision="main", cache_dir=default_cache_dir(),
-                      token=default_token(), verbose=false) -> String
+                      token=default_token(), local_files_only=_offline(),
+                      verbose=false) -> String
 
 Download the files HuggingFaceTransformers needs to load a model: `config.json`,
 `tokenizer.json` (and its companion JSON files), and the model weights,
 whether sharded (`model.safetensors.index.json` plus each shard) or single
 (`model.safetensors`).
 
-Returns the path to the snapshot directory.
+Returns the path to the snapshot directory. With `local_files_only` (or
+`HF_HUB_OFFLINE=1`) nothing is fetched: the cached snapshot is returned as long
+as it holds a config and weights.
 """
 function snapshot_download(
     repo_id::AbstractString;
     revision::AbstractString=DEFAULT_REVISION,
     cache_dir::AbstractString=default_cache_dir(),
     token::Union{AbstractString,Nothing}=default_token(),
+    local_files_only::Bool=_offline(),
     verbose::Bool=false,
 )
     paths = String[]
@@ -308,6 +321,7 @@ function snapshot_download(
             revision=revision,
             cache_dir=cache_dir,
             token=token,
+            local_files_only=local_files_only,
             verbose=verbose,
         ),
     )
@@ -323,6 +337,7 @@ function snapshot_download(
                     revision=revision,
                     cache_dir=cache_dir,
                     token=token,
+                    local_files_only=local_files_only,
                     verbose=verbose,
                 ),
             )
@@ -338,6 +353,7 @@ function snapshot_download(
             revision=revision,
             cache_dir=cache_dir,
             token=token,
+            local_files_only=local_files_only,
             verbose=verbose,
         )
         push!(paths, idx_path)
@@ -351,6 +367,7 @@ function snapshot_download(
                     revision=revision,
                     cache_dir=cache_dir,
                     token=token,
+                    local_files_only=local_files_only,
                     verbose=verbose,
                 ),
             )
@@ -368,6 +385,7 @@ function snapshot_download(
                 revision=revision,
                 cache_dir=cache_dir,
                 token=token,
+                local_files_only=local_files_only,
                 verbose=verbose,
             ),
         )

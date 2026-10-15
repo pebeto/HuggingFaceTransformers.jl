@@ -12,11 +12,12 @@ using HuggingFaceTransformers.Layers: flash_sdpa
 using CUDA
 
 function HuggingFaceTransformers.Layers.sdpa(
-    q::CuArray, k_t::CuArray, v::CuArray; scale, softcap=nothing, drop=nothing
+    q::CuArray, k_t::CuArray, v::CuArray; scale, softcap=nothing, drop=nothing,
+    sinks=nothing,
 )
     # Move the host-built drop mask to the device for on-GPU slicing.
     drop_dev = isnothing(drop) ? nothing : CuArray(drop)
-    return flash_sdpa(q, k_t, v; scale=scale, softcap=softcap, drop=drop_dev)
+    return flash_sdpa(q, k_t, v; scale=scale, softcap=softcap, drop=drop_dev, sinks=sinks)
 end
 
 end # module HuggingFaceTransformersCUDAExt

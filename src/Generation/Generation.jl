@@ -21,6 +21,7 @@ using ..Models:
     GPT2ForCausalLM,
     NeoXForCausalLM,
     MixtralForCausalLM,
+    GptOssForCausalLM,
     build_caches
 
 const DecoderLM = Union{
@@ -32,6 +33,7 @@ const DecoderLM = Union{
     GPT2ForCausalLM,
     NeoXForCausalLM,
     MixtralForCausalLM,
+    GptOssForCausalLM,
 }
 using ..Tokenizers: Tokenizer, encode, decode, pad_token_id
 

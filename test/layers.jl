@@ -376,6 +376,7 @@ end
             true,              # causal
             nothing,           # q_norm
             nothing,           # k_norm
+            nothing,           # sinks
         )
         x = randn(Float32, hidden_dim, 4, 1) .* 10   # large inputs → big scores
         out_raw = gqa_raw(x)
@@ -403,6 +404,7 @@ end
             true,              # causal
             nothing,           # q_norm
             nothing,           # k_norm
+            nothing,           # sinks
         )
         x = randn(Float32, hidden_dim, 4, 1)
         @test gqa_default(x) ≈ gqa_match(x)
@@ -423,6 +425,7 @@ end
             true,              # causal
             nothing,           # q_norm
             nothing,           # k_norm
+            nothing,           # sinks
         )
         @test !(gqa_default(x) ≈ gqa_other(x))
     end
@@ -460,6 +463,7 @@ end
             true,                        # causal
             nothing,                     # q_norm
             nothing,                     # k_norm
+            nothing,                     # sinks
         )
 
         x = rand(Float32, hidden_dim, 5, 1)
@@ -484,6 +488,7 @@ end
             true,                        # causal
             nothing,                     # q_norm
             nothing,                     # k_norm
+            nothing,                     # sinks
         )
 
         x = rand(Float32, hidden_dim, 5, 1)

@@ -11,6 +11,7 @@ module Models
 using Flux
 using Functors
 using JSON3
+using Mmap: Mmap
 using BFloat16s: BFloat16
 using SafeTensors: load_safetensors, load_sharded_safetensors
 using ..Layers:
@@ -18,6 +19,7 @@ using ..Layers:
     GemmaRMSNorm,
     LayerNorm,
     RoPE,
+    YarnRopeScaling,
     Linear,
     SiLUGatedMLP,
     GeluGatedMLP,
@@ -61,6 +63,8 @@ export forward_from_features, generate_multimodal, forward_embeds
 export LoRALinear, LoraConfig, lora_wrap, merge_lora, lora_scaling
 export save_lora, load_lora, apply_lora!
 export MixtralConfig, MixtralForCausalLM, mixtral_state_dict_map
+export GptOssConfig, GptOssForCausalLM, GptOssMLP, GptOssExperts, MXFP4Weights
+export gpt_oss_state_dict_map, decode_mxfp4!
 export convert_eltype, fp16, bf16, fp32
 export QuantizedInt8Matrix, quantize_int8
 export read_config, config_from_json, load_pretrained, AUTO_ARCHITECTURES
@@ -87,6 +91,7 @@ include("image_processor.jl")
 include("llava.jl")
 include("lora.jl")
 include("mixtral.jl")
+include("gpt_oss.jl")
 include("dtype.jl")
 include("quantize.jl")
 # Last: the dispatch table references every config and wrapper type above.

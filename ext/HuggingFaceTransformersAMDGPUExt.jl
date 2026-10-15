@@ -11,10 +11,11 @@ using HuggingFaceTransformers.Layers: flash_sdpa
 using AMDGPU
 
 function HuggingFaceTransformers.Layers.sdpa(
-    q::ROCArray, k_t::ROCArray, v::ROCArray; scale, softcap=nothing, drop=nothing
+    q::ROCArray, k_t::ROCArray, v::ROCArray; scale, softcap=nothing, drop=nothing,
+    sinks=nothing,
 )
     drop_dev = isnothing(drop) ? nothing : ROCArray(drop)
-    return flash_sdpa(q, k_t, v; scale=scale, softcap=softcap, drop=drop_dev)
+    return flash_sdpa(q, k_t, v; scale=scale, softcap=softcap, drop=drop_dev, sinks=sinks)
 end
 
 end # module HuggingFaceTransformersAMDGPUExt

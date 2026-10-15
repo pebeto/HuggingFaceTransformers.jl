@@ -12,10 +12,11 @@ using HuggingFaceTransformers.Layers: flash_sdpa
 using Metal
 
 function HuggingFaceTransformers.Layers.sdpa(
-    q::MtlArray, k_t::MtlArray, v::MtlArray; scale, softcap=nothing, drop=nothing
+    q::MtlArray, k_t::MtlArray, v::MtlArray; scale, softcap=nothing, drop=nothing,
+    sinks=nothing,
 )
     drop_dev = isnothing(drop) ? nothing : MtlArray(drop)
-    return flash_sdpa(q, k_t, v; scale=scale, softcap=softcap, drop=drop_dev)
+    return flash_sdpa(q, k_t, v; scale=scale, softcap=softcap, drop=drop_dev, sinks=sinks)
 end
 
 end # module HuggingFaceTransformersMetalExt

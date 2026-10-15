@@ -27,6 +27,9 @@ function _apply_transform(src::AbstractArray, transform::Symbol)
     if transform === :as_is
         return src
     elseif transform === :transpose
+        # A lazy checkpoint view is already a transpose of the file's bytes, so
+        # transposing it back is free.
+        src isa PermutedDimsArray{<:Any,2,(2, 1)} && return parent(src)
         return permutedims(src, (2, 1))
     else
         throw(ArgumentError("unknown state-dict transform: $(transform)"))
@@ -66,7 +69,14 @@ function load_into!(
         size(dst) == size(prepared) || throw(
             DimensionMismatch("$(hf_key): target $(size(dst)) vs source $(size(prepared))"),
         )
-        copyto!(dst, prepared)
+        _copy_weight!(dst, prepared)
     end
     return target
 end
+
+# Lazy checkpoint views are permutations of the file's bytes; `permutedims!`
+# copies them blockwise, several times faster than element by element.
+function _copy_weight!(dst::AbstractArray, src::PermutedDimsArray{<:Any,N,perm}) where {N,perm}
+    return permutedims!(dst, parent(src), perm)
+end
+_copy_weight!(dst::AbstractArray, src::AbstractArray) = copyto!(dst, src)

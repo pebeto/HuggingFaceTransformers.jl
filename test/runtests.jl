@@ -99,6 +99,10 @@ using HuggingFaceTransformers
         include("mixtral_model.jl")
     end
 
+    @testset verbose = true "gpt-oss" begin
+        include("gpt_oss.jl")
+    end
+
     @testset verbose = true "Padding masks" begin
         include("padding.jl")
     end
@@ -222,6 +226,12 @@ using HuggingFaceTransformers
     if !isempty(get(ENV, "HFT_TEST_PARITY_MIXTRAL", ""))
         @testset verbose = true "Mixtral parity" begin
             include("parity_mixtral.jl")
+        end
+    end
+
+    if !isempty(get(ENV, "HFT_TEST_PARITY_GPT_OSS", ""))
+        @testset verbose = true "gpt-oss parity" begin
+            include("parity_gpt_oss.jl")
         end
     end
 

@@ -10,8 +10,8 @@ using HuggingFaceTransformers.Tokenizers: load_tokenizer, encode, decode
 # here doesn't require new model-side code.
 #
 # Coverage spans every tokenizer family in the tree:
-#   - byte-level BPE      : gpt2, roberta, qwen2.5, qwen3, pythia, phi-3, llama3.2,
-#                           mistral-v0.2
+#   - byte-level BPE      : gpt2, roberta, qwen2.5, qwen3, gpt-oss, pythia, phi-3,
+#                           llama3.2, mistral-v0.2
 #   - Unigram + byte fb   : gemma-2
 #   - WordPiece           : bert-base-uncased, bert-base-cased
 const VARIANTS = (
@@ -19,6 +19,7 @@ const VARIANTS = (
     ("roberta", "tokenizer_parity_roberta.json"),
     ("qwen2.5", "tokenizer_parity_qwen2_5.json"),
     ("qwen3", "tokenizer_parity_qwen3.json"),
+    ("gpt-oss", "tokenizer_parity_gpt_oss.json"),
     ("pythia", "tokenizer_parity_pythia.json"),
     ("phi-3", "tokenizer_parity_phi_3.json"),
     ("llama3.2", "tokenizer_parity_llama_3_2.json"),

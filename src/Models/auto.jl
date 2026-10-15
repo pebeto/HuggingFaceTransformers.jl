@@ -205,6 +205,66 @@ function config_from_json(::Type{QwenConfig}, raw)
     )
 end
 
+# YaRN parameters from `rope_parameters` (transformers 5) or `rope_scaling`
+# (older configs); `nothing` for plain RoPE.
+function _yarn_scaling(raw)
+    params = _hf(raw, :rope_parameters, _hf(raw, :rope_scaling, nothing))
+    isnothing(params) && return nothing
+    kind = _hf_str(params, :rope_type, _hf_str(params, :type, "default"))
+    kind == "default" && return nothing
+    kind == "yarn" || throw(ArgumentError("RoPE scaling `$(kind)` is not implemented for this model"))
+    factor = _hf_float(params, :factor, 1.0)
+    attention = _hf_opt_float(params, :attention_factor)
+    mscale, mscale_all = _hf_opt_float(params, :mscale), _hf_opt_float(params, :mscale_all_dim)
+    if isnothing(attention) && !isnothing(mscale) && !isnothing(mscale_all) &&
+        !iszero(mscale) && !iszero(mscale_all)
+        get_mscale(m) = factor <= 1 ? 1.0 : 0.1 * m * log(factor) + 1.0
+        attention = get_mscale(mscale) / get_mscale(mscale_all)
+    end
+    return YarnRopeScaling(;
+        factor,
+        original_max_position_embeddings=_hf_req_int(params, :original_max_position_embeddings),
+        beta_fast=_hf_float(params, :beta_fast, 32.0),
+        beta_slow=_hf_float(params, :beta_slow, 1.0),
+        truncate=_hf_bool(params, :truncate, true),
+        attention_factor=attention,
+    )
+end
+
+function config_from_json(::Type{GptOssConfig}, raw)
+    hidden = _hf_req_int(raw, :hidden_size)
+    heads = _hf_req_int(raw, :num_attention_heads)
+    layers = _hf_req_int(raw, :num_hidden_layers)
+    kinds = _hf(raw, :layer_types, nothing)
+    layer_types = if isnothing(kinds)
+        [isodd(i) ? :sliding_attention : :full_attention for i in 1:layers]
+    else
+        Symbol.(collect(kinds))
+    end
+    params = _hf(raw, :rope_parameters, nothing)
+    theta = _hf(raw, :rope_theta, isnothing(params) ? nothing : _hf(params, :rope_theta, nothing))
+    return GptOssConfig(;
+        vocab_size=_hf_req_int(raw, :vocab_size),
+        hidden_size=hidden,
+        intermediate_size=_hf_req_int(raw, :intermediate_size),
+        num_hidden_layers=layers,
+        num_attention_heads=heads,
+        num_key_value_heads=_kv_heads(raw, heads),
+        head_dim=_head_dim(raw, hidden, heads),
+        num_local_experts=_hf_req_int(raw, :num_local_experts),
+        num_experts_per_tok=_hf_int(raw, :num_experts_per_tok, 4),
+        max_position_embeddings=_hf_req_int(raw, :max_position_embeddings),
+        rope_theta=Float64(something(theta, 150_000.0)),
+        rope_scaling=_yarn_scaling(raw),
+        rms_norm_eps=_hf_float(raw, :rms_norm_eps, 1.0e-5),
+        sliding_window=_hf_int(raw, :sliding_window, 128),
+        layer_types,
+        attention_bias=_hf_bool(raw, :attention_bias, true),
+        swiglu_limit=_hf_float(raw, :swiglu_limit, 7.0),
+        tie_word_embeddings=_hf_bool(raw, :tie_word_embeddings, false),
+    )
+end
+
 function config_from_json(::Type{GemmaConfig}, raw)
     hidden = _hf_req_int(raw, :hidden_size)
     heads = _hf_req_int(raw, :num_attention_heads)
@@ -509,6 +569,7 @@ const AUTO_ARCHITECTURES = Dict{String,Tuple{Any,Any}}(
     "GPT2LMHeadModel" => (GPT2Config, GPT2ForCausalLM),
     "GPTNeoXForCausalLM" => (NeoXConfig, NeoXForCausalLM),
     "MixtralForCausalLM" => (MixtralConfig, MixtralForCausalLM),
+    "GptOssForCausalLM" => (GptOssConfig, GptOssForCausalLM),
     "BertForMaskedLM" => (BertConfig, BertForMaskedLM),
     "RobertaForMaskedLM" => (BertConfig, BertForMaskedLM),
     "BertModel" => (BertConfig, BertEmbeddingModel),
@@ -533,6 +594,7 @@ const _MODEL_TYPE_FALLBACK = Dict{String,String}(
     "gpt2" => "GPT2LMHeadModel",
     "gpt_neox" => "GPTNeoXForCausalLM",
     "mixtral" => "MixtralForCausalLM",
+    "gpt_oss" => "GptOssForCausalLM",
     "nomic_bert" => "NomicBertModel",
     "siglip" => "SiglipModel",
     "dinov2" => "Dinov2Model",
@@ -583,6 +645,15 @@ and load in one call.
 function load_pretrained(dir::AbstractString; kwargs...)
     raw = read_config(dir)
     config_type, model_type = AUTO_ARCHITECTURES[_resolve_architecture(raw)]
-    model = model_type(config_from_json(config_type, raw); kwargs...)
-    return load_state_dict!(model, load_weights(dir))
+    return _build_and_load(model_type, config_from_json(config_type, raw), load_weights(dir); kwargs...)
+end
+
+# Most models are built and then filled. gpt-oss builds itself from the weights
+# instead, so its MXFP4 experts stay memory-mapped rather than first being
+# allocated densely.
+function _build_and_load(model_type, cfg, weights; kwargs...)
+    return load_state_dict!(model_type(cfg; kwargs...), weights)
+end
+function _build_and_load(::Type{GptOssForCausalLM}, cfg, weights; kwargs...)
+    return GptOssForCausalLM(cfg, weights)
 end

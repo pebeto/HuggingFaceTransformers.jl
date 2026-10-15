@@ -26,6 +26,7 @@ QuantizedInt8Matrix
 RMSNorm
 RoPE
 SiLUGatedMLP
+YarnRopeScaling
 checkpoint
 flash_sdpa
 reset!

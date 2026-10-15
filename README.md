@@ -14,7 +14,7 @@ with a leaner dependency tree and a focus on decoder LLMs.
 
 Every architecture below except LLaVA has a numeric-parity test that compares
 logits against a reference recorded from `transformers` in Python. The CPU
-suite is 1917 assertions and runs in about four minutes.
+suite is 1959 assertions and runs in about four minutes.
 
 ## Installation
 
@@ -72,8 +72,11 @@ same work by hand in four steps:
    where the layouts differ.
 
 `load_weights` accepts a directory, a single `.safetensors` file, or a
-`model.safetensors.index.json` for sharded checkpoints, and returns
-mmap-backed views by default. Pass `mmap=false` to copy eagerly. PyTorch
+`model.safetensors.index.json` for sharded checkpoints, and returns lazy views
+over a memory map by default, so loading copies each tensor once, straight from
+the file into its parameter. Pass `mmap=false` to read everything up front.
+`HF_HUB_OFFLINE=1` keeps `snapshot_download` off the network, as it does the
+Python library, and a cached snapshot is never modified. PyTorch
 `.bin` pickles are not read at all.
 
 Every family also exposes its mapping table (`llama_state_dict_map(cfg)` and
@@ -93,11 +96,20 @@ friends) if you want to inspect or extend the wiring.
 | GPT-2 | `GPT2ForCausalLM` | `gpt2`, `gpt2-medium`, `gpt2-large`, `gpt2-xl` |
 | GPT-NeoX / Pythia | `NeoXForCausalLM` | `pythia-70m/410m/1b/6.9b` |
 | Mixtral (sparse MoE) | `MixtralForCausalLM` | `Mixtral-8x7B/8x22B-Instruct-v0.1` |
+| gpt-oss | `GptOssForCausalLM` | `gpt-oss-20b` (two-layer cut, float32) |
 
 Llama 3 RoPE scaling, Mistral and Gemma sliding-window attention, Gemma's
 logit softcapping, Qwen3's per-head query and key norms, Phi-3's fused QKV,
-NeoX's partial RoPE and parallel-residual block, and Mixtral's top-k expert
-routing are all handled inside these types.
+NeoX's partial RoPE and parallel-residual block, Mixtral's top-k expert routing,
+and gpt-oss's attention sinks, YaRN RoPE and MXFP4 experts are all handled inside
+these types.
+
+gpt-oss keeps its experts in MXFP4, exactly as the checkpoint stores them and
+memory-mapped, and decodes each expert only when a token is routed to it. That
+puts gpt-oss-20b at about 13 GB of experts plus 7 GB for everything else, so it
+runs in about 20 GB (about 1.5 s per token on a 24-thread CPU). HF itself
+needs ~42 GB to run it on a CPU, which is why its parity reference is the
+checkpoint's first two layers, run in float32: logits agree to 1e-5.
 
 ### Encoders and embeddings
 
@@ -366,6 +378,8 @@ Python scripts. `HFT_TEST_JET=1` adds a JET smoke pass, and
 - LLaVA expects a vision tower that returns patch features with the CLS token
   already dropped. SigLIP fits; a CLIP tower is not implemented, which is what
   llava-1.5 end-to-end parity is waiting on.
+- gpt-oss decodes its MXFP4 experts on the CPU only, and its harmony chat
+  template uses Jinja macros, which `ChatTemplate` does not support yet.
 - Mixtral runs each expert once over its assigned tokens without fusing the
   expert matmuls.
 

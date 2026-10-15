@@ -56,6 +56,37 @@ end
     end
 end
 
+@testset "offline mode reads the cache and writes nothing" begin
+    mktempdir() do cache
+        repo = joinpath(cache, "models--org--tiny")
+        snap = joinpath(repo, "snapshots", "abc123")
+        mkpath(joinpath(repo, "blobs"))
+        mkpath(snap)
+        mkpath(joinpath(repo, "refs"))
+        write(joinpath(repo, "refs", "main"), "abc123")
+        for (name, blob) in (("config.json", "c0ffee"), ("model.safetensors", "beef"))
+            write(joinpath(repo, "blobs", blob), "{}")
+            symlink(joinpath("..", "..", "blobs", blob), joinpath(snap, name))
+        end
+        # A snapshot written by someone else may be read-only; offline loading
+        # must neither need nor attempt write access.
+        chmod(snap, 0o555)
+        try
+            @test withenv(() -> HFHub.snapshot_download("org/tiny"; cache_dir=cache),
+                "HF_HUB_OFFLINE" => "1") == snap
+            @test HFHub.snapshot_download("org/tiny"; cache_dir=cache, local_files_only=true) == snap
+            @test_throws KeyError HFHub.download_file(
+                "org/tiny", "tokenizer.json"; cache_dir=cache, local_files_only=true
+            )
+            @test_throws ErrorException HFHub.download_file(
+                "org/never-cached", "config.json"; cache_dir=cache, local_files_only=true
+            )
+        finally
+            chmod(snap, 0o755)
+        end
+    end
+end
+
 # Network-gated integration test. Set HFT_TEST_NETWORK=1 to enable.
 # Uses a HF maintainer-controlled tiny fixture repo so the cost is minimal.
 if get(ENV, "HFT_TEST_NETWORK", "0") == "1"

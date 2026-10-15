@@ -48,6 +48,7 @@ VARIANTS = {
     "roberta":           ("FacebookAI/roberta-base",               "bpe"),
     "qwen2.5":           ("Qwen/Qwen2.5-0.5B-Instruct",            "bpe"),
     "qwen3":             ("Qwen/Qwen3-0.6B",                       "bpe"),
+    "gpt-oss":           ("openai/gpt-oss-20b",                    "bpe"),
     "pythia":            ("EleutherAI/pythia-70m",                 "bpe"),
     "phi-3":             ("microsoft/Phi-3-mini-4k-instruct",      "bpe"),
     "llama3.2":          ("meta-llama/Llama-3.2-1B-Instruct",      "bpe"),

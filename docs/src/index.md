@@ -83,11 +83,14 @@ a `huggingface-cli login` done once. The package reads the same
 | GPT-2 | [`GPT2ForCausalLM`](@ref) | `gpt2`, `gpt2-medium`, `gpt2-large`, `gpt2-xl` |
 | GPT-NeoX / Pythia | [`NeoXForCausalLM`](@ref) | `pythia-70m/410m/1b/6.9b` |
 | Mixtral (sparse MoE) | [`MixtralForCausalLM`](@ref) | `Mixtral-8x7B/8x22B-Instruct-v0.1` |
+| gpt-oss | [`GptOssForCausalLM`](@ref) | `gpt-oss-20b` (two-layer cut, float32) |
 
 Llama 3 RoPE scaling, Mistral and Gemma sliding-window attention, Gemma's logit
 softcapping, Qwen3's per-head query and key norms, Phi-3's fused QKV, NeoX's
-partial RoPE and parallel-residual block, and Mixtral's top-k expert routing are
-all handled inside these types.
+partial RoPE and parallel-residual block, Mixtral's top-k expert routing, and
+gpt-oss's attention sinks, YaRN RoPE and MXFP4 experts are all handled inside
+these types. gpt-oss keeps its experts packed and memory-mapped, so the 20B model
+runs in about 20 GB; see [Memory notes](@ref).
 
 ### Encoders and embeddings
 
@@ -125,6 +128,9 @@ all handled inside these types.
 - LLaVA expects a vision tower that returns patch features with the CLS token
   already dropped. SigLIP fits; a CLIP tower is not implemented, which is what
   llava-1.5 end-to-end parity is waiting on.
+- gpt-oss decodes its MXFP4 experts on the CPU only, and its harmony chat
+  template uses Jinja macros, which [`Generation.ChatTemplate`](@ref) does not
+  support yet.
 - Mixtral runs each expert once over its assigned tokens without fusing the
   expert matmuls.
 
