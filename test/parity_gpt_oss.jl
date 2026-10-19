@@ -2,6 +2,7 @@ using Test
 using JSON3
 using HuggingFaceTransformers.HFHub: snapshot_download
 using HuggingFaceTransformers.Tokenizers: load_tokenizer, encode
+using HuggingFaceTransformers.Generation: ChatTemplate, generate
 using HuggingFaceTransformers.Models:
     GptOssConfig, GptOssForCausalLM, MXFP4Weights, config_from_json, read_config, load_weights
 
@@ -27,8 +28,9 @@ else
     ids = Int.(collect(fx.input_token_ids))
 
     @testset verbose = true "gpt-oss-20b, first $(fx.num_hidden_layers) layers" begin
+        tokenizer = load_tokenizer(dir)
         @testset "tokenizer matches HF" begin
-            @test encode(load_tokenizer(dir), String(fx.prompt)) == ids
+            @test encode(tokenizer, String(fx.prompt)) == ids
         end
 
         cfg = _first_layers(config_from_json(GptOssConfig, read_config(dir)), Int(fx.num_hidden_layers))
@@ -48,6 +50,25 @@ else
             if expected[1] - expected[2] > 2tol
                 @test argmax(col) - 1 == first(r.top_indices)
             end
+        end
+
+        @testset "harmony prompt and greedy decode match HF" begin
+            g = fx.generation
+            template = ChatTemplate(read(joinpath(dir, "chat_template.jinja"), String))
+            text = template(
+                g.messages; reasoning_effort=String(g.reasoning_effort), strftime_now=_ -> String(g.date)
+            )
+            prompt = encode(tokenizer, text)
+            @test prompt == collect(g.prompt_ids)
+
+            new = generate(lm, prompt; max_new_tokens=length(g.tokens))[(length(prompt) + 1):end]
+            # Greedy choices are comparable up to the first step where HF's top two
+            # logits sit within the tolerance; past a near tie either pick is right.
+            gaps = [t[1] - t[2] for t in g.top2]
+            comparable = something(findfirst(<(2tol), gaps), length(gaps) + 1) - 1
+            @info "gpt-oss greedy decode: $(comparable) of $(length(gaps)) steps comparable"
+            @test comparable > 128 - length(prompt)      # past the sliding window
+            @test new[1:comparable] == collect(g.tokens)[1:comparable]
         end
     end
 end

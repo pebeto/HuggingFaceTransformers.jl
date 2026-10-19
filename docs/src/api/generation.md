@@ -16,5 +16,6 @@ Generation
 ChatTemplate
 apply_chat_template
 generate
+load_chat_template
 speculative_generate
 ```

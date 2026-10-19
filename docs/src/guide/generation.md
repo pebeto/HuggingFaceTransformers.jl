@@ -108,16 +108,17 @@ package, so read them with a library of your choice and resample to 16 kHz.
 
 ## Chat templates
 
-[`Generation.ChatTemplate`](@ref) renders the `chat_template` field out of
-`tokenizer_config.json` through a small Jinja2 interpreter that follows HF's
-Jinja environment. The Qwen3 and Qwen2.5 templates are checked against
-`apply_chat_template` and render byte for byte, tools and thinking blocks
-included. Keyword arguments become template variables, so `enable_thinking=false`
-turns off Qwen3's thinking.
+[`Generation.ChatTemplate`](@ref) renders a model's chat template through a small
+Jinja2 interpreter that follows HF's Jinja environment, and
+[`Generation.load_chat_template`](@ref) finds the template where HF does
+(`chat_template.jinja`, else `tokenizer_config.json`). The Qwen3, Qwen2.5 and
+gpt-oss templates are checked against `apply_chat_template` and render byte for
+byte, tools, thinking blocks and gpt-oss's TypeScript tool schemas included.
+Keyword arguments become template variables, so `enable_thinking=false` turns off
+Qwen3's thinking and `reasoning_effort="low"` shortens gpt-oss's.
 
 ```julia
-tk_cfg = JSON3.read(read(joinpath(dir, "tokenizer_config.json"), String))
-template = ChatTemplate(String(tk_cfg.chat_template))
+template = load_chat_template(dir)
 
 prompt = template(
     [
@@ -129,14 +130,26 @@ prompt = template(
 )
 ```
 
-Supported: `if`/`elif`/`else`, `for` with `break` and `continue`, `set` including
-`namespace()` attributes, attribute and item access, Python indexing and slicing
-(negative indices, steps), arithmetic and comparison and logical operators, `in`,
-the common tests (`defined`, `none`, `string`, `mapping`, `false`, ...), the string
-methods templates call (`startswith`, `split`, `strip`, ...), the `trim`,
-`length` and `tojson` filters, `raise_exception`, the `loop.*` variables, and
-whitespace control. As in HF, `trim_blocks` and `lstrip_blocks` are on, and
-`tojson` writes what Python's `json.dumps` does (`{"a": 1}`, with spaces).
+The interpreter covers what these templates use: conditionals, loops with
+`break`, `continue` and unpacking, `set` and `namespace()`, macros, Python
+indexing and slicing, inline `if`, list literals, the common tests and filters,
+string and dict methods, and `strftime_now`; the [`Generation.ChatTemplate`](@ref)
+docstring has the full list. As in HF, `trim_blocks` and `lstrip_blocks` are on,
+and `tojson` writes what Python's `json.dumps` does (`{"a": 1}`, with spaces).
+
+gpt-oss answers in harmony format: its reasoning in an `analysis` channel, then
+the answer in a `final` one, ended by `<|return|>`. Pass the stop tokens from
+`generation_config.json` and keep the final channel:
+
+```julia
+template = load_chat_template(dir)
+eos = collect(JSON3.read(read(joinpath(dir, "generation_config.json"), String)).eos_token_id)
+messages = [Dict("role" => "user", "content" => "What is the capital of Peru?")]
+prompt = encode(tokenizer, template(messages; reasoning_effort="low"))
+out = generate(lm, prompt; max_new_tokens=256, eos_token_id=eos)
+text = decode(tokenizer, out[(length(prompt) + 1):end]; skip_special_tokens=false)
+answer = match(r"<\|channel\|>final<\|message\|>(.*?)(?:<\|return\|>|<\|end\|>|$)"s, text)[1]
+```
 
 Undefined names and missing members follow Jinja: they are falsy in a test and
 render as empty, rather than raising. That is what lets the tool-capable
@@ -149,10 +162,9 @@ an undefined value (`missing.attr`) does raise, because that is a template bug
 rather than a branch to skip, and an undefined value is distinct from `none`: a
 variable explicitly set to `none` is still defined.
 
-Not supported: tuple, list, and dict literals, float literals, macros,
-includes, custom filters, custom tests, and step slicing. A template that
-reaches for those raises on construction, which is why the examples carry a
-plain fallback template and warn when they fall back to it.
+A template that reaches for something unsupported (dict literals, `{% call %}`
+blocks, includes) raises, which is why the examples carry a plain fallback
+template and warn when they fall back to it.
 
 [`Generation.apply_chat_template`](@ref) is the one-shot form when you don't
 need to keep the parsed template around.

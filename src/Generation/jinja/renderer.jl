@@ -34,7 +34,17 @@ function _render_node!(io::IO, n::ForNode, ctx::AbstractDict)
     total = length(items)
     for (i, item) in enumerate(items)
         local_ctx = copy(ctx)
-        local_ctx[n.var] = item
+        if length(n.vars) == 1
+            local_ctx[only(n.vars)] = item
+        else
+            values = collect(item)
+            length(values) == length(n.vars) || throw(
+                ArgumentError("cannot unpack $(length(values)) values into $(join(n.vars, ", "))"),
+            )
+            for (name, value) in zip(n.vars, values)
+                local_ctx[name] = value
+            end
+        end
         local_ctx["loop"] = Dict{String,Any}(
             "index" => i,
             "index0" => i - 1,
@@ -65,3 +75,11 @@ function _render_node!(io::IO, n::SetNode, ctx::AbstractDict)
 end
 
 _render_node!(::IO, n::LoopControlNode, ::AbstractDict) = n.kind
+
+# Defining a macro binds a callable in the current scope. It keeps that scope by
+# reference, so a call sees the template's variables and every macro defined at
+# top level, including itself for recursion.
+function _render_node!(::IO, n::MacroNode, ctx::AbstractDict)
+    ctx[n.name] = TemplateMacro(n, ctx)
+    return nothing
+end

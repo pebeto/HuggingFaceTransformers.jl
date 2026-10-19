@@ -20,6 +20,40 @@ struct Namespace
     attrs::Dict{String,Any}
 end
 
+"""
+    TemplateMacro
+
+A `{% macro %}` bound at render time: the parsed definition plus the scope it
+was defined in. Calling it renders the body in a copy of that scope with the
+arguments bound, and returns the text.
+"""
+struct TemplateMacro
+    node::Any        # MacroNode; the AST is defined after this file's types load
+    scope::Dict{String,Any}
+end
+
+function _call_macro(m::TemplateMacro, args, kwargs)
+    node = m.node
+    length(args) <= length(node.params) ||
+        throw(ArgumentError("macro `$(node.name)` takes $(length(node.params)) arguments"))
+    local_ctx = copy(m.scope)
+    for (i, (param, default)) in enumerate(zip(node.params, node.defaults))
+        local_ctx[param] = if i <= length(args)
+            args[i]
+        elseif haskey(kwargs, param)
+            kwargs[param]
+        elseif !isnothing(default)
+            eval_expr(default, local_ctx)
+        else
+            Undefined()
+        end
+    end
+    io = IOBuffer()
+    signal = _render_nodes!(io, node.body, local_ctx)
+    isnothing(signal) || throw(ArgumentError("`$(signal)` outside a for loop"))
+    return String(take!(io))
+end
+
 _truthy(::Undefined) = false
 _truthy(::Nothing) = false
 _truthy(b::Bool) = b
@@ -67,33 +101,46 @@ function _py_float(x::AbstractFloat)
 end
 
 # HF's `tojson` is Python's `json.dumps` with its defaults: ", " and ": " between
-# items, non-ASCII kept as is, keys in the order the mapping holds them.
-_py_json(x) = sprint(_write_py_json, x)
+# items, non-ASCII kept as is, keys in the order the mapping holds them. With
+# `indent`, one item per line and no space after the commas.
+_py_json(x, indent::Union{Nothing,Integer}=nothing) =
+    sprint(io -> _write_py_json(io, x, isnothing(indent) ? nothing : Int(indent), 0))
 
-_write_py_json(io::IO, ::Nothing) = print(io, "null")
-_write_py_json(io::IO, b::Bool) = print(io, b ? "true" : "false")
-_write_py_json(io::IO, n::Integer) = print(io, n)
-_write_py_json(io::IO, x::AbstractFloat) = print(io, _py_float(x))
-_write_py_json(io::IO, s::Union{AbstractString,Symbol}) = _write_py_string(io, String(s))
-function _write_py_json(io::IO, d::Union{AbstractDict,NamedTuple})
-    print(io, '{')
-    for (i, (k, v)) in enumerate(pairs(d))
-        i > 1 && print(io, ", ")
+_write_py_json(io::IO, ::Nothing, _, _) = print(io, "null")
+_write_py_json(io::IO, b::Bool, _, _) = print(io, b ? "true" : "false")
+_write_py_json(io::IO, n::Integer, _, _) = print(io, n)
+_write_py_json(io::IO, x::AbstractFloat, _, _) = print(io, _py_float(x))
+_write_py_json(io::IO, s::Union{AbstractString,Symbol}, _, _) = _write_py_string(io, String(s))
+function _write_py_json(io::IO, d::Union{AbstractDict,NamedTuple}, indent, level)
+    return _write_py_items(io, collect(pairs(d)), '{', '}', indent, level) do (k, v)
         _write_py_string(io, k isa Union{AbstractString,Symbol} ? String(k) : _stringify(k))
         print(io, ": ")
-        _write_py_json(io, v)
+        _write_py_json(io, v, indent, level + 1)
     end
-    return print(io, '}')
 end
-function _write_py_json(io::IO, v::Union{AbstractVector,Tuple})
-    print(io, '[')
-    for (i, item) in enumerate(v)
-        i > 1 && print(io, ", ")
-        _write_py_json(io, item)
+function _write_py_json(io::IO, v::Union{AbstractVector,Tuple}, indent, level)
+    return _write_py_items(io, collect(v), '[', ']', indent, level) do item
+        _write_py_json(io, item, indent, level + 1)
     end
-    return print(io, ']')
 end
-_write_py_json(::IO, x) = throw(ArgumentError("cannot serialize $(typeof(x)) to JSON"))
+_write_py_json(::IO, ::Undefined, _, _) =
+    throw(ArgumentError("cannot serialize an undefined value to JSON"))
+_write_py_json(::IO, x, _, _) = throw(ArgumentError("cannot serialize $(typeof(x)) to JSON"))
+
+function _write_py_items(write_item, io::IO, items, open::Char, close::Char, indent, level)
+    isempty(items) && return print(io, open, close)
+    print(io, open)
+    for (i, item) in enumerate(items)
+        if isnothing(indent)
+            i > 1 && print(io, ", ")
+        else
+            print(io, i > 1 ? ",\n" : "\n", " "^(indent * (level + 1)))
+        end
+        write_item(item)
+    end
+    isnothing(indent) || print(io, "\n", " "^(indent * level))
+    return print(io, close)
+end
 
 const _PY_JSON_ESCAPES = Dict(
     '"' => "\\\"", '\\' => "\\\\", '\n' => "\\n", '\r' => "\\r", '\t' => "\\t",
@@ -209,13 +256,32 @@ function _binop(op::Symbol, l, r)
     end
 end
 
-function _apply_filter(name::AbstractString, value)
+function _apply_filter(name::AbstractString, value, args=Any[], kwargs=Dict{String,Any}())
     if name == "trim"
         return strip(_stringify(value))
     elseif name == "tojson"
-        return _py_json(value)
+        return _py_json(value, get(kwargs, "indent", isempty(args) ? nothing : args[1]))
     elseif name == "length" || name == "count"
         return length(value)
+    elseif name == "join"
+        sep = get(kwargs, "d", isempty(args) ? "" : args[1])
+        return join((_stringify(x) for x in value), _stringify(sep))
+    elseif name == "default" || name == "d"
+        fallback = isempty(args) ? "" : args[1]
+        falsy_too = length(args) >= 2 ? _truthy(args[2]) : _truthy(get(kwargs, "boolean", false))
+        return value isa Undefined || (falsy_too && !_truthy(value)) ? fallback : value
+    elseif name == "upper"
+        return uppercase(_stringify(value))
+    elseif name == "lower"
+        return lowercase(_stringify(value))
+    elseif name == "string"
+        return _stringify(value)
+    elseif name == "first"
+        return first(value)
+    elseif name == "last"
+        return last(value)
+    elseif name == "list"
+        return collect(value)
     else
         throw(ArgumentError("unsupported filter: $(name)"))
     end
@@ -292,11 +358,28 @@ function eval_expr(e::TestExpr, ctx::AbstractDict)
 end
 function eval_expr(e::FilterExpr, ctx::AbstractDict)
     v = eval_expr(e.target, ctx)
-    return _apply_filter(e.name, v)
+    args = Any[eval_expr(a, ctx) for a in e.args]
+    kwargs = Dict{String,Any}(k => eval_expr(x, ctx) for (k, x) in e.kwargs)
+    return _apply_filter(e.name, v, args, kwargs)
 end
+function eval_expr(e::ConditionalExpr, ctx::AbstractDict)
+    _truthy(eval_expr(e.cond, ctx)) && return eval_expr(e.then, ctx)
+    return isnothing(e.otherwise) ? Undefined() : eval_expr(e.otherwise, ctx)
+end
+eval_expr(e::ListExpr, ctx::AbstractDict) = Any[eval_expr(x, ctx) for x in e.items]
 function eval_expr(e::CallExpr, ctx::AbstractDict)
     args = Any[eval_expr(a, ctx) for a in e.args]
-    if e.func == "raise_exception"
+    # Macros, and functions passed in as variables, shadow the built-ins; HF's
+    # templates rely on that to pin `strftime_now` in tests.
+    target = get(ctx, e.func, nothing)
+    if target isa TemplateMacro
+        return _call_macro(target, args, Dict{String,Any}(k => eval_expr(v, ctx) for (k, v) in e.kwargs))
+    elseif target isa Function
+        return target(args...; (Symbol(k) => eval_expr(v, ctx) for (k, v) in e.kwargs)...)
+    end
+    if e.func == "strftime_now"
+        return Libc.strftime(_stringify(args[1]), time())
+    elseif e.func == "raise_exception"
         throw(ArgumentError("template raised: $(isempty(args) ? "" : _stringify(args[1]))"))
     elseif e.func == "namespace"
         attrs = Dict{String,Any}(k => eval_expr(v, ctx) for (k, v) in e.kwargs)
@@ -343,10 +426,18 @@ function _call_method(obj::AbstractString, name::String, args)
     end
     throw(ArgumentError("unsupported string method: $(name)"))
 end
+_key_string(k) = k isa Symbol ? String(k) : k
+
 function _call_method(obj::Union{AbstractDict,Namespace}, name::String, args)
     if name == "get"
         value = _get_member(obj, args[1])
         return value isa Undefined ? (length(args) >= 2 ? args[2] : nothing) : value
+    elseif obj isa AbstractDict && name == "items"
+        return [(_key_string(k), v) for (k, v) in pairs(obj)]
+    elseif obj isa AbstractDict && name == "keys"
+        return [_key_string(k) for k in keys(obj)]
+    elseif obj isa AbstractDict && name == "values"
+        return collect(values(obj))
     end
     throw(ArgumentError("unsupported mapping method: $(name)"))
 end

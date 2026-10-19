@@ -37,7 +37,7 @@ const DecoderLM = Union{
 }
 using ..Tokenizers: Tokenizer, encode, decode, pad_token_id
 
-export generate, speculative_generate, ChatTemplate, apply_chat_template
+export generate, speculative_generate, ChatTemplate, apply_chat_template, load_chat_template
 
 include("jinja/ast.jl")
 include("jinja/blocks.jl")

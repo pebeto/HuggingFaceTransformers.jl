@@ -1,5 +1,5 @@
 using Test
-using HuggingFaceTransformers.Generation: ChatTemplate, apply_chat_template
+using HuggingFaceTransformers.Generation: ChatTemplate, apply_chat_template, load_chat_template
 using JSON3
 
 @testset verbose = true "building blocks" begin
@@ -170,10 +170,49 @@ end
         @test act("{{ 'v' }}\n  {% if true %}t{% endif %}") == "v\nt"
     end
 
+    @testset "macros" begin
+        # Expected strings come from Jinja2 under HF's settings.
+        src = "{% macro greet(name, punct='!') %}Hi {{ name }}{{ punct }}{% endmacro %}" *
+            "{{ greet('Ana') }} {{ greet('Bo', '?') }} {{ greet(name='Cy', punct='.') }}"
+        @test act(src) == "Hi Ana! Hi Bo? Hi Cy."
+        # Recursion, as gpt-oss's schema renderer uses.
+        @test act("{%- macro count(n) -%}{%- if n > 0 -%}{{ n }}{{ count(n - 1) }}{%- endif -%}" *
+                  "{%- endmacro -%}{{ count(3) }}") == "321"
+        # The body sees the template's variables.
+        @test act("{%- macro who() -%}{{ user }}{%- endmacro -%}{{ who() }}"; user="dana") == "dana"
+        @test_throws ArgumentError act("{% macro f(a) %}{% endmacro %}{{ f(1, 2) }}")
+    end
+
+    @testset "inline if, list literals, filter arguments" begin
+        @test act("{{ 'yes' if flag else 'no' }}{{ 'only' if flag }}|" *
+                  "{{ x if missing is defined else 'fallback' }}"; flag=false) == "no|fallback"
+        @test act("{{ 'a' in (opts or []) }}{{ [1, 2, 3] | length }}{{ [] | length }}"; opts=nothing) ==
+            "False30"
+        @test act("{{ xs | join(', ') }}|{{ xs | join }}|{{ missing | default('dflt') }}|" *
+                  "{{ '' | default('empty', true) }}"; xs=["a", "b"]) == "a, b|ab|dflt|empty"
+    end
+
+    @testset "unpacking loops over items()" begin
+        d = JSON3.read("""{"b": 1, "a": 2}""")      # keeps key order, as a Python dict does
+        @test act("{% for k, v in d.items() %}{{ k }}={{ v }};{% endfor %}{{ d.keys() | list | tojson }}"; d) ==
+            "b=1;a=2;[\"b\", \"a\"]"
+        @test_throws ArgumentError act("{% for a, b, c in d.items() %}{% endfor %}"; d)
+    end
+
+    @testset "strftime_now" begin
+        @test act("{{ strftime_now('%Y') }}") == Libc.strftime("%Y", time())
+        # A variable of the same name shadows the built-in, which is how HF's
+        # templates are rendered with a fixed date.
+        @test act("{{ strftime_now('%Y-%m-%d') }}"; strftime_now=_ -> "2025-08-05") == "2025-08-05"
+    end
+
     @testset "tojson is Python's json.dumps" begin
         x = Dict("a" => Any[1.5, 1.0e-5, 1.0e16, 1.0e15, 0.0001, nothing, true, "é\"\n\t\x01"])
         @test act("{{ x | tojson }}"; x) ==
             "{\"a\": [1.5, 1e-05, 1e+16, 1000000000000000.0, 0.0001, null, true, \"é\\\"\\n\\t\\u0001\"]}"
+        nested = JSON3.read("""{"a": [1, {"b": null}], "c": {}}""")
+        @test act("{{ x | tojson(indent=2) }}"; x=nested) ==
+            "{\n  \"a\": [\n    1,\n    {\n      \"b\": null\n    }\n  ],\n  \"c\": {}\n}"
     end
 end
 
@@ -367,6 +406,8 @@ const _CHAT_TEMPLATE_FIXTURE = joinpath(@__DIR__, "fixtures", "chat_template_par
             @testset "$(tmpl.name): $(case.name)" for case in tmpl.cases
                 kwargs = Dict{Symbol,Any}(Symbol(k) => v for (k, v) in get(case, :kwargs, Dict()))
                 isnothing(get(case, :tools, nothing)) || (kwargs[:tools] = case.tools)
+                # gpt-oss's system message carries the date; the recorder pinned it.
+                haskey(case, :date) && (kwargs[:strftime_now] = _ -> String(case.date))
                 rendered = template(
                     case.messages; add_generation_prompt=case.add_generation_prompt, kwargs...
                 )
@@ -374,4 +415,29 @@ const _CHAT_TEMPLATE_FIXTURE = joinpath(@__DIR__, "fixtures", "chat_template_par
             end
         end
     end
+end
+
+@testset "load_chat_template finds the template where HF does" begin
+    mktempdir() do dir
+        config = joinpath(dir, "tokenizer_config.json")
+        write(config, JSON3.write(Dict("chat_template" => "field:{{ messages | length }}")))
+        @test load_chat_template(dir)([1, 2]) == "field:2"
+        @test load_chat_template(config)([1]) == "field:1"          # a file inside works too
+
+        # A chat_template.jinja next to it takes precedence.
+        write(joinpath(dir, "chat_template.jinja"), "file:{{ messages | length }}")
+        @test load_chat_template(dir)([1]) == "file:1"
+        rm(joinpath(dir, "chat_template.jinja"))
+
+        # Several named templates: `default` unless asked otherwise.
+        named = [Dict("name" => "default", "template" => "d"), Dict("name" => "tool_use", "template" => "t")]
+        write(config, JSON3.write(Dict("chat_template" => named)))
+        @test load_chat_template(dir)([]) == "d"
+        @test load_chat_template(dir; name="tool_use")([]) == "t"
+        @test_throws ArgumentError load_chat_template(dir; name="rag")
+
+        write(config, JSON3.write(Dict("model_max_length" => 8)))
+        @test_throws ArgumentError load_chat_template(dir)
+    end
+    @test_throws ArgumentError load_chat_template(mktempdir())
 end

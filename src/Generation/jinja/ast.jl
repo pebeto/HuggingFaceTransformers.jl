@@ -41,6 +41,19 @@ end
 struct FilterExpr <: TmplExpr
     target::TmplExpr
     name::String
+    args::Vector{TmplExpr}
+    kwargs::Vector{Pair{String,TmplExpr}}
+end
+FilterExpr(target::TmplExpr, name::AbstractString) =
+    FilterExpr(target, String(name), TmplExpr[], Pair{String,TmplExpr}[])
+# `a if cond else b`; a missing `else` yields undefined, as in Jinja.
+struct ConditionalExpr <: TmplExpr
+    cond::TmplExpr
+    then::TmplExpr
+    otherwise::Union{Nothing,TmplExpr}
+end
+struct ListExpr <: TmplExpr
+    items::Vector{TmplExpr}
 end
 struct CallExpr <: TmplExpr
     func::String
@@ -67,8 +80,14 @@ struct IfNode <: TmplNode
     else_body::Union{Nothing,Vector{TmplNode}}
 end
 struct ForNode <: TmplNode
-    var::String
+    vars::Vector{String}          # several names unpack each item: `for k, v in d.items()`
     iter::TmplExpr
+    body::Vector{TmplNode}
+end
+struct MacroNode <: TmplNode
+    name::String
+    params::Vector{String}
+    defaults::Vector{Union{Nothing,TmplExpr}}
     body::Vector{TmplNode}
 end
 struct SetNode <: TmplNode

@@ -27,9 +27,41 @@ end
 
 function parse_expression(s::AbstractString)
     p = ExprParser(_tokenize_expr(s), 1)
-    e = _parse_or(p)
+    e = _parse_conditional(p)
     _eat!(p, :eof)
     return e
+end
+
+# `then if cond else otherwise`, Jinja's inline if, binds loosest of all.
+function _parse_conditional(p)
+    e = _parse_or(p)
+    _check(p, :name, "if") || return e
+    _consume!(p)
+    cond = _parse_or(p)
+    otherwise = nothing
+    if _check(p, :name, "else")
+        _consume!(p)
+        otherwise = _parse_conditional(p)
+    end
+    return ConditionalExpr(cond, e, otherwise)
+end
+
+# A call's arguments: positional ones, then `name=value` keywords.
+function _parse_call_args!(p)
+    args = TmplExpr[]
+    kwargs = Pair{String,TmplExpr}[]
+    while !_check(p, :rparen)
+        if _check(p, :name) && _peek(p, 1).kind === :assign
+            name = _consume!(p).value
+            _consume!(p)
+            push!(kwargs, name => _parse_conditional(p))
+        else
+            push!(args, _parse_conditional(p))
+        end
+        _check(p, :rparen) || _eat!(p, :comma)
+    end
+    _eat!(p, :rparen)
+    return args, kwargs
 end
 
 function _parse_or(p)
@@ -137,7 +169,13 @@ function _parse_filter(p)
     while _check(p, :pipe)
         _consume!(p)
         name_tok = _eat!(p, :name)
-        e = FilterExpr(e, name_tok.value)
+        if _check(p, :lparen)
+            _consume!(p)
+            args, kwargs = _parse_call_args!(p)
+            e = FilterExpr(e, name_tok.value, args, kwargs)
+        else
+            e = FilterExpr(e, name_tok.value)
+        end
     end
     return e
 end
@@ -169,19 +207,7 @@ function _parse_postfix(p)
             end
         elseif _check(p, :lparen)
             _consume!(p)
-            args = TmplExpr[]
-            kwargs = Pair{String,TmplExpr}[]
-            while !_check(p, :rparen)
-                if _check(p, :name) && _peek(p, 1).kind === :assign
-                    name = _consume!(p).value
-                    _consume!(p)
-                    push!(kwargs, name => _parse_or(p))
-                else
-                    push!(args, _parse_or(p))
-                end
-                _check(p, :rparen) || _eat!(p, :comma)
-            end
-            _eat!(p, :rparen)
+            args, kwargs = _parse_call_args!(p)
             if e isa NameExpr
                 e = CallExpr(e.name, args, kwargs)
             elseif e isa AttrExpr && isempty(kwargs)
@@ -206,9 +232,18 @@ function _parse_atom(p)
         return NameExpr(t.value)
     elseif t.kind === :lparen
         _consume!(p)
-        e = _parse_or(p)
+        e = _parse_conditional(p)
         _eat!(p, :rparen)
         return e
+    elseif t.kind === :lbracket
+        _consume!(p)
+        items = TmplExpr[]
+        while !_check(p, :rbracket)
+            push!(items, _parse_conditional(p))
+            _check(p, :rbracket) || _eat!(p, :comma)
+        end
+        _eat!(p, :rbracket)
+        return ListExpr(items)
     end
     throw(ArgumentError("unexpected token in expression: $(t.kind) $(t.value)"))
 end

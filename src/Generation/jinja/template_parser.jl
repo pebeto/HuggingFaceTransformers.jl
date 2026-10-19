@@ -42,6 +42,8 @@ function _parse_one(p::BlockParser)
             return _parse_for(p)
         elseif word == "set"
             return _parse_set(p)
+        elseif word == "macro"
+            return _parse_macro(p)
         elseif word == "break" || word == "continue"
             p.pos += 1
             return LoopControlNode(Symbol(word))
@@ -79,9 +81,9 @@ end
 
 function _parse_for(p::BlockParser)
     _, content = p.blocks[p.pos]
-    m = match(r"^for\s+(\w+)\s+in\s+(.+)$"s, strip(content))
+    m = match(r"^for\s+(\w+(?:\s*,\s*\w+)*)\s+in\s+(.+)$"s, strip(content))
     isnothing(m) && throw(ArgumentError("invalid for statement: $(content)"))
-    var_cap = m.captures[1]::AbstractString
+    vars = String.(strip.(split(m.captures[1]::AbstractString, ',')))
     iter_cap = m.captures[2]::AbstractString
     p.pos += 1
     body = _parse_block(p, Symbol[:endfor])
@@ -90,7 +92,35 @@ function _parse_for(p::BlockParser)
     end_kind === :stmt && strip(end_content) == "endfor" ||
         throw(ArgumentError("expected endfor, got $(end_content)"))
     p.pos += 1
-    return ForNode(String(var_cap), parse_expression(iter_cap), body)
+    return ForNode(vars, parse_expression(iter_cap), body)
+end
+
+# `{% macro name(a, b=default) %}...{% endmacro %}`. The signature reuses the
+# expression tokenizer, so defaults can be any expression.
+function _parse_macro(p::BlockParser)
+    _, content = p.blocks[p.pos]
+    tokens = _tokenize_expr(replace(String(strip(content)), r"^macro\s+" => ""))
+    sig = ExprParser(tokens, 1)
+    name = _eat!(sig, :name).value
+    _eat!(sig, :lparen)
+    params, defaults = String[], Union{Nothing,TmplExpr}[]
+    while !_check(sig, :rparen)
+        push!(params, _eat!(sig, :name).value)
+        if _check(sig, :assign)
+            _consume!(sig)
+            push!(defaults, _parse_conditional(sig))
+        else
+            push!(defaults, nothing)
+        end
+        _check(sig, :rparen) || _eat!(sig, :comma)
+    end
+    _eat!(sig, :rparen)
+    _eat!(sig, :eof)
+    p.pos += 1
+    body = _parse_block(p, Symbol[:endmacro])
+    p.pos <= length(p.blocks) || throw(ArgumentError("unclosed macro `$(name)`"))
+    p.pos += 1
+    return MacroNode(name, params, defaults, body)
 end
 
 function _parse_set(p::BlockParser)

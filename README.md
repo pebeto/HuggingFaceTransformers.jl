@@ -14,7 +14,7 @@ with a leaner dependency tree and a focus on decoder LLMs.
 
 Every architecture below except LLaVA has a numeric-parity test that compares
 logits against a reference recorded from `transformers` in Python. The CPU
-suite is 1959 assertions and runs in about four minutes.
+suite is 1986 assertions and runs in about four minutes.
 
 ## Installation
 
@@ -165,14 +165,14 @@ reset!(caches)
 
 ### Chat templates
 
-`ChatTemplate` renders the `chat_template` field out of `tokenizer_config.json`
-through a small Jinja2 interpreter. It follows HF's Jinja environment, and the
-Qwen3 and Qwen2.5 templates render byte for byte as `apply_chat_template` does,
-tools and thinking blocks included:
+`ChatTemplate` renders a model's chat template through a small Jinja2
+interpreter. It follows HF's Jinja environment, and the Qwen3, Qwen2.5 and
+gpt-oss (harmony) templates render byte for byte as `apply_chat_template` does,
+tools and thinking blocks included. `load_chat_template(dir)` finds the template
+where HF does (`chat_template.jinja`, else `tokenizer_config.json`):
 
 ```julia
-tk_cfg = JSON3.read(read(joinpath(dir, "tokenizer_config.json"), String))
-template = ChatTemplate(String(tk_cfg.chat_template))
+template = load_chat_template(dir)
 
 prompt = template(
     [
@@ -378,8 +378,7 @@ Python scripts. `HFT_TEST_JET=1` adds a JET smoke pass, and
 - LLaVA expects a vision tower that returns patch features with the CLS token
   already dropped. SigLIP fits; a CLIP tower is not implemented, which is what
   llava-1.5 end-to-end parity is waiting on.
-- gpt-oss decodes its MXFP4 experts on the CPU only, and its harmony chat
-  template uses Jinja macros, which `ChatTemplate` does not support yet.
+- gpt-oss decodes its MXFP4 experts on the CPU only.
 - Mixtral runs each expert once over its assigned tokens without fusing the
   expert matmuls.
 

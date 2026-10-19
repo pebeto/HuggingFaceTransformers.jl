@@ -128,9 +128,7 @@ runs in about 20 GB; see [Memory notes](@ref).
 - LLaVA expects a vision tower that returns patch features with the CLS token
   already dropped. SigLIP fits; a CLIP tower is not implemented, which is what
   llava-1.5 end-to-end parity is waiting on.
-- gpt-oss decodes its MXFP4 experts on the CPU only, and its harmony chat
-  template uses Jinja macros, which [`Generation.ChatTemplate`](@ref) does not
-  support yet.
+- gpt-oss decodes its MXFP4 experts on the CPU only.
 - Mixtral runs each expert once over its assigned tokens without fusing the
   expert matmuls.
 
