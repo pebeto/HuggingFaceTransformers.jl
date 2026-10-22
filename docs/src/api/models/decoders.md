@@ -34,6 +34,7 @@ Phi3ForCausalLM
 QwenConfig
 QwenForCausalLM
 decode_mxfp4!
+mxfp4_mul!
 gemma_state_dict_map
 gpt2_state_dict_map
 gpt_oss_state_dict_map

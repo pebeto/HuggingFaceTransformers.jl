@@ -124,12 +124,17 @@ over a memory map of the checkpoint, and each parameter is filled straight from
 the file.
 
 gpt-oss goes further and never copies its experts. They stay in MXFP4, as the
-file stores them, behind [`Models.MXFP4Weights`](@ref), and each expert is
-decoded into a reusable `Float32` buffer only when a token is routed to it.
-gpt-oss-20b then needs about 13 GB for its experts, held as page cache the
-kernel can evict and reread, plus about 7 GB for its other weights. Decoding
-every routed expert on every step is what bounds its speed, about 1.5 s per
-token on a 24-thread CPU; start Julia with `-t auto` so the decode is threaded.
+file stores them, behind [`Models.MXFP4Weights`](@ref). gpt-oss-20b then needs
+about 13 GB for its experts, held as page cache the kernel can evict and reread,
+plus about 7 GB for its other weights.
+
+An expert that gets a few dozen tokens or fewer, which during generation is every
+expert, multiplies straight from its packed bytes with
+[`Models.mxfp4_mul!`](@ref): it reads 4.25 bits per weight instead of decoding
+32-bit weights into a buffer and reading them back. Only an expert with more
+tokens than that, in a long prompt, is decoded for BLAS. On a 24-thread CPU that
+puts gpt-oss-20b at about 0.3 s per generated token and a 79-token prompt at
+3.5 s. Start Julia with `-t auto`: the kernels are threaded.
 
 A few allocations are sized for correctness rather than minimum footprint:
 

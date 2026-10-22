@@ -41,6 +41,12 @@ Base.@kwdef struct GptOssConfig
 end
 
 const _FP4_E2M1 = Float32[0, 0.5, 1, 1.5, 2, 3, 4, 6, -0.0, -0.5, -1, -1.5, -2, -3, -4, -6]
+# Both values a byte packs, low nibble first: one lookup per byte.
+const _FP4_PAIRS = [(_FP4_E2M1[(b & 0x0f) + 1], _FP4_E2M1[(b >> 4) + 1]) for b in 0x00:0xff]
+# The power of two an E8M0 scale byte stands for. Multiplying by it is exactly
+# `ldexp` for every byte but 0xFF, which OCP reserves for NaN and `ldexp` would
+# take as 2^128.
+const _E8M0 = [k == 255 ? NaN32 : ldexp(1.0f0, k - 127) for k in 0:255]
 
 """
     MXFP4Weights(blocks, scales)
@@ -52,9 +58,10 @@ scale, stored as an exponent biased by 127.
 
 `blocks` is `(16, n_blocks, n_out, n_experts)` and `scales` is
 `(n_blocks, n_out, n_experts)`: the file's byte order, which a lazy
-[`load_weights`](@ref) view exposes without copying. An expert is decoded into
-`Float32` only when it runs, so gpt-oss-20b's experts take about 13 GB instead of
-the 50 GB they would as `Float32`.
+[`load_weights`](@ref) view exposes without copying. An expert is multiplied
+straight from these bytes ([`mxfp4_mul!`](@ref)), or for many tokens decoded into
+`Float32` while it runs ([`decode_mxfp4!`](@ref)), so gpt-oss-20b's experts take
+about 13 GB instead of the 50 GB they would as `Float32`.
 """
 struct MXFP4Weights{B<:AbstractArray{UInt8,4},S<:AbstractArray{UInt8,3}}
     blocks::B
@@ -82,15 +89,17 @@ weight for output `r`. Each output row decodes into one contiguous column, and
 function decode_mxfp4!(buffer::AbstractMatrix{Float32}, w::MXFP4Weights, expert::Integer)
     size(buffer) == (_n_in(w), _n_out(w)) ||
         throw(DimensionMismatch("buffer $(size(buffer)), expected $((_n_in(w), _n_out(w)))"))
-    blocks, scales, e = w.blocks, w.scales, Int(expert)
-    Threads.@threads for r in 1:_n_out(w)
-        @inbounds for g in axes(blocks, 2)
-            exponent = Int(scales[g, r, e]) - 127
-            offset = 32 * (g - 1)
-            for b in 1:16
-                byte = blocks[b, g, r, e]
-                buffer[offset + 2b - 1, r] = ldexp(_FP4_E2M1[(byte & 0x0f) + 1], exponent)
-                buffer[offset + 2b, r] = ldexp(_FP4_E2M1[(byte >> 4) + 1], exponent)
+    n_blocks, n_out = size(w.blocks, 2), _n_out(w)
+    blocks, scales, e = vec(w.blocks), vec(w.scales), Int(expert)
+    Threads.@threads for r in 1:n_out
+        row = (Int(e) - 1) * n_out + (r - 1)
+        @inbounds for g in 1:n_blocks
+            scale = _E8M0[scales[row * n_blocks + g] + 1]
+            offset, col = 16 * (row * n_blocks + g - 1), 32 * (g - 1)
+            @simd for b in 1:16
+                lo, hi = _FP4_PAIRS[blocks[offset + b] + 1]
+                buffer[col + 2b - 1, r] = lo * scale
+                buffer[col + 2b, r] = hi * scale
             end
         end
     end
@@ -128,8 +137,81 @@ end
 _expert_buffer(::AbstractArray{<:Real,3}) = nothing
 _expert_buffer(w::MXFP4Weights) = Matrix{Float32}(undef, _n_in(w), _n_out(w))
 
+# Up to this many tokens an expert multiplies straight from its packed bytes;
+# beyond it, decoding the whole matrix once and handing it to BLAS is faster.
+const _MXFP4_FUSED_MAX_TOKENS = 24
+
+"""
+    mxfp4_mul!(y, w::MXFP4Weights, expert, x) -> y
+
+`y = W * x` for one expert without decoding `W`: each packed byte's two values are
+looked up together, summed within their 32-wide block, and the block's
+power-of-two scale applied once. Tokens go four at a time, so a packed row is
+read once per four tokens, and the work is threaded over output rows. Up to a few
+dozen tokens this beats decoding the expert for BLAS, which writes and rereads
+32 bits per weight where this reads 4.25.
+"""
+function mxfp4_mul!(y::AbstractMatrix{Float32}, w::MXFP4Weights, expert::Integer, x::AbstractMatrix{Float32})
+    n_blocks, n_out, n_tok = size(w.blocks, 2), _n_out(w), size(x, 2)
+    size(x, 1) == _n_in(w) || throw(DimensionMismatch("x has $(size(x, 1)) rows, expected $(_n_in(w))"))
+    size(y) == (n_out, n_tok) ||
+        throw(DimensionMismatch("y is $(size(y)), expected $((n_out, n_tok))"))
+    # Flat views in file order: row `r` of expert `e` is one contiguous run.
+    blocks, scales, e = vec(w.blocks), vec(w.scales), Int(expert)
+    Threads.@threads for r in 1:n_out
+        row = (e - 1) * n_out + (r - 1)
+        if n_tok == 1
+            # Decoding: one token, one running sum.
+            acc = 0.0f0
+            @inbounds for g in 1:n_blocks
+                block = 0.0f0
+                offset, col = 16 * (row * n_blocks + g - 1), 32 * (g - 1)
+                @simd for b in 1:16
+                    lo, hi = _FP4_PAIRS[blocks[offset + b] + 1]
+                    block = muladd(lo, x[col + 2b - 1, 1], muladd(hi, x[col + 2b, 1], block))
+                end
+                acc = muladd(block, _E8M0[scales[row * n_blocks + g] + 1], acc)
+            end
+            @inbounds y[r, 1] = acc
+            continue
+        end
+        for t in 1:4:n_tok
+            # A short last group repeats its final token; only real ones are stored.
+            t2, t3, t4 = min(t + 1, n_tok), min(t + 2, n_tok), min(t + 3, n_tok)
+            a1 = a2 = a3 = a4 = 0.0f0
+            @inbounds for g in 1:n_blocks
+                s1 = s2 = s3 = s4 = 0.0f0
+                offset, col = 16 * (row * n_blocks + g - 1), 32 * (g - 1)
+                @simd for b in 1:16
+                    lo, hi = _FP4_PAIRS[blocks[offset + b] + 1]
+                    i, j = col + 2b - 1, col + 2b
+                    s1 = muladd(lo, x[i, t], muladd(hi, x[j, t], s1))
+                    s2 = muladd(lo, x[i, t2], muladd(hi, x[j, t2], s2))
+                    s3 = muladd(lo, x[i, t3], muladd(hi, x[j, t3], s3))
+                    s4 = muladd(lo, x[i, t4], muladd(hi, x[j, t4], s4))
+                end
+                scale = _E8M0[scales[row * n_blocks + g] + 1]
+                a1, a2 = muladd(s1, scale, a1), muladd(s2, scale, a2)
+                a3, a4 = muladd(s3, scale, a3), muladd(s4, scale, a4)
+            end
+            @inbounds begin
+                y[r, t] = a1
+                t + 1 <= n_tok && (y[r, t2] = a2)
+                t + 2 <= n_tok && (y[r, t3] = a3)
+                t + 3 <= n_tok && (y[r, t4] = a4)
+            end
+        end
+    end
+    return y
+end
+
 _apply_expert(w::AbstractArray{<:Real,3}, e::Int, x, _) = view(w, :, :, e) * x
-_apply_expert(w::MXFP4Weights, e::Int, x, buffer) = transpose(decode_mxfp4!(buffer, w, e)) * x
+function _apply_expert(w::MXFP4Weights, e::Int, x, buffer)
+    if size(x, 2) <= _MXFP4_FUSED_MAX_TOKENS || isnothing(buffer)
+        return mxfp4_mul!(Matrix{Float32}(undef, _n_out(w), size(x, 2)), w, e, Matrix{Float32}(x))
+    end
+    return transpose(decode_mxfp4!(buffer, w, e)) * x
+end
 
 # HF's `_apply_gate`: gate and up interleave, the gate is capped above and the up
 # projection clamped both ways, then SiLU with a sharpened sigmoid times (up + 1).
@@ -178,8 +260,11 @@ function (m::GptOssMLP)(x::AbstractArray)
     end
 
     ex = m.experts
-    gate_up_buffer = _expert_buffer(ex.gate_up)
-    down_buffer = _expert_buffer(ex.down)
+    # Decode buffers are only worth their ~100 MB when some expert has enough
+    # tokens to be faster through BLAS, as in a prefill.
+    busy = any(tokens -> length(tokens) > _MXFP4_FUSED_MAX_TOKENS, assigned)
+    gate_up_buffer = busy ? _expert_buffer(ex.gate_up) : nothing
+    down_buffer = busy ? _expert_buffer(ex.down) : nothing
     out = zeros(Float32, hidden, n_tokens)
     for e in 1:n_experts
         tokens = assigned[e]

@@ -64,7 +64,7 @@ export LoRALinear, LoraConfig, lora_wrap, merge_lora, lora_scaling
 export save_lora, load_lora, apply_lora!
 export MixtralConfig, MixtralForCausalLM, mixtral_state_dict_map
 export GptOssConfig, GptOssForCausalLM, GptOssMLP, GptOssExperts, MXFP4Weights
-export gpt_oss_state_dict_map, decode_mxfp4!
+export gpt_oss_state_dict_map, decode_mxfp4!, mxfp4_mul!
 export convert_eltype, fp16, bf16, fp32
 export QuantizedInt8Matrix, quantize_int8
 export read_config, config_from_json, load_pretrained, AUTO_ARCHITECTURES

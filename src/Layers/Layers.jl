@@ -1026,6 +1026,18 @@ function repeat_kv(x::AbstractArray, group_size::Integer)
     return repeat(x; inner=(1, group_size, 1, 1))
 end
 
+# Repeat each key/value head `group` times along a new axis next to the head axis
+# of an `(a, b, kv_heads, batch)` array, giving `(a, b, heads * batch)` with
+# consecutive query heads sharing a key/value head (HF's `repeat_kv` order).
+# Broadcasting against ones does it in one vectorized pass, differentiably and on
+# any device; Base's `repeat` walks element by element. Multiplying by one is exact.
+function _repeat_heads(x::AbstractArray{<:Any,4}, group::Integer)
+    a, b, kv_heads, batch = size(x)
+    group == 1 && return reshape(x, a, b, kv_heads * batch)
+    ones_ = @ignore_derivatives fill!(similar(x, 1, 1, Int(group), 1, 1), one(eltype(x)))
+    return reshape(reshape(x, a, b, 1, kv_heads, batch) .* ones_, a, b, group * kv_heads * batch)
+end
+
 function (m::GQA)(
     x::AbstractArray; cache=nothing, step=nothing, position_ids=nothing,
     padding_mask=nothing,
@@ -1086,20 +1098,17 @@ function (m::GQA)(
 
     seq_len_kv = size(k_full, 3)
 
-    # GQA repetition
+    # Into the layouts `sdpa` takes: queries (seq, head_dim, heads*batch), keys
+    # already transposed to (head_dim, seq, heads*batch), values (seq, head_dim,
+    # heads*batch). Keys and values are permuted while they still have one head
+    # per group and repeated afterwards, which moves `group_size` times less data
+    # than repeating first; with a long cache this is most of a decode step.
     group_size = m.num_heads_q ÷ m.num_heads_k
-    k_rep = repeat_kv(k_full, group_size)
-    v_rep = repeat_kv(v_full, group_size)
-
-    # Reshape into the (seq, head_dim, heads*batch) layout `sdpa` expects.
-    q_perm = permutedims(q_rotated, (3, 1, 2, 4))
-    k_perm = permutedims(k_rep, (3, 1, 2, 4))
-    v_perm = permutedims(v_rep, (3, 1, 2, 4))
-
-    q_flat = reshape(q_perm, seq_len, m.head_dim, m.num_heads_q * batch_size)
-    k_flat = reshape(k_perm, seq_len_kv, m.head_dim, m.num_heads_q * batch_size)
-    k_flat_t = permutedims(k_flat, (2, 1, 3))
-    v_flat = reshape(v_perm, seq_len_kv, m.head_dim, m.num_heads_q * batch_size)
+    q_flat = reshape(
+        permutedims(q_rotated, (3, 1, 2, 4)), seq_len, m.head_dim, m.num_heads_q * batch_size
+    )
+    k_flat_t = _repeat_heads(permutedims(k_full, (1, 3, 2, 4)), group_size)
+    v_flat = _repeat_heads(permutedims(v_full, (3, 1, 2, 4)), group_size)
 
     scale = isnothing(m.query_scale) ? sqrt(Float32(m.head_dim)) : m.query_scale
 

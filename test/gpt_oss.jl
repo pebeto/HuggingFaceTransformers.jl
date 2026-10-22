@@ -4,10 +4,11 @@ using JSON3
 using HuggingFaceTransformers.Models
 using HuggingFaceTransformers.Models:
     GptOssConfig, GptOssForCausalLM, GptOssMLP, GptOssExperts, MXFP4Weights, decode_mxfp4!,
+    mxfp4_mul!,
     gpt_oss_state_dict_map, load_pretrained, build_caches, _resolve, _save_safetensors,
     _clamped_swiglu
 using HuggingFaceTransformers.Layers:
-    Linear, RoPE, YarnRopeScaling, sdpa, flash_sdpa, _softmax_with_sinks
+    Linear, RoPE, YarnRopeScaling, sdpa, flash_sdpa, _softmax_with_sinks, repeat_kv, _repeat_heads
 
 const _FP4 = Float32[0, 0.5, 1, 1.5, 2, 3, 4, 6, -0.0, -0.5, -1, -1.5, -2, -3, -4, -6]
 
@@ -99,6 +100,18 @@ end
         @test_throws DimensionMismatch decode_mxfp4!(Matrix{Float32}(undef, 6, 64), w, 1)
         @test_throws DimensionMismatch MXFP4Weights(zeros(UInt8, 8, 1, 1, 1), zeros(UInt8, 1, 1, 1))
     end
+
+    @testset "multiplying from the packed bytes matches decoding first" begin
+        w, dense = _random_mxfp4(Xoshiro(5), 7, 96, 2)
+        # One token, whole groups of four, and groups cut short.
+        @testset "$(n) tokens" for n in (1, 2, 3, 4, 5, 9)
+            x = randn(Xoshiro(n), Float32, 96, n)
+            y = mxfp4_mul!(Matrix{Float32}(undef, 7, n), w, 2, x)
+            @test y ≈ dense[:, :, 2] * x rtol = 1.0e-5
+        end
+        @test_throws DimensionMismatch mxfp4_mul!(Matrix{Float32}(undef, 7, 1), w, 1, randn(Float32, 64, 1))
+        @test_throws DimensionMismatch mxfp4_mul!(Matrix{Float32}(undef, 6, 1), w, 1, randn(Float32, 96, 1))
+    end
 end
 
 @testset verbose = true "sink attention" begin
@@ -120,6 +133,14 @@ end
     # A sink of -Inf takes no mass, which is plain attention.
     @test sdpa(q, k_t, v; scale=sqrt(8.0f0), sinks=fill(-Inf32, 6)) ≈ sdpa(q, k_t, v; scale=sqrt(8.0f0))
     @test !(with_sinks ≈ sdpa(q, k_t, v; scale=sqrt(8.0f0)))
+end
+
+@testset "repeating heads after permuting keeps HF's head order" begin
+    # Query head h uses key/value head (h - 1) ÷ group + 1, as repeat_kv lays out.
+    k = randn(Xoshiro(7), Float32, 4, 3, 5, 2)          # (head_dim, kv_heads, seq, batch)
+    expected = reshape(permutedims(repeat_kv(k, 2), (1, 3, 2, 4)), 4, 5, 12)
+    @test _repeat_heads(permutedims(k, (1, 3, 2, 4)), 2) == expected
+    @test _repeat_heads(permutedims(k, (1, 3, 2, 4)), 1) == reshape(permutedims(k, (1, 3, 2, 4)), 4, 5, 6)
 end
 
 @testset "YaRN matches HF's frequencies" begin
@@ -187,6 +208,11 @@ end
 
         # Loading packed experts into an existing dense model decodes them.
         @test load_state_dict!(GptOssForCausalLM(cfg), _checkpoint(lm, packed; mxfp4=true))(ids) ≈ logits
+
+        # A long prompt gives some experts more tokens than the packed kernel takes,
+        # so those decode their weights for BLAS instead. Same result either way.
+        long_ids = reshape(rand(Xoshiro(6), 0:63, 60), :, 1)
+        @test packed_lm(long_ids) ≈ lm(long_ids)
     end
 
     @testset "load_pretrained keeps a checkpoint's MXFP4 experts packed" begin

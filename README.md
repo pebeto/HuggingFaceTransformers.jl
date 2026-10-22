@@ -14,7 +14,7 @@ with a leaner dependency tree and a focus on decoder LLMs.
 
 Every architecture below except LLaVA has a numeric-parity test that compares
 logits against a reference recorded from `transformers` in Python. The CPU
-suite is 1986 assertions and runs in about four minutes.
+suite is 1997 assertions and runs in about four minutes.
 
 ## Installation
 
@@ -107,7 +107,7 @@ these types.
 gpt-oss keeps its experts in MXFP4, exactly as the checkpoint stores them and
 memory-mapped, and decodes each expert only when a token is routed to it. That
 puts gpt-oss-20b at about 13 GB of experts plus 7 GB for everything else, so it
-runs in about 20 GB (about 1.5 s per token on a 24-thread CPU). HF itself
+runs in about 20 GB (about 0.3 s per token on a 24-thread CPU). HF itself
 needs ~42 GB to run it on a CPU, which is why its parity reference is the
 checkpoint's first two layers, run in float32: logits agree to 1e-5.
 
