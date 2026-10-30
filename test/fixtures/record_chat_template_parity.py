@@ -5,7 +5,7 @@ parity test.
 Usage:
     python3 test/fixtures/record_chat_template_parity.py [NAME ...]
 
-With names (qwen3, qwen2.5, gpt-oss), only those templates are re-recorded and
+With names (qwen3, qwen2.5, qwen3.5, gpt-oss), only those templates are re-recorded and
 the rest of the fixture is kept.
 
 Requirements:
@@ -205,9 +205,26 @@ HARMONY_CASES = [
     }),
 ]
 
+# Qwen3.5's template also renders image and video placeholders from structured
+# content, counting them with `~`.
+QWEN3_5_CASES = QWEN_CASES + [
+    ("image_content", {
+        "messages": [
+            {"role": "user", "content": [
+                {"type": "image"},
+                {"type": "text", "text": "What is in this picture?"},
+                {"type": "image"},
+                {"type": "text", "text": "And this one?"},
+            ]},
+        ],
+        "add_generation_prompt": True,
+    }),
+]
+
 TEMPLATES = [
     ("qwen3", "Qwen/Qwen3-0.6B", QWEN_CASES),
     ("qwen2.5", "Qwen/Qwen2.5-0.5B-Instruct", QWEN_CASES),
+    ("qwen3.5", "Qwen/Qwen3.5-0.8B", QWEN3_5_CASES),
     ("gpt-oss", "openai/gpt-oss-20b", HARMONY_CASES),
 ]
 
@@ -221,13 +238,19 @@ def record(name, repo, case_list):
         if name == "gpt-oss":
             kwargs["strftime_now"] = lambda fmt: DATE
             pinned = {"date": DATE}
-        rendered = tokenizer.apply_chat_template(
-            case["messages"],
-            tools=case.get("tools"),
-            add_generation_prompt=case["add_generation_prompt"],
-            tokenize=False,
-            **kwargs,
-        )
+        try:
+            rendered = tokenizer.apply_chat_template(
+                case["messages"],
+                tools=case.get("tools"),
+                add_generation_prompt=case["add_generation_prompt"],
+                tokenize=False,
+                **kwargs,
+            )
+        except Exception as err:
+            # Some templates reject some inputs (Qwen3.5 wants tool-call arguments
+            # as a mapping); the Julia side must refuse them too.
+            cases.append({"name": case_name, **case, **pinned, "raises": type(err).__name__})
+            continue
         cases.append({"name": case_name, **case, **pinned, "expected": rendered})
     print(f"{name}: {len(cases)} cases from {repo}")
     return {"name": name, "repo_id": repo, "template": tokenizer.chat_template, "cases": cases}

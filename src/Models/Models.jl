@@ -26,6 +26,8 @@ using ..Layers:
     GeluMLP,
     MoEMLP,
     GQA,
+    GatedDeltaNet,
+    DeltaNetCache,
     sdpa,
     QuantizedInt8Matrix,
     KVCache,
@@ -37,6 +39,7 @@ export TokenEmbedding, DecoderLayer, DecoderModel, build_caches, load_state_dict
 export LlamaConfig, LlamaRopeScaling, LlamaForCausalLM, llama_state_dict_map
 export MistralConfig, MistralForCausalLM, mistral_state_dict_map
 export QwenConfig, QwenForCausalLM, qwen_state_dict_map
+export Qwen3_5Config, Qwen3_5ForCausalLM, qwen3_5_state_dict_map
 export GemmaConfig, GemmaDecoderLayer, GemmaModel, GemmaForCausalLM, gemma_state_dict_map
 export Phi3Config, Phi3ForCausalLM, phi3_state_dict_map
 export GPT2Config, GPT2Model, GPT2ForCausalLM, gpt2_state_dict_map
@@ -75,6 +78,7 @@ include("decoder.jl")
 include("llama.jl")
 include("mistral.jl")
 include("qwen.jl")
+include("qwen3_5.jl")
 include("gemma.jl")
 include("phi3.jl")
 include("gpt2.jl")

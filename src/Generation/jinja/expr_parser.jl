@@ -139,10 +139,20 @@ function _parse_compare(p)
 end
 
 function _parse_add(p)
-    e = _parse_mul(p)
+    e = _parse_concat(p)
     while _check(p, :op, "+") || _check(p, :op, "-")
         op = Symbol(_consume!(p).value)
-        e = BinOpExpr(op, e, _parse_mul(p))
+        e = BinOpExpr(op, e, _parse_concat(p))
+    end
+    return e
+end
+
+# `~` joins operands as strings. Jinja ranks it between `+`/`-` and `*`/`/`.
+function _parse_concat(p)
+    e = _parse_mul(p)
+    while _check(p, :op, "~")
+        _consume!(p)
+        e = BinOpExpr(:~, e, _parse_mul(p))
     end
     return e
 end

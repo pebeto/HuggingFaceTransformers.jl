@@ -8,6 +8,10 @@ using Flux
 using NNlib
 using Statistics
 
+# A copy of `g` with some fields replaced, so these tests don't have to spell out
+# every field (and break each time GQA gains one).
+_rebuild(g::GQA; kw...) = GQA((haskey(kw, f) ? kw[f] : getfield(g, f) for f in fieldnames(GQA))...)
+
 @testset "RMSNorm" begin
     dim = 8
     rms = RMSNorm(dim)
@@ -361,23 +365,7 @@ end
         # an identical GQA without softcap — the outputs must differ.
         Random.seed!(0xCAFE)
         gqa_raw = GQA(hidden_dim, num_heads_q, num_heads_k, head_dim, rope)
-        gqa_cap = GQA(
-            gqa_raw.wq,
-            gqa_raw.wk,
-            gqa_raw.wv,
-            gqa_raw.wo,
-            gqa_raw.rope,
-            gqa_raw.num_heads_q,
-            gqa_raw.num_heads_k,
-            gqa_raw.head_dim,
-            nothing,           # window_size
-            5.0f0,             # softcap
-            nothing,           # query_scale
-            true,              # causal
-            nothing,           # q_norm
-            nothing,           # k_norm
-            nothing,           # sinks
-        )
+        gqa_cap = _rebuild(gqa_raw; softcap=5.0f0)
         x = randn(Float32, hidden_dim, 4, 1) .* 10   # large inputs → big scores
         out_raw = gqa_raw(x)
         out_cap = gqa_cap(x)
@@ -389,44 +377,12 @@ end
         # Use query_scale = sqrt(head_dim) explicitly — should match the default.
         Random.seed!(0xFEED)
         gqa_default = GQA(hidden_dim, num_heads_q, num_heads_k, head_dim, rope)
-        gqa_match = GQA(
-            gqa_default.wq,
-            gqa_default.wk,
-            gqa_default.wv,
-            gqa_default.wo,
-            gqa_default.rope,
-            gqa_default.num_heads_q,
-            gqa_default.num_heads_k,
-            gqa_default.head_dim,
-            nothing,
-            nothing,
-            Float32(sqrt(head_dim)),
-            true,              # causal
-            nothing,           # q_norm
-            nothing,           # k_norm
-            nothing,           # sinks
-        )
+        gqa_match = _rebuild(gqa_default; query_scale=Float32(sqrt(head_dim)))
         x = randn(Float32, hidden_dim, 4, 1)
         @test gqa_default(x) ≈ gqa_match(x)
 
         # And a different query_scale must change the result.
-        gqa_other = GQA(
-            gqa_default.wq,
-            gqa_default.wk,
-            gqa_default.wv,
-            gqa_default.wo,
-            gqa_default.rope,
-            gqa_default.num_heads_q,
-            gqa_default.num_heads_k,
-            gqa_default.head_dim,
-            nothing,
-            nothing,
-            Float32(2.0 * sqrt(head_dim)),
-            true,              # causal
-            nothing,           # q_norm
-            nothing,           # k_norm
-            nothing,           # sinks
-        )
+        gqa_other = _rebuild(gqa_default; query_scale=Float32(2.0 * sqrt(head_dim)))
         @test !(gqa_default(x) ≈ gqa_other(x))
     end
 end
@@ -448,23 +404,7 @@ end
         # than the sequence, one unwindowed. They must agree token-for-token.
         Random.seed!(0xC0FFEE)
         gqa_full = GQA(hidden_dim, num_heads_q, num_heads_k, head_dim, rope)
-        gqa_wide = GQA(
-            gqa_full.wq,
-            gqa_full.wk,
-            gqa_full.wv,
-            gqa_full.wo,
-            gqa_full.rope,
-            gqa_full.num_heads_q,
-            gqa_full.num_heads_k,
-            gqa_full.head_dim,
-            10,                          # window > seq_len
-            nothing,                     # softcap
-            nothing,                     # query_scale
-            true,                        # causal
-            nothing,                     # q_norm
-            nothing,                     # k_norm
-            nothing,                     # sinks
-        )
+        gqa_wide = _rebuild(gqa_full; window_size=10)
 
         x = rand(Float32, hidden_dim, 5, 1)
         @test gqa_full(x) ≈ gqa_wide(x)
@@ -473,23 +413,7 @@ end
     @testset "window restricts past context (output diverges)" begin
         Random.seed!(0xBADF00D)
         gqa_full = GQA(hidden_dim, num_heads_q, num_heads_k, head_dim, rope)
-        gqa_win = GQA(
-            gqa_full.wq,
-            gqa_full.wk,
-            gqa_full.wv,
-            gqa_full.wo,
-            gqa_full.rope,
-            gqa_full.num_heads_q,
-            gqa_full.num_heads_k,
-            gqa_full.head_dim,
-            2,                           # window of 2 (self + 1 past)
-            nothing,                     # softcap
-            nothing,                     # query_scale
-            true,                        # causal
-            nothing,                     # q_norm
-            nothing,                     # k_norm
-            nothing,                     # sinks
-        )
+        gqa_win = _rebuild(gqa_full; window_size=2)
 
         x = rand(Float32, hidden_dim, 5, 1)
         out_full = gqa_full(x)

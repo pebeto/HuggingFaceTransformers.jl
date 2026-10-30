@@ -39,6 +39,10 @@ using HuggingFaceTransformers
         include("qwen.jl")
     end
 
+    @testset verbose = true "Qwen3.5" begin
+        include("qwen3_5.jl")
+    end
+
     @testset verbose = true "Gemma" begin
         include("gemma.jl")
     end
@@ -226,6 +230,12 @@ using HuggingFaceTransformers
     if !isempty(get(ENV, "HFT_TEST_PARITY_MIXTRAL", ""))
         @testset verbose = true "Mixtral parity" begin
             include("parity_mixtral.jl")
+        end
+    end
+
+    if !isempty(get(ENV, "HFT_TEST_PARITY_QWEN3_5", ""))
+        @testset verbose = true "Qwen3.5 parity" begin
+            include("parity_qwen3_5.jl")
         end
     end
 

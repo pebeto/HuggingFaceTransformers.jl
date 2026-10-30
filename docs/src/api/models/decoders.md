@@ -33,6 +33,8 @@ Phi3Config
 Phi3ForCausalLM
 QwenConfig
 QwenForCausalLM
+Qwen3_5Config
+Qwen3_5ForCausalLM
 decode_mxfp4!
 mxfp4_mul!
 gemma_state_dict_map
@@ -44,4 +46,5 @@ mixtral_state_dict_map
 neox_state_dict_map
 phi3_state_dict_map
 qwen_state_dict_map
+qwen3_5_state_dict_map
 ```

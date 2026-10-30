@@ -8,7 +8,7 @@ using JSON3
         @test apply_chat_template("{{ 'hi' }}", []) == "hi"
         @test apply_chat_template("{{ 42 }}", []) == "42"
         @test apply_chat_template("{{ true }}", []) == "True"
-        @test apply_chat_template("{{ none }}", []) == ""
+        @test apply_chat_template("{{ none }}", []) == "None"      # as Jinja prints it
     end
 
     @testset "variables & kwargs context" begin
@@ -197,6 +197,15 @@ end
         @test act("{% for k, v in d.items() %}{{ k }}={{ v }};{% endfor %}{{ d.keys() | list | tojson }}"; d) ==
             "b=1;a=2;[\"b\", \"a\"]"
         @test_throws ArgumentError act("{% for a, b, c in d.items() %}{% endfor %}"; d)
+    end
+
+    @testset "~ concatenation, safe, items, and printing none" begin
+        # Expected strings come from Jinja2. `~` binds tighter than `+` and looser
+        # than `*`; `none` prints as Python's None, an undefined value as nothing.
+        @test act("{{ none }}|{{ x }}|{{ 'a' ~ none }}|{{ 'a' ~ 1 ~ undefined_name }}|{{ 2 * 3 ~ 4 }}";
+            x=nothing) == "None|None|aNone|a1|64"
+        @test act("{% for k, v in d | items %}{{ k }}={{ v }}{% endfor %}"; d=Dict("a" => 1)) == "a=1"
+        @test act("{{ '<b>' | safe }}") == "<b>"
     end
 
     @testset "strftime_now" begin
@@ -408,10 +417,14 @@ const _CHAT_TEMPLATE_FIXTURE = joinpath(@__DIR__, "fixtures", "chat_template_par
                 isnothing(get(case, :tools, nothing)) || (kwargs[:tools] = case.tools)
                 # gpt-oss's system message carries the date; the recorder pinned it.
                 haskey(case, :date) && (kwargs[:strftime_now] = _ -> String(case.date))
-                rendered = template(
+                render() = template(
                     case.messages; add_generation_prompt=case.add_generation_prompt, kwargs...
                 )
-                @test rendered == case.expected
+                if haskey(case, :raises)
+                    @test_throws ArgumentError render()      # HF raised too
+                else
+                    @test render() == case.expected
+                end
             end
         end
     end

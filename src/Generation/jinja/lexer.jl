@@ -102,7 +102,7 @@ function _tokenize_expr(s::AbstractString)
                 push!(tokens, ExprToken(:op, string(c)))
                 i = nxt
             end
-        elseif c in ('+', '-', '*', '/', '%')
+        elseif c in ('+', '-', '*', '/', '%', '~')
             push!(tokens, ExprToken(:op, string(c)))
             i = nextind(s, i)
         elseif c == '('

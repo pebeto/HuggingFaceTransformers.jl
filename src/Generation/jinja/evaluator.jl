@@ -64,7 +64,7 @@ _truthy(d::AbstractDict) = !isempty(d)
 _truthy(_) = true
 
 _stringify(::Undefined) = ""
-_stringify(::Nothing) = ""
+_stringify(::Nothing) = "None"           # Python's str(None); only undefined renders empty
 _stringify(s::AbstractString) = s
 _stringify(b::Bool) = b ? "True" : "False"
 _stringify(x::AbstractFloat) = _py_float(x)
@@ -223,6 +223,8 @@ function _binop(op::Symbol, l, r)
             return string(_stringify(l), _stringify(r))
         end
         return l + r
+    elseif op === :~
+        return string(_stringify(l), _stringify(r))
     elseif op === :-
         return l - r
     elseif op === :*
@@ -282,6 +284,10 @@ function _apply_filter(name::AbstractString, value, args=Any[], kwargs=Dict{Stri
         return last(value)
     elseif name == "list"
         return collect(value)
+    elseif name == "safe"
+        return value               # marks text as HTML-safe; nothing to escape here
+    elseif name == "items"
+        return _call_method(value, "items", Any[])
     else
         throw(ArgumentError("unsupported filter: $(name)"))
     end

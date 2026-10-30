@@ -14,7 +14,9 @@ Layers
 
 ```@docs
 Checkpointed
+DeltaNetCache
 GQA
+GatedDeltaNet
 GeluGatedMLP
 GeluMLP
 GemmaRMSNorm

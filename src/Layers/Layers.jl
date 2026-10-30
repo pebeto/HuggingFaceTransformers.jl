@@ -36,6 +36,8 @@ export KVCache,
     GeluMLP,
     MoEMLP,
     GQA,
+    GatedDeltaNet,
+    DeltaNetCache,
     QuantizedInt8Matrix,
     sdpa,
     flash_sdpa,
@@ -119,11 +121,12 @@ function reset!(cache::KVCache)
 end
 
 """
-    reset!(caches::AbstractVector{<:KVCache}) -> caches
+    reset!(caches::AbstractVector) -> caches
 
-Reset a per-layer cache bundle (the vector returned by `build_caches`).
+Reset a per-layer cache bundle (the vector returned by `build_caches`), whatever
+mix of cache types it holds.
 """
-function reset!(caches::AbstractVector{<:KVCache})
+function reset!(caches::AbstractVector)
     for c in caches
         reset!(c)
     end
@@ -932,7 +935,9 @@ Mistral's sliding-window attention. `nothing` (the default) is plain causal.
 `q_norm` and `k_norm` are per-head `RMSNorm`s over `head_dim`, applied to the
 projected queries and keys before RoPE (Qwen3), or `nothing`. `sinks` holds one
 learned logit per query head that joins each softmax and is then dropped
-(gpt-oss), or `nothing`.
+(gpt-oss), or `nothing`. With `output_gate`, `wq` also produces a gate per head,
+laid out `[query; gate]` head by head, and the attention output is multiplied by
+its sigmoid before `wo` (Qwen3.5).
 """
 struct GQA{Q,K,V,O,R,N,S}
     wq::Q
@@ -950,6 +955,7 @@ struct GQA{Q,K,V,O,R,N,S}
     q_norm::N
     k_norm::N
     sinks::S
+    output_gate::Bool
 end
 
 """
@@ -972,8 +978,10 @@ sees every key. Used by encoder-only models (BERT, RoBERTa) where
 attention is bidirectional.
 
 `qk_norm_eps`, when set, adds a per-head `RMSNorm` with that epsilon on the
-queries and on the keys, as Qwen3 does. `sinks=true` adds a learned attention
-sink per query head, as gpt-oss does.
+queries and on the keys, as Qwen3 does; `qk_norm_zero_centered=true` makes them
+[`GemmaRMSNorm`](@ref)s, scaling by `1 + weight` (Qwen3.5). `sinks=true` adds a
+learned attention sink per query head, as gpt-oss does. `output_gate=true` gates
+the output per head with a sigmoid computed alongside the queries (Qwen3.5).
 """
 function GQA(
     hidden_dim::Integer,
@@ -988,18 +996,22 @@ function GQA(
     query_scale::Union{Nothing,Real}=nothing,
     causal::Bool=true,
     qk_norm_eps::Union{Nothing,Real}=nothing,
+    qk_norm_zero_centered::Bool=false,
     sinks::Bool=false,
+    output_gate::Bool=false,
     init=Flux.glorot_uniform,
 )
-    wq = Linear(hidden_dim, num_heads_q * head_dim; bias=qkv_bias, init=init)
+    q_out = num_heads_q * head_dim * (output_gate ? 2 : 1)
+    wq = Linear(hidden_dim, q_out; bias=qkv_bias, init=init)
     wk = Linear(hidden_dim, num_heads_k * head_dim; bias=qkv_bias, init=init)
     wv = Linear(hidden_dim, num_heads_k * head_dim; bias=qkv_bias, init=init)
     wo = Linear(num_heads_q * head_dim, hidden_dim; bias=wo_bias, init=init)
     win = isnothing(window_size) ? nothing : Int(window_size)
     sc = isnothing(softcap) ? nothing : Float32(softcap)
     qs = isnothing(query_scale) ? nothing : Float32(query_scale)
-    q_norm = isnothing(qk_norm_eps) ? nothing : RMSNorm(head_dim, qk_norm_eps)
-    k_norm = isnothing(qk_norm_eps) ? nothing : RMSNorm(head_dim, qk_norm_eps)
+    Norm = qk_norm_zero_centered ? GemmaRMSNorm : RMSNorm
+    q_norm = isnothing(qk_norm_eps) ? nothing : Norm(head_dim, qk_norm_eps)
+    k_norm = isnothing(qk_norm_eps) ? nothing : Norm(head_dim, qk_norm_eps)
     return GQA(
         wq,
         wk,
@@ -1016,6 +1028,7 @@ function GQA(
         q_norm,
         k_norm,
         sinks ? zeros(Float32, num_heads_q) : nothing,
+        output_gate,
     )
 end
 
@@ -1058,7 +1071,14 @@ function (m::GQA)(
     k = m.wk(x)
     v = m.wv(x)
 
-    # Reshape for multi-head attention
+    # Reshape for multi-head attention. A gated layer's queries carry each head's
+    # gate right after it.
+    gate = nothing
+    if m.output_gate
+        q_and_gate = reshape(q, 2 * m.head_dim, m.num_heads_q, seq_len, batch_size)
+        q = q_and_gate[1:(m.head_dim), :, :, :]
+        gate = q_and_gate[(m.head_dim + 1):end, :, :, :]
+    end
     q = reshape(q, m.head_dim, m.num_heads_q, seq_len, batch_size)
     k = reshape(k, m.head_dim, m.num_heads_k, seq_len, batch_size)
     v = reshape(v, m.head_dim, m.num_heads_k, seq_len, batch_size)
@@ -1172,6 +1192,7 @@ function (m::GQA)(
 
     out_perm = reshape(out_flat, seq_len, m.head_dim, m.num_heads_q, batch_size)
     out = permutedims(out_perm, (2, 3, 1, 4))
+    isnothing(gate) || (out = out .* NNlib.sigmoid.(gate))
 
     out_collapsed = reshape(out, m.num_heads_q * m.head_dim, seq_len, batch_size)
     return m.wo(out_collapsed)
@@ -1227,5 +1248,7 @@ end
 (c::Checkpointed)(args...) = checkpoint(c.layer, args...)
 
 Flux.@layer Checkpointed
+
+include("gated_delta_net.jl")
 
 end # module Layers

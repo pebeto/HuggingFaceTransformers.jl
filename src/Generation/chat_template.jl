@@ -6,22 +6,23 @@ message list renders the template against a context dict built from
 the messages and any extra keyword arguments.
 
 Supports the Jinja2 subset HF chat templates use, under HF's environment
-settings (`trim_blocks` and `lstrip_blocks` on). The Qwen3, Qwen2.5 and gpt-oss
-(harmony) templates render byte for byte as `apply_chat_template` does.
+settings (`trim_blocks` and `lstrip_blocks` on). The Qwen3, Qwen2.5, Qwen3.5 and
+gpt-oss (harmony) templates render byte for byte as `apply_chat_template` does.
 
 - Statements: `if` / `elif` / `else`, `for` with `break` / `continue` and
   unpacking (`for k, v in d.items()`), `set`, `set ns.attr = ...` on a
   `namespace(...)`, and `macro` with default arguments and recursion.
 - Expressions: string / int / bool / `none` literals, list literals, variables,
   attribute and item access, Python indexing and slicing (negative indices,
-  steps), arithmetic, comparison and logical operators, `in` / `not in`, inline
-  `a if cond else b`, the string methods templates call (`startswith`,
+  steps), arithmetic, comparison and logical operators, `~` concatenation,
+  `in` / `not in`, inline `a if cond else b`, the string methods templates call (`startswith`,
   `endswith`, `split`, `strip`, `lstrip`, `rstrip`, `upper`, `lower`, `replace`)
   and a mapping's `get`, `items`, `keys` and `values`.
 - Tests: `defined`, `undefined`, `none`, `true`, `false`, `boolean`, `string`,
   `number`, `integer`, `float`, `mapping`, `sequence`, `iterable`.
 - Filters: `trim`, `length` / `count`, `join`, `default`, `upper`, `lower`,
-  `string`, `first`, `last`, `list`, and `tojson` (with `indent`), which writes
+  `string`, `first`, `last`, `list`, `items`, `safe`, and `tojson` (with
+  `indent`), which writes
   what Python's `json.dumps` does: spaces after `,` and `:`, keys in mapping
   order.
 - Functions: `raise_exception("msg")`, `namespace(...)`, and `strftime_now(fmt)`.

@@ -14,7 +14,7 @@ with a leaner dependency tree and a focus on decoder LLMs.
 
 Every architecture below except LLaVA has a numeric-parity test that compares
 logits against a reference recorded from `transformers` in Python. The CPU
-suite is 1997 assertions and runs in about four minutes.
+suite is 2037 assertions and runs in about four minutes.
 
 ## Installation
 
@@ -91,6 +91,7 @@ friends) if you want to inspect or extend the wiring.
 | Llama 3.x | `LlamaForCausalLM` | `Llama-3.2-1B/3B-Instruct`, `Llama-3.1-8B/70B-Instruct` |
 | Mistral | `MistralForCausalLM` | `Mistral-7B-Instruct-v0.2`, `v0.3` |
 | Qwen2 / Qwen2.5 / Qwen3 | `QwenForCausalLM` | `Qwen2.5-0.5B/1.5B/3B/7B-Instruct`, `Qwen3-0.6B` |
+| Qwen3.5 (text) | `Qwen3_5ForCausalLM` | `Qwen3.5-0.8B` |
 | Gemma 2 | `GemmaForCausalLM` | `gemma-2-2b/9b/27b-it` |
 | Phi-3 | `Phi3ForCausalLM` | `Phi-3-mini-4k-instruct`, `Phi-3-medium-4k-instruct` |
 | GPT-2 | `GPT2ForCausalLM` | `gpt2`, `gpt2-medium`, `gpt2-large`, `gpt2-xl` |
@@ -101,8 +102,9 @@ friends) if you want to inspect or extend the wiring.
 Llama 3 RoPE scaling, Mistral and Gemma sliding-window attention, Gemma's
 logit softcapping, Qwen3's per-head query and key norms, Phi-3's fused QKV,
 NeoX's partial RoPE and parallel-residual block, Mixtral's top-k expert routing,
-and gpt-oss's attention sinks, YaRN RoPE and MXFP4 experts are all handled inside
-these types.
+gpt-oss's attention sinks, YaRN RoPE and MXFP4 experts, and Qwen3.5's Gated
+DeltaNet linear attention and gated full attention are all handled inside these
+types.
 
 gpt-oss keeps its experts in MXFP4, exactly as the checkpoint stores them and
 memory-mapped, and decodes each expert only when a token is routed to it. That
@@ -166,8 +168,8 @@ reset!(caches)
 ### Chat templates
 
 `ChatTemplate` renders a model's chat template through a small Jinja2
-interpreter. It follows HF's Jinja environment, and the Qwen3, Qwen2.5 and
-gpt-oss (harmony) templates render byte for byte as `apply_chat_template` does,
+interpreter. It follows HF's Jinja environment, and the Qwen3, Qwen2.5, Qwen3.5
+and gpt-oss (harmony) templates render byte for byte as `apply_chat_template` does,
 tools and thinking blocks included. `load_chat_template(dir)` finds the template
 where HF does (`chat_template.jinja`, else `tokenizer_config.json`):
 
@@ -379,6 +381,10 @@ Python scripts. `HFT_TEST_JET=1` adds a JET smoke pass, and
   already dropped. SigLIP fits; a CLIP tower is not implemented, which is what
   llava-1.5 end-to-end parity is waiting on.
 - gpt-oss decodes its MXFP4 experts on the CPU only.
+- Qwen3.5 loads the language model only (no vision tower), runs its delta-net
+  layers on the CPU, and cannot be used for speculative decoding, whose cache
+  rewind its recurrent state does not allow. Its FP8 and NVFP4 checkpoints are
+  not read yet.
 - Mixtral runs each expert once over its assigned tokens without fusing the
   expert matmuls.
 

@@ -22,6 +22,7 @@ using ..Models:
     NeoXForCausalLM,
     MixtralForCausalLM,
     GptOssForCausalLM,
+    Qwen3_5ForCausalLM,
     build_caches
 
 const DecoderLM = Union{
@@ -34,7 +35,13 @@ const DecoderLM = Union{
     NeoXForCausalLM,
     MixtralForCausalLM,
     GptOssForCausalLM,
+    Qwen3_5ForCausalLM,
 }
+
+# A layer that folds the past into a running state cannot be rewound the way a
+# KV cache is overwritten, which speculative decoding relies on.
+_has_recurrent_state(::Any) = false
+_has_recurrent_state(::Qwen3_5ForCausalLM) = true
 using ..Tokenizers: Tokenizer, encode, decode, pad_token_id
 
 export generate, speculative_generate, ChatTemplate, apply_chat_template, load_chat_template

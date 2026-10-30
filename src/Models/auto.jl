@@ -265,6 +265,52 @@ function config_from_json(::Type{GptOssConfig}, raw)
     )
 end
 
+function config_from_json(::Type{Qwen3_5Config}, raw)
+    # The multimodal checkpoints nest the language model's settings; a text-only
+    # config is flat.
+    text = _hf(raw, :text_config, raw)
+    hidden = _hf_req_int(text, :hidden_size)
+    heads = _hf_req_int(text, :num_attention_heads)
+    layers = _hf_req_int(text, :num_hidden_layers)
+    isempty(_hf(text, :mlp_only_layers, [])) ||
+        throw(ArgumentError("Qwen3.5 `mlp_only_layers` is not supported"))
+    rope = _hf(text, :rope_parameters, Dict{Symbol,Any}())
+    kind = _hf_str(rope, :rope_type, "default")
+    kind == "default" || throw(ArgumentError("RoPE `$(kind)` is not implemented for Qwen3.5"))
+    kinds = _hf(text, :layer_types, nothing)
+    interval = _hf_int(text, :full_attention_interval, 4)
+    layer_types = if isnothing(kinds)
+        [i % interval == 0 ? :full_attention : :linear_attention for i in 1:layers]
+    else
+        Symbol.(collect(kinds))
+    end
+    text_only = "Qwen3_5ForCausalLM" in _hf_architectures(raw) ||
+        _hf_str(raw, :model_type, "") == "qwen3_5_text"
+    return Qwen3_5Config(;
+        vocab_size=_hf_req_int(text, :vocab_size),
+        hidden_size=hidden,
+        intermediate_size=_hf_req_int(text, :intermediate_size),
+        num_hidden_layers=layers,
+        num_attention_heads=heads,
+        num_key_value_heads=_kv_heads(text, heads),
+        head_dim=_head_dim(text, hidden, heads),
+        linear_num_key_heads=_hf_req_int(text, :linear_num_key_heads),
+        linear_num_value_heads=_hf_req_int(text, :linear_num_value_heads),
+        linear_key_head_dim=_hf_req_int(text, :linear_key_head_dim),
+        linear_value_head_dim=_hf_req_int(text, :linear_value_head_dim),
+        linear_conv_kernel_dim=_hf_int(text, :linear_conv_kernel_dim, 4),
+        max_position_embeddings=_hf_req_int(text, :max_position_embeddings),
+        rope_theta=_hf_float(rope, :rope_theta, _hf_float(text, :rope_theta, 10_000_000.0)),
+        partial_rotary_factor=_hf_float(rope, :partial_rotary_factor, 0.25),
+        rms_norm_eps=_hf_float(text, :rms_norm_eps, 1.0e-6),
+        attn_output_gate=_hf_bool(text, :attn_output_gate, true),
+        attention_bias=_hf_bool(text, :attention_bias, false),
+        tie_word_embeddings=_hf_bool(text, :tie_word_embeddings, _hf_bool(raw, :tie_word_embeddings, false)),
+        layer_types,
+        hf_prefix=text_only ? "model" : "model.language_model",
+    )
+end
+
 function config_from_json(::Type{GemmaConfig}, raw)
     hidden = _hf_req_int(raw, :hidden_size)
     heads = _hf_req_int(raw, :num_attention_heads)
@@ -564,6 +610,8 @@ const AUTO_ARCHITECTURES = Dict{String,Tuple{Any,Any}}(
     "MistralForCausalLM" => (MistralConfig, MistralForCausalLM),
     "Qwen2ForCausalLM" => (QwenConfig, QwenForCausalLM),
     "Qwen3ForCausalLM" => (QwenConfig, QwenForCausalLM),
+    "Qwen3_5ForConditionalGeneration" => (Qwen3_5Config, Qwen3_5ForCausalLM),
+    "Qwen3_5ForCausalLM" => (Qwen3_5Config, Qwen3_5ForCausalLM),
     "Gemma2ForCausalLM" => (GemmaConfig, GemmaForCausalLM),
     "Phi3ForCausalLM" => (Phi3Config, Phi3ForCausalLM),
     "GPT2LMHeadModel" => (GPT2Config, GPT2ForCausalLM),
@@ -589,6 +637,8 @@ const _MODEL_TYPE_FALLBACK = Dict{String,String}(
     "mistral" => "MistralForCausalLM",
     "qwen2" => "Qwen2ForCausalLM",
     "qwen3" => "Qwen3ForCausalLM",
+    "qwen3_5" => "Qwen3_5ForConditionalGeneration",
+    "qwen3_5_text" => "Qwen3_5ForCausalLM",
     "gemma2" => "Gemma2ForCausalLM",
     "phi3" => "Phi3ForCausalLM",
     "gpt2" => "GPT2LMHeadModel",

@@ -111,9 +111,11 @@ package, so read them with a library of your choice and resample to 16 kHz.
 [`Generation.ChatTemplate`](@ref) renders a model's chat template through a small
 Jinja2 interpreter that follows HF's Jinja environment, and
 [`Generation.load_chat_template`](@ref) finds the template where HF does
-(`chat_template.jinja`, else `tokenizer_config.json`). The Qwen3, Qwen2.5 and
-gpt-oss templates are checked against `apply_chat_template` and render byte for
-byte, tools, thinking blocks and gpt-oss's TypeScript tool schemas included.
+(`chat_template.jinja`, else `tokenizer_config.json`). The Qwen3, Qwen2.5,
+Qwen3.5 and gpt-oss templates are checked against `apply_chat_template` and
+render byte for byte, tools, thinking blocks, Qwen3.5's image placeholders and
+gpt-oss's TypeScript tool schemas included; inputs a template rejects in HF are
+rejected here too.
 Keyword arguments become template variables, so `enable_thinking=false` turns off
 Qwen3's thinking and `reasoning_effort="low"` shortens gpt-oss's.
 

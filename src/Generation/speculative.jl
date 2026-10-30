@@ -40,6 +40,12 @@ function speculative_generate(
     rng::AbstractRNG=Random.default_rng(),
 )
     isempty(input_ids) && throw(ArgumentError("input_ids must be non-empty"))
+    (_has_recurrent_state(target) || _has_recurrent_state(draft)) && throw(
+        ArgumentError(
+            "speculative decoding rewinds the cache after rejected drafts, which a " *
+            "recurrent layer's state cannot do",
+        ),
+    )
     n_draft >= 1 || throw(ArgumentError("n_draft must be ≥ 1, got $(n_draft)"))
     max_new_tokens >= 0 ||
         throw(ArgumentError("max_new_tokens must be ≥ 0, got $(max_new_tokens)"))

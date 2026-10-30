@@ -78,6 +78,7 @@ a `huggingface-cli login` done once. The package reads the same
 | Llama 3.x | [`LlamaForCausalLM`](@ref) | `Llama-3.2-1B/3B-Instruct`, `Llama-3.1-8B/70B-Instruct` |
 | Mistral | [`MistralForCausalLM`](@ref) | `Mistral-7B-Instruct-v0.2`, `v0.3` |
 | Qwen2 / Qwen2.5 / Qwen3 | [`QwenForCausalLM`](@ref) | `Qwen2.5-0.5B/1.5B/3B/7B-Instruct`, `Qwen3-0.6B` |
+| Qwen3.5 (text) | [`Qwen3_5ForCausalLM`](@ref) | `Qwen3.5-0.8B` |
 | Gemma 2 | [`GemmaForCausalLM`](@ref) | `gemma-2-2b/9b/27b-it` |
 | Phi-3 | [`Phi3ForCausalLM`](@ref) | `Phi-3-mini-4k-instruct`, `Phi-3-medium-4k-instruct` |
 | GPT-2 | [`GPT2ForCausalLM`](@ref) | `gpt2`, `gpt2-medium`, `gpt2-large`, `gpt2-xl` |
@@ -87,8 +88,9 @@ a `huggingface-cli login` done once. The package reads the same
 
 Llama 3 RoPE scaling, Mistral and Gemma sliding-window attention, Gemma's logit
 softcapping, Qwen3's per-head query and key norms, Phi-3's fused QKV, NeoX's
-partial RoPE and parallel-residual block, Mixtral's top-k expert routing, and
-gpt-oss's attention sinks, YaRN RoPE and MXFP4 experts are all handled inside
+partial RoPE and parallel-residual block, Mixtral's top-k expert routing,
+gpt-oss's attention sinks, YaRN RoPE and MXFP4 experts, and Qwen3.5's Gated
+DeltaNet linear attention ([`Layers.GatedDeltaNet`](@ref)) are all handled inside
 these types. gpt-oss keeps its experts packed and memory-mapped, so the 20B model
 runs in about 20 GB; see [Memory notes](@ref).
 
@@ -129,6 +131,10 @@ runs in about 20 GB; see [Memory notes](@ref).
   already dropped. SigLIP fits; a CLIP tower is not implemented, which is what
   llava-1.5 end-to-end parity is waiting on.
 - gpt-oss decodes its MXFP4 experts on the CPU only.
+- Qwen3.5 loads the language model only (no vision tower), runs its delta-net
+  layers on the CPU, and cannot be used for speculative decoding, whose cache
+  rewind its recurrent state does not allow. Its FP8 and NVFP4 checkpoints are
+  not read yet.
 - Mixtral runs each expert once over its assigned tokens without fusing the
   expert matmuls.
 
