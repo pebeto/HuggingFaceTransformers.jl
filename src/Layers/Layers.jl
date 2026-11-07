@@ -1032,6 +1032,30 @@ function GQA(
     )
 end
 
+"""
+    GQA(wq, wk, wv, wo, rope; num_heads_q, num_heads_k, head_dim, window_size=nothing,
+        softcap=nothing, query_scale=nothing, causal=true, q_norm=nothing,
+        k_norm=nothing, sinks=nothing, output_gate=false)
+
+Assemble a `GQA` from projections built elsewhere, such as packed weights read
+straight from a checkpoint.
+"""
+function GQA(
+    wq::Linear, wk::Linear, wv::Linear, wo::Linear, rope::Union{Nothing,RoPE};
+    num_heads_q::Integer, num_heads_k::Integer, head_dim::Integer,
+    window_size::Union{Nothing,Integer}=nothing, softcap::Union{Nothing,Real}=nothing,
+    query_scale::Union{Nothing,Real}=nothing, causal::Bool=true,
+    q_norm=nothing, k_norm=nothing, sinks=nothing, output_gate::Bool=false,
+)
+    return GQA(
+        wq, wk, wv, wo, rope, Int(num_heads_q), Int(num_heads_k), Int(head_dim),
+        isnothing(window_size) ? nothing : Int(window_size),
+        isnothing(softcap) ? nothing : Float32(softcap),
+        isnothing(query_scale) ? nothing : Float32(query_scale),
+        causal, q_norm, k_norm, sinks, output_gate,
+    )
+end
+
 function repeat_kv(x::AbstractArray, group_size::Integer)
     if group_size == 1
         return x

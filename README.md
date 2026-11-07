@@ -14,7 +14,7 @@ with a leaner dependency tree and a focus on decoder LLMs.
 
 Every architecture below except LLaVA has a numeric-parity test that compares
 logits against a reference recorded from `transformers` in Python. The CPU
-suite is 2037 assertions and runs in about four minutes.
+suite is 2066 assertions and runs in about four minutes.
 
 ## Installation
 
@@ -91,7 +91,7 @@ friends) if you want to inspect or extend the wiring.
 | Llama 3.x | `LlamaForCausalLM` | `Llama-3.2-1B/3B-Instruct`, `Llama-3.1-8B/70B-Instruct` |
 | Mistral | `MistralForCausalLM` | `Mistral-7B-Instruct-v0.2`, `v0.3` |
 | Qwen2 / Qwen2.5 / Qwen3 | `QwenForCausalLM` | `Qwen2.5-0.5B/1.5B/3B/7B-Instruct`, `Qwen3-0.6B` |
-| Qwen3.5 (text) | `Qwen3_5ForCausalLM` | `Qwen3.5-0.8B` |
+| Qwen3.5 (text) | `Qwen3_5ForCausalLM` | `Qwen3.5-0.8B`, `unsloth/Qwen3.8-27B-NVFP4` (four-layer cut) |
 | Gemma 2 | `GemmaForCausalLM` | `gemma-2-2b/9b/27b-it` |
 | Phi-3 | `Phi3ForCausalLM` | `Phi-3-mini-4k-instruct`, `Phi-3-medium-4k-instruct` |
 | GPT-2 | `GPT2ForCausalLM` | `gpt2`, `gpt2-medium`, `gpt2-large`, `gpt2-xl` |
@@ -112,6 +112,15 @@ puts gpt-oss-20b at about 13 GB of experts plus 7 GB for everything else, so it
 runs in about 20 GB (about 0.3 s per token on a 24-thread CPU). HF itself
 needs ~42 GB to run it on a CPU, which is why its parity reference is the
 checkpoint's first two layers, run in float32: logits agree to 1e-5.
+
+Qwen3.5 also reads compressed-tensors checkpoints, such as
+`unsloth/Qwen3.8-27B-NVFP4`: NVFP4 and FP8 linear layers stay packed and
+memory-mapped, and bf16 embeddings stay in the file. The 27B model then needs
+under 1 GB of its own memory, with its ~20 GB of weights held as page cache.
+Weights are decoded exactly and activations stay in float32, so this is
+weight-only quantization; HF's default path also rounds activations to FP8 or
+NVFP4, as FP4 hardware would. Against HF running the checkpoint's first four
+layers that same way, logits agree to 4e-6.
 
 ### Encoders and embeddings
 
@@ -382,9 +391,8 @@ Python scripts. `HFT_TEST_JET=1` adds a JET smoke pass, and
   llava-1.5 end-to-end parity is waiting on.
 - gpt-oss decodes its MXFP4 experts on the CPU only.
 - Qwen3.5 loads the language model only (no vision tower), runs its delta-net
-  layers on the CPU, and cannot be used for speculative decoding, whose cache
-  rewind its recurrent state does not allow. Its FP8 and NVFP4 checkpoints are
-  not read yet.
+  layers and packed FP8/NVFP4 weights on the CPU, and cannot be used for
+  speculative decoding, whose cache rewind its recurrent state does not allow.
 - Mixtral runs each expert once over its assigned tokens without fusing the
   expert matmuls.
 

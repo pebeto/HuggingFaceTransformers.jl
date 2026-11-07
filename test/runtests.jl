@@ -43,6 +43,10 @@ using HuggingFaceTransformers
         include("qwen3_5.jl")
     end
 
+    @testset verbose = true "Packed weights" begin
+        include("packed_weights.jl")
+    end
+
     @testset verbose = true "Gemma" begin
         include("gemma.jl")
     end
@@ -236,6 +240,12 @@ using HuggingFaceTransformers
     if !isempty(get(ENV, "HFT_TEST_PARITY_QWEN3_5", ""))
         @testset verbose = true "Qwen3.5 parity" begin
             include("parity_qwen3_5.jl")
+        end
+    end
+
+    if !isempty(get(ENV, "HFT_TEST_PARITY_QWEN3_5_QUANTIZED", ""))
+        @testset verbose = true "Quantized Qwen3.5 parity" begin
+            include("parity_qwen3_5_quantized.jl")
         end
     end
 

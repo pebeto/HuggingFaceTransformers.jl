@@ -75,9 +75,9 @@ lora_scaling(c::LoraConfig) =
     Float32(c.use_rslora ? c.lora_alpha / sqrt(c.r) : c.lora_alpha / c.r)
 
 # Minimal safetensors writer (SafeTensors.jl only reads). Writes tensors in
-# C-order so a standard safetensors reader reloads the same logical arrays: UInt8
-# and BFloat16 as they are (packed MXFP4 experts, bf16 checkpoints), anything else
-# as F32.
+# C-order so a standard safetensors reader reloads the same logical arrays: UInt8,
+# BFloat16 and FP8 as they are (packed experts and weights, bf16 checkpoints),
+# anything else as F32.
 function _save_safetensors(
     path::AbstractString,
     tensors::AbstractDict{String,<:AbstractArray};
@@ -88,8 +88,8 @@ function _save_safetensors(
     offset = 0
     for name in sort(collect(keys(tensors)))
         src = tensors[name]
-        a = eltype(src) in (UInt8, BFloat16) ? collect(src) : Float32.(src)
-        tag = Dict(UInt8 => "U8", BFloat16 => "BF16", Float32 => "F32")[eltype(a)]
+        a = eltype(src) in (UInt8, BFloat16, Float8E4M3) ? collect(src) : Float32.(src)
+        tag = Dict(UInt8 => "U8", BFloat16 => "BF16", Float8E4M3 => "F8_E4M3", Float32 => "F32")[eltype(a)]
         # C-order bytes = column-major of the dim-reversed array.
         c = ndims(a) <= 1 ? a : permutedims(a, reverse(ntuple(identity, ndims(a))))
         bytes = collect(reinterpret(UInt8, vec(collect(c))))

@@ -39,6 +39,23 @@ the matmul dequantizes per call, which trades compute for memory. Expect logit
 error roughly in the `1e-2` to `1e-1` range against the fp32 reference, growing
 with depth.
 
+## Quantized checkpoints
+
+Qwen3.5 loads compressed-tensors checkpoints as they are stored. Linear layers in
+NVFP4 (4-bit E2M1 in groups of 16, each with an FP8 scale and a per-tensor global
+scale) become [`Models.NVFP4Matrix`](@ref), those in channel-wise FP8 become
+[`Models.FP8Matrix`](@ref), and bf16 embeddings become a
+[`Models.BF16Matrix`](@ref) over the file. None of them is copied: multiplying
+reads the packed bytes and decodes them exactly as it goes, so
+`unsloth/Qwen3.8-27B-NVFP4` loads in a few seconds with under 1 GB resident and
+answers a chat on a 30 GB machine, at about 1.7 s per token on a 24-thread CPU.
+
+This is weight-only quantization: activations stay in Float32. HF's default path
+for these checkpoints also rounds each layer's input to FP8 per token or to NVFP4
+per group of 16, as FP4 hardware does, so its logits differ slightly from these.
+The parity test compares against HF running the same exactly-decoded weights with
+full-precision activations.
+
 ## GPU
 
 Two questions are separate here: where the arrays live, and which attention

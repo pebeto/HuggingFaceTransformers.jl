@@ -707,3 +707,7 @@ end
 function _build_and_load(::Type{GptOssForCausalLM}, cfg, weights; kwargs...)
     return GptOssForCausalLM(cfg, weights)
 end
+# Qwen3.5 likewise, so a quantized checkpoint's packed weights are used in place.
+function _build_and_load(::Type{Qwen3_5ForCausalLM}, cfg, weights; kwargs...)
+    return Qwen3_5ForCausalLM(cfg, weights)
+end

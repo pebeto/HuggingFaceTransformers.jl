@@ -242,9 +242,19 @@ function _parse_atom(p)
         return NameExpr(t.value)
     elseif t.kind === :lparen
         _consume!(p)
+        # Parentheses group an expression; with a comma they make a tuple, which
+        # templates use as a literal set: `x in ('a', 'b')`.
+        _check(p, :rparen) && (_consume!(p); return ListExpr(TmplExpr[]))
         e = _parse_conditional(p)
+        _check(p, :comma) || (_eat!(p, :rparen); return e)
+        items = TmplExpr[e]
+        while _check(p, :comma)
+            _consume!(p)
+            _check(p, :rparen) && break
+            push!(items, _parse_conditional(p))
+        end
         _eat!(p, :rparen)
-        return e
+        return ListExpr(items)
     elseif t.kind === :lbracket
         _consume!(p)
         items = TmplExpr[]

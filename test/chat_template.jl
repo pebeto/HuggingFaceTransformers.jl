@@ -208,6 +208,11 @@ end
         @test act("{{ '<b>' | safe }}") == "<b>"
     end
 
+    @testset "tuple literals" begin
+        @test act("{{ x in ('a', 'b') }}{{ x not in ('c',) }}{{ () | length }}{{ (1 + 2) * 3 }}"; x="b") ==
+            "TrueTrue09"
+    end
+
     @testset "strftime_now" begin
         @test act("{{ strftime_now('%Y') }}") == Libc.strftime("%Y", time())
         # A variable of the same name shadows the built-in, which is how HF's

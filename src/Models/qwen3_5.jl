@@ -113,6 +113,78 @@ function Qwen3_5ForCausalLM(cfg::Qwen3_5Config)
 end
 
 """
+    Qwen3_5ForCausalLM(cfg, weights)
+
+Build the model straight from an HF-keyed weight dictionary, as
+[`load_weights`](@ref) returns it, without first allocating dense parameters.
+Linear layers stored as NVFP4 or FP8 (compressed-tensors checkpoints such as
+`unsloth/Qwen3.8-27B-NVFP4`) stay packed, as [`NVFP4Matrix`](@ref) and
+[`FP8Matrix`](@ref), and bf16 embeddings stay in the file behind a
+[`BF16Matrix`](@ref); everything else is copied to `Float32`. Weights are decoded
+exactly while multiplying, and activations stay in `Float32`.
+"""
+function Qwen3_5ForCausalLM(cfg::Qwen3_5Config, weights::AbstractDict{String,<:AbstractArray})
+    P = cfg.hf_prefix
+    eps = Float32(cfg.rms_norm_eps)
+    vector(key) = vec(_dense32(weights[key]))
+    norm(key) = GemmaRMSNorm(vector(key), eps)
+    rope = RoPE(
+        cfg.head_dim; base=cfg.rope_theta,
+        rotary_dim=round(Int, cfg.head_dim * cfg.partial_rotary_factor),
+    )
+    layers = map(enumerate(cfg.layer_types)) do (i, kind)
+        prefix = "$(P).layers.$(i - 1)"
+        mixer = if kind === :full_attention
+            a = "$(prefix).self_attn"
+            bias = cfg.attention_bias
+            GQA(
+                _checkpoint_linear(weights, "$(a).q_proj"; bias),
+                _checkpoint_linear(weights, "$(a).k_proj"; bias),
+                _checkpoint_linear(weights, "$(a).v_proj"; bias),
+                _checkpoint_linear(weights, "$(a).o_proj"; bias),
+                rope;
+                num_heads_q=cfg.num_attention_heads, num_heads_k=cfg.num_key_value_heads,
+                head_dim=cfg.head_dim, q_norm=norm("$(a).q_norm.weight"),
+                k_norm=norm("$(a).k_norm.weight"), output_gate=cfg.attn_output_gate,
+            )
+        elseif kind === :linear_attention
+            d = "$(prefix).linear_attn"
+            GatedDeltaNet(
+                _checkpoint_linear(weights, "$(d).in_proj_qkv"),
+                _checkpoint_linear(weights, "$(d).in_proj_z"),
+                _checkpoint_linear(weights, "$(d).in_proj_b"),
+                _checkpoint_linear(weights, "$(d).in_proj_a"),
+                _checkpoint_linear(weights, "$(d).out_proj"),
+                _dense32(weights["$(d).conv1d.weight"]),
+                vector("$(d).dt_bias"), vector("$(d).A_log"), vector("$(d).norm.weight"),
+                cfg.linear_num_key_heads, cfg.linear_num_value_heads,
+                cfg.linear_key_head_dim, cfg.linear_value_head_dim, eps,
+            )
+        else
+            throw(ArgumentError("unsupported Qwen3.5 layer type `$(kind)`"))
+        end
+        mlp = SiLUGatedMLP(
+            _checkpoint_linear(weights, "$(prefix).mlp.gate_proj"),
+            _checkpoint_linear(weights, "$(prefix).mlp.up_proj"),
+            _checkpoint_linear(weights, "$(prefix).mlp.down_proj"),
+        )
+        DecoderLayer(mixer, norm("$(prefix).input_layernorm.weight"),
+            norm("$(prefix).post_attention_layernorm.weight"), mlp)
+    end
+    embedding = weights["$(P).embed_tokens.weight"]
+    # (vocab, hidden) in HF; the file's order is the (hidden, vocab) a lookup wants.
+    table = eltype(embedding) == BFloat16 ? BF16Matrix(_file_order(embedding)) :
+        permutedims(_dense32(embedding), (2, 1))
+    lm_head = if cfg.tie_word_embeddings
+        Linear(_dense32(embedding), nothing)
+    else
+        _checkpoint_linear(weights, "lm_head")
+    end
+    model = DecoderModel(TokenEmbedding(table), layers, norm("$(P).norm.weight"))
+    return Qwen3_5ForCausalLM(cfg, model, lm_head)
+end
+
+"""
     qwen3_5_state_dict_map(cfg::Qwen3_5Config) -> Dict
 
 HuggingFace → internal parameter table for Qwen3.5's text model. Both kinds of

@@ -151,6 +151,22 @@ end
         @test haskey(sd, "model.language_model.layers.3.self_attn.q_norm.weight")
         fresh = load_state_dict!(Qwen3_5ForCausalLM(cfg), sd)
         @test fresh(ids) ≈ logits
+        # Building straight from the tensors, as `load` does, gives the same model.
+        @test Qwen3_5ForCausalLM(cfg, sd)(ids) ≈ logits
+    end
+
+    @testset "tied embeddings, built from the tensors" begin
+        tied_cfg = _tiny_qwen3_5_config(; tie_word_embeddings=true)
+        tied = load_state_dict!(Qwen3_5ForCausalLM(tied_cfg), Dict{String,Array{Float32}}(
+            key => (t === :transpose ? permutedims(_resolve(lm, p), (2, 1)) : copy(_resolve(lm, p)))
+            for (key, (p, t)) in qwen3_5_state_dict_map(tied_cfg)
+        ))
+        sd = Dict{String,Array{Float32}}(
+            key => (t === :transpose ? permutedims(_resolve(tied, p), (2, 1)) : copy(_resolve(tied, p)))
+            for (key, (p, t)) in qwen3_5_state_dict_map(tied_cfg)
+        )
+        @test !haskey(sd, "lm_head.weight")
+        @test Qwen3_5ForCausalLM(tied_cfg, sd)(ids) ≈ tied(ids)
     end
 
     @test_throws ArgumentError speculative_generate(lm, lm, [1, 2, 3]; max_new_tokens=2)

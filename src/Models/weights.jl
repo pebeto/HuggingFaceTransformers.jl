@@ -56,6 +56,7 @@ const _SAFETENSORS_DTYPES = Dict{String,DataType}(
     "F64" => Float64, "F32" => Float32, "F16" => Float16, "BF16" => BFloat16,
     "I64" => Int64, "I32" => Int32, "I16" => Int16, "I8" => Int8,
     "U64" => UInt64, "U32" => UInt32, "U16" => UInt16, "U8" => UInt8, "BOOL" => Bool,
+    "F8_E4M3" => Float8E4M3,
 )
 
 # A safetensors file is an 8-byte header length, a JSON header, then row-major

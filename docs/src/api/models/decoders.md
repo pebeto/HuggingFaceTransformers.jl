@@ -26,6 +26,10 @@ MistralForCausalLM
 MixtralConfig
 MixtralForCausalLM
 MXFP4Weights
+Float8E4M3
+FP8Matrix
+NVFP4Matrix
+BF16Matrix
 NeoXConfig
 NeoXDecoderLayer
 NeoXForCausalLM
