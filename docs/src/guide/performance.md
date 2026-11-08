@@ -48,7 +48,14 @@ scale) become [`Models.NVFP4Matrix`](@ref), those in channel-wise FP8 become
 [`Models.BF16Matrix`](@ref) over the file. None of them is copied: multiplying
 reads the packed bytes and decodes them exactly as it goes, so
 `unsloth/Qwen3.8-27B-NVFP4` loads in a few seconds with under 1 GB resident and
-answers a chat on a 30 GB machine, at about 1.7 s per token on a 24-thread CPU.
+answers a chat on a 30 GB machine, at about 0.4 s per token on a 24-thread CPU.
+For one token, each row is decoded and summed in a single vectorized pass; for a
+prompt, rows are decoded four at a time into a buffer that stays in cache and
+multiplied against four tokens at a time, so a long prompt costs about what a
+dense Float32 matrix multiply does. Each
+generated token reads about 17 GB of weights, so at ~65 GB/s of memory
+bandwidth the floor is near 0.26 s; most of the remaining gap is the arithmetic
+of decoding NVFP4.
 
 This is weight-only quantization: activations stay in Float32. HF's default path
 for these checkpoints also rounds each layer's input to FP8 per token or to NVFP4

@@ -21,6 +21,10 @@ _e4m3(b::UInt8) = Float32(reinterpret(Float8E4M3, b))
     @test _e4m3(0x01) == 2.0f0^-9                  # smallest subnormal
     @test isnan(_e4m3(0x7f)) && isnan(_e4m3(0xff))
     @test _e4m3(0x80) === -0.0f0
+    # The kernels' arithmetic decoders agree with the tables on every code.
+    @test all(b -> isnan(_e4m3(b)) || Models._e4m3(UInt32(b)) === _e4m3(b), 0x00:0xff)
+    @test [Float32(Models._fp4_lo(UInt16(v))) * Models._FP4_UNIT for v in 0:15] == _NVFP4
+    @test [Float32(Models._fp4_hi(UInt16(v << 4))) * Models._FP4_UNIT for v in 0:15] == _NVFP4
 end
 
 # Random packed weights with their dense float32 equivalent, `(out, in)`.
@@ -50,6 +54,9 @@ end
             @test w == dense                                  # element by element
             # One token, whole groups of four, and groups cut short.
             @test all(n -> (x = randn(rng, Float32, 48, n); w * x ≈ dense * x), (1, 2, 3, 4, 5, 9))
+            # An even number of NVFP4 groups, and as many rows as threads twice over.
+            w2, dense2 = name == "FP8" ? _random_fp8(rng, 70, 64) : _random_nvfp4(rng, 70, 64)
+            @test all(n -> (x = randn(rng, Float32, 64, n); w2 * x ≈ dense2 * x), (1, 6))
             @test w * randn(Xoshiro(1), Float32, 48) ≈ dense * randn(Xoshiro(1), Float32, 48)
             @test_throws DimensionMismatch w * randn(Float32, 47, 1)
             @test Linear(w, nothing)(ones(Float32, 48, 2, 1)) ≈ reshape(dense * ones(Float32, 48, 2), 9, 2, 1)

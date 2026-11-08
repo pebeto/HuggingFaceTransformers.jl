@@ -67,80 +67,173 @@ end
 Base.size(m::BF16Matrix) = size(m.data)
 Base.getindex(m::BF16Matrix, i::Int, j::Int) = Float32(m.data[i, j])
 
-# y = W x for a packed W, threaded over output rows. `row!(acc, r, x, t, n)` adds
-# row r's dot products with columns t:t+n-1 of x (n ≤ 4) into acc[1:n]; reading a
-# row once per four tokens is what makes a prompt affordable.
-function _packed_mul!(row!, y::AbstractMatrix{Float32}, x::AbstractMatrix{Float32})
-    n_tok = size(x, 2)
-    Threads.@threads for r in axes(y, 1)
-        acc = zeros(Float32, 4)
-        for t in 1:4:n_tok
-            n = min(4, n_tok - t + 1)
-            fill!(acc, 0)
-            row!(acc, r, x, t, n)
-            @inbounds for i in 1:n
-                y[r, t + i - 1] = acc[i]
+# The kernels below decode with bit arithmetic instead of a table lookup, which
+# keeps their loops vectorized.
+#
+# An E2M1 nibble, the low or high half of `b`, as a Float16 equal to 2^-14 times
+# its value: the bits land where Float16 keeps its exponent and mantissa, and the
+# conversion to Float32 (one instruction where the CPU has it) gets E2M1's
+# subnormal 0.5 right.
+@inline _fp4_lo(b::UInt16) = reinterpret(Float16, ((b << 12) & 0x8000) | ((b << 9) & 0x0e00))
+@inline _fp4_hi(b::UInt16) = reinterpret(Float16, ((b << 8) & 0x8000) | ((b << 5) & 0x0e00))
+const _FP4_UNIT = 2.0f0^14
+
+# `_e4m3` reads the two NaN codes as ±480; quantized weights and scales never hold
+# them.
+@inline function _e4m3(b::UInt32)
+    em = b & 0x7f
+    normal = (em << 20) + (UInt32(120) << 23)
+    subnormal = reinterpret(UInt32, Float32(em) * 0.001953125f0)
+    return reinterpret(Float32, ifelse(em < 0x08, subnormal, normal) | ((b & 0x80) << 24))
+end
+
+const _PackedMatrix = Union{FP8Matrix,NVFP4Matrix}
+
+# The input as the row decoders below lay a row out: as is for FP8; for NVFP4 the
+# odd inputs (low nibbles) then the even ones (high nibbles).
+_packed_input(::FP8Matrix, x) = Matrix{Float32}(x)
+function _packed_input(::NVFP4Matrix, x)
+    xp = Matrix{Float32}(undef, size(x))
+    half = size(x, 1) ÷ 2
+    @inbounds for t in axes(x, 2), b in 1:half
+        xp[b, t], xp[half + b, t] = x[2b - 1, t], x[2b, t]
+    end
+    return xp
+end
+
+# Row r decoded into `buf`, in `_packed_input` order.
+function _decode_row!(buf, m::FP8Matrix, bytes, r)
+    n_in = size(m.data, 1)
+    offset, scale = (r - 1) * n_in, m.scale[r]
+    @inbounds @simd for k in 1:n_in
+        buf[k] = _e4m3(UInt32(bytes[offset + k])) * scale
+    end
+    return buf
+end
+
+function _decode_row!(buf, m::NVFP4Matrix, (packed, scales), r)
+    n_bytes, n_groups = size(m.packed, 1), size(m.scales, 1)
+    offset, scale_offset = (r - 1) * n_bytes, (r - 1) * n_groups
+    inv = _FP4_UNIT / m.global_scale
+    # Two groups of 8 bytes per pass, so a pass is 16 lanes wide.
+    @inbounds for p in 1:(n_groups ÷ 2)
+        s1 = _e4m3(UInt32(scales[scale_offset + 2p - 1])) * inv
+        s2 = _e4m3(UInt32(scales[scale_offset + 2p])) * inv
+        base = 16(p - 1)
+        @simd for j in 1:16
+            byte, s = UInt16(packed[offset + base + j]), ifelse(j <= 8, s1, s2)
+            buf[base + j] = Float32(_fp4_lo(byte)) * s
+            buf[n_bytes + base + j] = Float32(_fp4_hi(byte)) * s
+        end
+    end
+    if isodd(n_groups)
+        s = _e4m3(UInt32(scales[scale_offset + n_groups])) * inv
+        @inbounds for j in (n_bytes - 7):n_bytes
+            byte = UInt16(packed[offset + j])
+            buf[j], buf[n_bytes + j] = Float32(_fp4_lo(byte)) * s, Float32(_fp4_hi(byte)) * s
+        end
+    end
+    return buf
+end
+
+# Row r times a single input column, decoded and summed in one pass; `acc` is
+# scratch for 16 values.
+function _row_dot(m::FP8Matrix, bytes, r, x, _)
+    n_in = size(m.data, 1)
+    offset, s = (r - 1) * n_in, 0.0f0
+    @inbounds @simd for k in 1:n_in
+        s = muladd(_e4m3(UInt32(bytes[offset + k])), x[k], s)
+    end
+    return s * m.scale[r]
+end
+
+function _row_dot(m::NVFP4Matrix, (packed, scales), r, x, acc)
+    n_bytes, n_groups = size(m.packed, 1), size(m.scales, 1)
+    offset, scale_offset = (r - 1) * n_bytes, (r - 1) * n_groups
+    fill!(view(acc, 1:16), 0.0f0)
+    @inbounds for p in 1:(n_groups ÷ 2)
+        s1, s2 = _e4m3(UInt32(scales[scale_offset + 2p - 1])), _e4m3(UInt32(scales[scale_offset + 2p]))
+        base = 16(p - 1)
+        @simd for j in 1:16
+            byte = UInt16(packed[offset + base + j])
+            d = muladd(Float32(_fp4_lo(byte)), x[base + j], Float32(_fp4_hi(byte)) * x[n_bytes + base + j])
+            acc[j] = muladd(ifelse(j <= 8, s1, s2), d, acc[j])
+        end
+    end
+    s = 0.0f0
+    @inbounds for j in 1:16
+        s += acc[j]
+    end
+    if isodd(n_groups)
+        d = 0.0f0
+        @inbounds for j in (n_bytes - 7):n_bytes
+            byte = UInt16(packed[offset + j])
+            d = muladd(Float32(_fp4_lo(byte)), x[j], muladd(Float32(_fp4_hi(byte)), x[n_bytes + j], d))
+        end
+        s = muladd(_e4m3(UInt32(scales[scale_offset + n_groups])), d, s)
+    end
+    return s * _FP4_UNIT / m.global_scale
+end
+
+_packed_bytes(m::FP8Matrix) = _bytes(m.data)
+_packed_bytes(m::NVFP4Matrix) = (_bytes(m.packed), _bytes(m.scales))
+
+# Four decoded rows (the columns of `buf`) against tokens t:t+n-1 (n ≤ 4): sixteen
+# sums, with every weight and input loaded once.
+@inline function _dot4x4!(y, rows, buf, x, t, n)
+    t1, t2, t3, t4 = t, t + min(1, n - 1), t + min(2, n - 1), t + min(3, n - 1)
+    a11 = a12 = a13 = a14 = a21 = a22 = a23 = a24 = 0.0f0
+    a31 = a32 = a33 = a34 = a41 = a42 = a43 = a44 = 0.0f0
+    @inbounds @simd for k in axes(buf, 1)
+        w1, w2, w3, w4 = buf[k, 1], buf[k, 2], buf[k, 3], buf[k, 4]
+        x1, x2, x3, x4 = x[k, t1], x[k, t2], x[k, t3], x[k, t4]
+        a11, a12, a13, a14 = muladd(w1, x1, a11), muladd(w1, x2, a12), muladd(w1, x3, a13), muladd(w1, x4, a14)
+        a21, a22, a23, a24 = muladd(w2, x1, a21), muladd(w2, x2, a22), muladd(w2, x3, a23), muladd(w2, x4, a24)
+        a31, a32, a33, a34 = muladd(w3, x1, a31), muladd(w3, x2, a32), muladd(w3, x3, a33), muladd(w3, x4, a34)
+        a41, a42, a43, a44 = muladd(w4, x1, a41), muladd(w4, x2, a42), muladd(w4, x3, a43), muladd(w4, x4, a44)
+    end
+    sums = ((a11, a12, a13, a14), (a21, a22, a23, a24), (a31, a32, a33, a34), (a41, a42, a43, a44))
+    @inbounds for i in eachindex(rows), j in 1:n
+        y[rows[i], t + j - 1] = sums[i][j]
+    end
+    return y
+end
+
+# y = W x for a packed W, threaded over blocks of four output rows. One token is
+# decoded and summed in a single pass; several decode each row once, into a buffer
+# that stays in cache while it meets every token.
+function Base.:*(m::_PackedMatrix, x::AbstractMatrix{<:Real})
+    size(x, 1) == size(m, 2) || throw(DimensionMismatch("$(size(m)) * $(size(x))"))
+    xp, data = _packed_input(m, x), _packed_bytes(m)
+    (n_out, n_in), n_tok = size(m), size(x, 2)
+    y = Matrix{Float32}(undef, n_out, n_tok)
+    n_quads = cld(n_out, 4)
+    n_tasks = min(n_quads, 2Threads.nthreads())
+    @sync for c in 1:n_tasks
+        Threads.@spawn begin
+            buf = Matrix{Float32}(undef, n_tok == 1 ? 16 : n_in, 4)
+            for q in (div((c - 1) * n_quads, n_tasks) + 1):div(c * n_quads, n_tasks)
+                rows = (4q - 3):min(4q, n_out)
+                if n_tok == 1
+                    for r in rows
+                        @inbounds y[r, 1] = _row_dot(m, data, r, xp, buf)
+                    end
+                    continue
+                end
+                for (i, r) in enumerate(rows)
+                    _decode_row!(view(buf, :, i), m, data, r)
+                end
+                length(rows) < 4 && fill!(view(buf, :, (length(rows) + 1):4), 0.0f0)
+                for t in 1:4:n_tok
+                    _dot4x4!(y, rows, buf, xp, t, min(4, n_tok - t + 1))
+                end
             end
         end
     end
     return y
 end
 
-function Base.:*(m::FP8Matrix, x::AbstractMatrix{<:Real})
-    size(x, 1) == size(m, 2) || throw(DimensionMismatch("$(size(m)) * $(size(x))"))
-    xf = Matrix{Float32}(x)
-    bytes, n_in, scale = _bytes(m.data), size(m.data, 1), m.scale
-    return _packed_mul!(Matrix{Float32}(undef, size(m, 1), size(x, 2)), xf) do acc, r, x, t, n
-        offset = (r - 1) * n_in
-        if n == 1
-            s = 0.0f0
-            @inbounds @simd for k in 1:n_in
-                s = muladd(_E4M3[bytes[offset + k] + 1], x[k, t], s)
-            end
-            acc[1] = s * scale[r]
-        else
-            t2, t3, t4 = t + min(1, n - 1), t + min(2, n - 1), t + min(3, n - 1)
-            s1 = s2 = s3 = s4 = 0.0f0
-            @inbounds @simd for k in 1:n_in
-                w = _E4M3[bytes[offset + k] + 1]
-                s1 = muladd(w, x[k, t], s1)
-                s2 = muladd(w, x[k, t2], s2)
-                s3 = muladd(w, x[k, t3], s3)
-                s4 = muladd(w, x[k, t4], s4)
-            end
-            acc[1], acc[2], acc[3], acc[4] = s1 * scale[r], s2 * scale[r], s3 * scale[r], s4 * scale[r]
-        end
-    end
-end
-
-function Base.:*(m::NVFP4Matrix, x::AbstractMatrix{<:Real})
-    size(x, 1) == size(m, 2) || throw(DimensionMismatch("$(size(m)) * $(size(x))"))
-    xf = Matrix{Float32}(x)
-    packed, scales = _bytes(m.packed), _bytes(m.scales)
-    n_bytes, n_groups, global_scale = size(m.packed, 1), size(m.scales, 1), m.global_scale
-    return _packed_mul!(Matrix{Float32}(undef, size(m, 1), size(x, 2)), xf) do acc, r, x, t, n
-        t2, t3, t4 = t + min(1, n - 1), t + min(2, n - 1), t + min(3, n - 1)
-        @inbounds for g in 1:n_groups
-            scale = _E4M3[scales[(r - 1) * n_groups + g] + 1] / global_scale
-            offset, col = (r - 1) * n_bytes + 8(g - 1), 16(g - 1)
-            s1 = s2 = s3 = s4 = 0.0f0
-            @simd for b in 1:8
-                lo, hi = _FP4_PAIRS[packed[offset + b] + 1]
-                i, j = col + 2b - 1, col + 2b
-                s1 = muladd(lo, x[i, t], muladd(hi, x[j, t], s1))
-                s2 = muladd(lo, x[i, t2], muladd(hi, x[j, t2], s2))
-                s3 = muladd(lo, x[i, t3], muladd(hi, x[j, t3], s3))
-                s4 = muladd(lo, x[i, t4], muladd(hi, x[j, t4], s4))
-            end
-            acc[1] = muladd(s1, scale, acc[1])
-            acc[2] = muladd(s2, scale, acc[2])
-            acc[3] = muladd(s3, scale, acc[3])
-            acc[4] = muladd(s4, scale, acc[4])
-        end
-    end
-end
-
-Base.:*(m::Union{FP8Matrix,NVFP4Matrix}, x::AbstractVector{<:Real}) = vec(m * reshape(x, :, 1))
+Base.:*(m::_PackedMatrix, x::AbstractVector{<:Real}) = vec(m * reshape(x, :, 1))
 
 # A checkpoint's linear layer as it is stored: NVFP4 or FP8 kept packed (and, for a
 # lazy view, memory-mapped), anything else copied to Float32.

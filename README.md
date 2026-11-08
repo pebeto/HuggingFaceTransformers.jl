@@ -14,7 +14,7 @@ with a leaner dependency tree and a focus on decoder LLMs.
 
 Every architecture below except LLaVA has a numeric-parity test that compares
 logits against a reference recorded from `transformers` in Python. The CPU
-suite is 2066 assertions and runs in about four minutes.
+suite is 2071 assertions and runs in about four minutes.
 
 ## Installation
 
@@ -116,7 +116,8 @@ checkpoint's first two layers, run in float32: logits agree to 1e-5.
 Qwen3.5 also reads compressed-tensors checkpoints, such as
 `unsloth/Qwen3.8-27B-NVFP4`: NVFP4 and FP8 linear layers stay packed and
 memory-mapped, and bf16 embeddings stay in the file. The 27B model then needs
-under 1 GB of its own memory, with its ~20 GB of weights held as page cache.
+under 1 GB of its own memory, with its ~20 GB of weights held as page cache,
+and generates about 0.4 s per token on a 24-thread CPU.
 Weights are decoded exactly and activations stay in float32, so this is
 weight-only quantization; HF's default path also rounds activations to FP8 or
 NVFP4, as FP4 hardware would. Against HF running the checkpoint's first four

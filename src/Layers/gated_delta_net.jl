@@ -105,9 +105,6 @@ function reset!(cache::DeltaNetCache)
     return cache
 end
 
-_l2normalize(x, eps) = x ./ sqrt.(sum(abs2, x; dims=1) .+ eps)
-_silu(x) = x .* NNlib.sigmoid.(x)
-
 function (m::GatedDeltaNet)(
     x::AbstractArray; cache=nothing, step=nothing, position_ids=nothing, padding_mask=nothing
 )
@@ -121,61 +118,88 @@ function (m::GatedDeltaNet)(
     fresh = isnothing(cache) || isnothing(step) || step == 1
     fresh && !isnothing(cache) && reset!(cache)
 
-    # Causal depthwise convolution over the last `kernel` inputs.
-    qkv = m.in_proj_qkv(x)                               # (conv_dim, seq, batch)
-    kernel = size(m.conv1d, 3)
-    previous = isnothing(cache) ? zeros(Float32, size(qkv, 1), kernel - 1, batch) : cache.conv
-    window = cat(previous, qkv; dims=2)
-    conv = sum(m.conv1d[:, 1, j] .* window[:, j:(j + seq_len - 1), :] for j in 1:kernel)
-    isnothing(cache) || (cache.conv .= window[:, (end - kernel + 2):end, :])
-    conv = _silu(conv)
-
-    hk, hv, nk, nv = m.head_k_dim, m.head_v_dim, m.num_k_heads, m.num_v_heads
-    key_dim = nk * hk
-    q = _l2normalize(reshape(conv[1:key_dim, :, :], hk, nk, seq_len, batch), 1.0f-6) ./ sqrt(Float32(hk))
-    k = _l2normalize(reshape(conv[(key_dim + 1):(2key_dim), :, :], hk, nk, seq_len, batch), 1.0f-6)
-    v = reshape(conv[(2key_dim + 1):end, :, :], hv, nv, seq_len, batch)
-    z = reshape(m.in_proj_z(x), hv, nv, seq_len, batch)
+    conv = _causal_conv_silu(m.conv1d, m.in_proj_qkv(x), isnothing(cache) ? nothing : cache.conv)
+    z = m.in_proj_z(x)                                    # (value_dim, seq, batch)
     beta = NNlib.sigmoid.(m.in_proj_b(x))                 # (nv, seq, batch)
     decay = exp.(-exp.(m.A_log) .* NNlib.softplus.(m.in_proj_a(x) .+ m.dt_bias))
 
+    hk, hv, nv = m.head_k_dim, m.head_v_dim, m.num_v_heads
     state = isnothing(cache) ? zeros(Float32, hk, hv, nv, batch) : cache.state
     out = Array{Float32}(undef, hv, nv, seq_len, batch)
-    group = nv ÷ nk
-    heads = vec(collect(Iterators.product(1:nv, 1:batch)))
-    Threads.@threads for i in eachindex(heads)
-        h, b = heads[i]
-        kh = (h - 1) ÷ group + 1
-        _delta_rule!(view(out, :, h, :, b), view(state, :, :, h, b), view(q, :, kh, :, b),
-            view(k, :, kh, :, b), view(v, :, h, :, b), view(beta, h, :, b), view(decay, h, :, b))
+    Threads.@threads for i in 1:(nv * batch)
+        _delta_head!(out, state, conv, z, beta, decay, m, (i - 1) % nv + 1, (i - 1) ÷ nv + 1)
     end
-
-    # Per-head RMS norm, scaled and gated by silu(z).
-    rms = sqrt.(sum(abs2, out; dims=1) ./ hv .+ m.eps)
-    gated = (out ./ rms) .* m.norm_weight .* _silu(z)
-    return m.out_proj(reshape(gated, hv * nv, seq_len, batch))
+    return m.out_proj(reshape(out, hv * nv, seq_len, batch))
 end
 
-# One head, every token in order. Each column `j` of the state is decayed, read
-# against the key, corrected by the delta and read against the query in a single
-# pass.
-function _delta_rule!(out, S, q, k, v, beta, decay)
-    hk, hv = size(S)
-    @inbounds for t in axes(q, 2)
-        d, bt = decay[t], beta[t]
+# The causal depthwise convolution over the last `kernel` inputs, then SiLU. With a
+# cache, `previous` holds the inputs before this call's first and is moved along.
+function _causal_conv_silu(w, qkv, previous)
+    conv_dim, seq_len, batch = size(qkv)
+    kernel = size(w, 3)
+    out = zeros(Float32, conv_dim, seq_len, batch)
+    @inbounds for b in 1:batch, t in 1:seq_len, j in 1:kernel
+        p = t + j - kernel                  # input position; ≤ 0 is before this call
+        p < 1 && isnothing(previous) && continue
+        @simd for c in 1:conv_dim
+            input = p >= 1 ? qkv[c, p, b] : previous[c, p + kernel - 1, b]
+            out[c, t, b] = muladd(w[c, 1, j], input, out[c, t, b])
+        end
+    end
+    @inbounds @simd for i in eachindex(out)
+        out[i] *= NNlib.sigmoid(out[i])
+    end
+    if !isnothing(previous)
+        # The window's last kernel - 1 columns; each read is ahead of every write.
+        @inbounds for i in 1:(kernel - 1), b in 1:batch
+            p = seq_len + i - (kernel - 1)
+            @simd for c in 1:conv_dim
+                previous[c, i, b] = p >= 1 ? qkv[c, p, b] : previous[c, p + kernel - 1, b]
+            end
+        end
+    end
+    return out
+end
+
+# Value head h of sequence b, every token in order. q and k are L2-normalized on
+# the fly (their scale factors folded into the sums), each column `j` of the state
+# is decayed, read against the key, corrected by the delta and read against the
+# query in a single pass, and the head's output is RMS-normalized and gated by
+# silu(z).
+function _delta_head!(out, S, conv, z, beta, decay, m::GatedDeltaNet, h, b)
+    hk, hv, nk, nv = m.head_k_dim, m.head_v_dim, m.num_k_heads, m.num_v_heads
+    kh = (h - 1) ÷ (nv ÷ nk)
+    q0, k0, v0 = kh * hk, (nk + kh) * hk, 2nk * hk + (h - 1) * hv
+    root = sqrt(Float32(hk))
+    @inbounds for t in axes(conv, 2)
+        sq = sk = 0.0f0
+        @simd for i in 1:hk
+            sq = muladd(conv[q0 + i, t, b], conv[q0 + i, t, b], sq)
+            sk = muladd(conv[k0 + i, t, b], conv[k0 + i, t, b], sk)
+        end
+        qn, kn = 1 / (sqrt(sq + 1.0f-6) * root), 1 / sqrt(sk + 1.0f-6)
+        d, bt = decay[h, t, b], beta[h, t, b]
+        energy = 0.0f0
         for j in 1:hv
             recalled = 0.0f0
             @simd for i in 1:hk
-                S[i, j] *= d
-                recalled += S[i, j] * k[i, t]
+                S[i, j, h, b] *= d
+                recalled = muladd(S[i, j, h, b], conv[k0 + i, t, b], recalled)
             end
-            delta = (v[j, t] - recalled) * bt
+            delta = (conv[v0 + j, t, b] - recalled * kn) * bt * kn
             read = 0.0f0
             @simd for i in 1:hk
-                S[i, j] += k[i, t] * delta
-                read += S[i, j] * q[i, t]
+                S[i, j, h, b] = muladd(conv[k0 + i, t, b], delta, S[i, j, h, b])
+                read = muladd(S[i, j, h, b], conv[q0 + i, t, b], read)
             end
-            out[j, t] = read
+            o = read * qn
+            out[j, h, t, b] = o
+            energy = muladd(o, o, energy)
+        end
+        inv_rms = 1 / sqrt(energy / hv + m.eps)
+        @simd for j in 1:hv
+            g = z[(h - 1) * hv + j, t, b]
+            out[j, h, t, b] *= inv_rms * m.norm_weight[j] * (g * NNlib.sigmoid(g))
         end
     end
     return out
