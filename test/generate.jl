@@ -259,3 +259,133 @@ end
         end
     end
 end
+
+@testset verbose = true "generation config, streaming and stop strings" begin
+    TK = HuggingFaceTransformers.Tokenizers
+    function byte_tokenizer()
+        vocab = Dict(string(BYTES_TO_UNICODE[b]) => Int(b) for b in 0x00:0xff)
+        return Tokenizer(
+            BPEModel(vocab, Tuple{String,String}[]), TK.IdentityNormalizer(),
+            ByteLevelPreTokenizer(false, true), ByteLevelDecoder(), AddedToken[],
+            Dict{String,Int}(), Dict{Int,String}(),
+        )
+    end
+    # A SentencePiece-style tokenizer over the given pieces, decoded the way Llama's is.
+    function piece_tokenizer(pieces)
+        vocab = Dict(p => i - 1 for (i, p) in enumerate(pieces))
+        decoder = TK.SequenceDecoder([
+            TK.ReplaceDecoder("▁", " "), TK.ByteFallbackDecoder(), TK.FuseDecoder(),
+            TK.StripDecoder(" ", 1, 0),
+        ])
+        return Tokenizer(
+            BPEModel(vocab, Tuple{String,String}[]; byte_fallback=true), TK.IdentityNormalizer(),
+            ByteLevelPreTokenizer(false, true), decoder, AddedToken[], Dict{String,Int}(),
+            Dict{Int,String}(),
+        )
+    end
+
+    @testset "generation_config.json parses with HF's defaults" begin
+        mktempdir() do dir
+            write(joinpath(dir, "generation_config.json"), """
+                {"bos_token_id": 199998, "do_sample": true,
+                 "eos_token_id": [200002, 199999, 200012], "pad_token_id": 199999}""")
+            cfg = load_generation_config(dir)
+            @test cfg.do_sample && cfg.eos_token_id == [200002, 199999, 200012]
+            @test cfg.pad_token_id == 199999 && cfg.bos_token_id == 199998
+            @test cfg.top_k == 50 && cfg.top_p == 1 && cfg.temperature == 1
+            @test isnothing(cfg.max_new_tokens) && isempty(cfg.stop_strings)
+        end
+        mktempdir() do dir
+            write(joinpath(dir, "generation_config.json"), """
+                {"eos_token_id": 7, "top_k": 20, "top_p": 0.95, "temperature": null,
+                 "max_length": 9, "stop_strings": "END"}""")
+            cfg = load_generation_config(joinpath(dir, "generation_config.json"))
+            @test cfg.eos_token_id == [7] && cfg.top_k == 20 && cfg.top_p == 0.95
+            @test cfg.temperature == 1 && cfg.max_length == 9 && cfg.stop_strings == ["END"]
+        end
+        # Without the file, HF takes the token ids from the model config.
+        mktempdir() do dir
+            write(joinpath(dir, "config.json"), """
+                {"architectures": ["X"], "text_config": {"eos_token_id": 3, "pad_token_id": 0}}""")
+            cfg = load_generation_config(dir)
+            @test cfg.eos_token_id == [3] && cfg.pad_token_id == 0 && !cfg.do_sample
+        end
+        mktempdir() do dir
+            @test_throws ArgumentError load_generation_config(dir)
+        end
+    end
+
+    @testset "generate takes its defaults from a GenerationConfig" begin
+        lm, _ = _tiny_lm()
+        ids = [1, 2, 3]
+        greedy = generate(lm, ids; max_new_tokens=6)
+        cfg = GenerationConfig(; eos_token_id=[greedy[4]], max_new_tokens=6)
+        @test generate(lm, ids; generation_config=cfg) == greedy[1:4]
+        @test generate(lm, ids; generation_config=cfg, eos_token_id=nothing) == greedy
+        @test length(generate(lm, ids; generation_config=GenerationConfig(; max_length=5))) == 5
+        @test length(generate(lm, ids; generation_config=GenerationConfig())) == 3 + 16
+        sampled = GenerationConfig(; do_sample=true, top_k=1, max_new_tokens=6)
+        @test generate(lm, ids; generation_config=sampled, rng=MersenneTwister(3)) == greedy
+        @test generate(lm, [ids, [4]]; generation_config=cfg)[1] == greedy[1:4]
+        @test speculative_generate(lm, lm, ids; generation_config=cfg) == greedy[1:4]
+    end
+
+    @testset "TextStreamer releases whole characters" begin
+        tk = byte_tokenizer()
+        text = "héllo € 😀!"
+        pieces = String[]
+        s = TextStreamer(tk, p -> push!(pieces, p))
+        ids = Int.(codeunits(text))
+        s(ids[1:1])
+        foreach(id -> s([id]), ids[2:end])
+        Generation._end_stream(s)
+        @test pieces == [string(c) for c in text]
+
+        lm, _ = _tiny_lm(; vocab_size=256, seed=0x8888)
+        io = IOBuffer()
+        out = generate(lm, Int.(codeunits("hi")); max_new_tokens=8,
+            streamer=TextStreamer(tk, io; skip_prompt=true))
+        @test String(take!(io)) == decode(tk, out[3:end]) * "\n"
+        @test length(generate(lm, [1, 2]; max_new_tokens=6, streamer=v -> length(v) > 1)) == 3
+    end
+
+    @testset "SentencePiece byte fallback keeps the space and the euro sign" begin
+        tk = piece_tokenizer(["▁The", "▁cost", "▁is", "▁", "<0xE2>", "<0x82>", "<0xAC>", "5"])
+        @test decode(tk, 0:7) == "The cost is €5"
+        pieces = String[]
+        s = TextStreamer(tk, p -> push!(pieces, p); skip_prompt=true)
+        s([0, 1])
+        foreach(id -> s([id]), 2:7)
+        Generation._end_stream(s)
+        @test pieces == [" is", " ", "€", "5"]
+    end
+
+    @testset "a stop string has to overlap the last token, as in HF" begin
+        pieces = ["st", "op", "stop", "opera", "sto", "pper", "las", "topper", "s", "to",
+                  "pped", "at", "tion"]
+        tk = piece_tokenizer(pieces)
+        hits(words) = Generation._hits_stop_string(
+            tk, [findfirst(==(w), pieces) - 1 for w in words], ["stop"], 4)
+        # HF's StopStringCriteria docstring examples, both ways.
+        @test all(hits, (["st", "op"], ["stop"], ["st", "opera"], ["sto", "pper"],
+            ["las", "topper"], ["s", "to", "pped"]))
+        @test !any(hits, (["stop", "at"], ["st", "op", "at"], ["st", "opera", "tion"]))
+    end
+
+    @testset "stop strings end generation and stay in the output" begin
+        tk = byte_tokenizer()
+        lm, _ = _tiny_lm(; vocab_size=256, seed=0x8888)
+        prompt = Int.(codeunits("hi"))
+        free = generate(lm, prompt; max_new_tokens=12)
+        k = findfirst(<(0x80), free[3:end]) + 2
+        stop = string(Char(free[k]))
+        expected = free[1:findfirst(==(free[k]), free[3:end]) + 2]
+        @test length(expected) < length(free)
+        @test generate(lm, prompt; max_new_tokens=12, stop_strings=stop, tokenizer=tk) == expected
+        @test generate(lm, tk, "hi"; max_new_tokens=12, stop_strings=[stop]) == decode(tk, expected)
+        cfg = GenerationConfig(; stop_strings=[stop], max_new_tokens=12)
+        @test generate(lm, [prompt, [1]]; generation_config=cfg, tokenizer=tk)[1] == expected
+        @test_throws ArgumentError generate(lm, prompt; stop_strings=stop)
+        @test_throws ArgumentError generate(lm, prompt; stop_strings=[""], tokenizer=tk)
+    end
+end

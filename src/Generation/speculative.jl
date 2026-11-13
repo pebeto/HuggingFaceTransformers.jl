@@ -20,6 +20,8 @@ Keyword arguments:
 - `do_sample::Bool = false` — greedy when `false`.
 - `temperature::Real = 1.0` — divides logits before softmax (sampling only).
 - `eos_token_id` — `Integer` or vector that terminates generation.
+- `generation_config` — a [`GenerationConfig`](@ref) for the defaults above. Its
+  `top_k`, `top_p`, `repetition_penalty` and `stop_strings` are not used here.
 - `rng::AbstractRNG = Random.default_rng()`.
 
 Each round sync-feeds the last committed token to both models before drafting;
@@ -29,6 +31,19 @@ tokens per target forward instead of one; actual speedup tracks the draft's
 acceptance rate.
 """
 function speculative_generate(
+    target::DecoderLM,
+    draft::DecoderLM,
+    input_ids::AbstractVector{<:Integer};
+    generation_config::Union{Nothing,GenerationConfig}=nothing,
+    kwargs...,
+)
+    supported = (:max_new_tokens, :do_sample, :temperature, :eos_token_id)
+    config = _config_kwargs(generation_config, length(input_ids))
+    defaults = NamedTuple{filter(in(supported), keys(config))}(config)
+    return _speculative_generate(target, draft, input_ids; defaults..., kwargs...)
+end
+
+function _speculative_generate(
     target::DecoderLM,
     draft::DecoderLM,
     input_ids::AbstractVector{<:Integer};

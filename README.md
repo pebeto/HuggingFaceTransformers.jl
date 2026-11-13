@@ -14,7 +14,7 @@ with a leaner dependency tree and a focus on decoder LLMs.
 
 Every architecture below except LLaVA has a numeric-parity test that compares
 logits against a reference recorded from `transformers` in Python. The CPU
-suite is 2071 assertions and runs in about four minutes.
+suite is 2099 assertions and runs in about four minutes.
 
 ## Installation
 
@@ -163,6 +163,21 @@ Token IDs are 0-indexed to match HF, and the return value is the full
 `[prompt..., generated...]` sequence. The two-argument form
 `generate(lm, tokenizer, prompt)` tokenizes and detokenizes around it. Pass a
 vector of prompts to generate them as one left-padded batch.
+
+A checkpoint's `generation_config.json` supplies its stop tokens and sampling
+settings, `TextStreamer` prints text as it arrives, and `stop_strings` ends
+generation on text rather than on token ids:
+
+```julia
+generate(
+    lm,
+    prompt_ids;
+    generation_config=load_generation_config(dir),
+    streamer=TextStreamer(tokenizer; skip_prompt=true),
+    stop_strings=["</tool_call>"],
+    tokenizer=tokenizer,
+)
+```
 
 The KV-cache is preallocated as
 `(head_dim, n_kv_heads, max_seq, batch)` and mutated in place, feature-first so

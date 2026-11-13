@@ -35,6 +35,58 @@ which is the one to reach for in a REPL:
 reply = generate(lm, tokenizer, "Explain why grass is green."; max_new_tokens=64)
 ```
 
+## Checkpoint defaults
+
+Most checkpoints ship a `generation_config.json` with their stop tokens and
+recommended sampling settings. [`Generation.load_generation_config`](@ref) reads it
+into a [`Generation.GenerationConfig`](@ref), and `generate` takes its defaults
+from that. Keywords you pass still win:
+
+```julia
+gen = load_generation_config(dir)
+ids = generate(lm, prompt_ids; generation_config=gen, max_new_tokens=256)
+```
+
+Unset fields take `transformers`' defaults, so a config that turns on
+`do_sample` without naming `top_k` samples with `top_k=50`, as HF does. A
+checkpoint without the file gets its token ids from `config.json`. The one
+difference from HF is the length: when the file sets neither `max_new_tokens` nor
+`max_length`, `generate` adds its usual 16 tokens rather than capping the whole
+sequence at 20.
+
+## Streaming
+
+[`Generation.TextStreamer`](@ref) prints text as it is generated, in the same way
+`transformers.TextStreamer` does:
+
+```julia
+generate(lm, prompt_ids; max_new_tokens=256, streamer=TextStreamer(tokenizer; skip_prompt=true))
+```
+
+Each piece is printed once its characters are complete. A character split across
+tokens, which byte-level BPE and SentencePiece byte fallback both produce, arrives
+whole. A few tokens of context are decoded ahead of each piece, which keeps the
+space a SentencePiece decoder strips from the start of a string. Pass a function
+instead of an `IO` to receive the pieces yourself.
+
+Any callable works as `streamer`. It is called once with the prompt ids, then with
+each new token as a one-element vector, the way HF calls `streamer.put`. Returning
+`false` from a token call stops generation after that token.
+
+## Stop strings
+
+`stop_strings` ends generation when the decoded text produces one of the strings,
+which needs the tokenizer:
+
+```julia
+ids = generate(lm, prompt_ids; stop_strings=["</tool_call>", "\nUser:"], tokenizer=tokenizer)
+```
+
+The form that takes a tokenizer passes it on by itself. Matching follows HF's
+`StopStringCriteria`: a stop string counts when it overlaps the newest token,
+including when that token runs past its end, and it stays in the output. Batched
+generation stops each row on its own.
+
 ## Driving the KV-cache yourself
 
 [`Layers.KVCache`](@ref) is preallocated as
@@ -140,15 +192,14 @@ docstring has the full list. As in HF, `trim_blocks` and `lstrip_blocks` are on,
 and `tojson` writes what Python's `json.dumps` does (`{"a": 1}`, with spaces).
 
 gpt-oss answers in harmony format: its reasoning in an `analysis` channel, then
-the answer in a `final` one, ended by `<|return|>`. Pass the stop tokens from
-`generation_config.json` and keep the final channel:
+the answer in a `final` one, ended by `<|return|>`. Its `generation_config.json`
+holds the stop tokens, so generate with it and keep the final channel:
 
 ```julia
 template = load_chat_template(dir)
-eos = collect(JSON3.read(read(joinpath(dir, "generation_config.json"), String)).eos_token_id)
 messages = [Dict("role" => "user", "content" => "What is the capital of Peru?")]
 prompt = encode(tokenizer, template(messages; reasoning_effort="low"))
-out = generate(lm, prompt; max_new_tokens=256, eos_token_id=eos)
+out = generate(lm, prompt; generation_config=load_generation_config(dir), max_new_tokens=256)
 text = decode(tokenizer, out[(length(prompt) + 1):end]; skip_special_tokens=false)
 answer = match(r"<\|channel\|>final<\|message\|>(.*?)(?:<\|return\|>|<\|end\|>|$)"s, text)[1]
 ```

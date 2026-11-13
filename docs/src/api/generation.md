@@ -4,7 +4,7 @@ CurrentModule = HuggingFaceTransformers.Generation
 
 # Generation
 
-Sampling, chat templating, and speculative decoding.
+Sampling, checkpoint defaults, streaming, chat templating, and speculative decoding.
 
 ```@docs
 Generation
@@ -14,8 +14,11 @@ Generation
 
 ```@docs
 ChatTemplate
+GenerationConfig
+TextStreamer
 apply_chat_template
 generate
 load_chat_template
+load_generation_config
 speculative_generate
 ```

@@ -2,8 +2,9 @@
     HuggingFaceTransformers.Generation
 
 Decoder sampling: `generate()` (greedy / temperature / top-k / top-p /
-repetition penalty / max_new_tokens / EOS), plus the minimal Jinja
-subset needed to render chat templates from `tokenizer_config.json`.
+repetition penalty / max_new_tokens / EOS / stop strings), defaults from
+`generation_config.json`, streaming, plus the minimal Jinja subset needed to
+render chat templates from `tokenizer_config.json`.
 
 `generate`'s signature mirrors HuggingFace's `model.generate` so callers
 from `transformers` use it without relearning the API. Batch-1 only.
@@ -45,6 +46,7 @@ _has_recurrent_state(::Qwen3_5ForCausalLM) = true
 using ..Tokenizers: Tokenizer, encode, decode, pad_token_id
 
 export generate, speculative_generate, ChatTemplate, apply_chat_template, load_chat_template
+export GenerationConfig, load_generation_config, TextStreamer
 
 include("jinja/ast.jl")
 include("jinja/blocks.jl")
@@ -54,6 +56,8 @@ include("jinja/template_parser.jl")
 include("jinja/evaluator.jl")
 include("jinja/renderer.jl")
 include("chat_template.jl")
+include("config.jl")
+include("streaming.jl")
 
 function _softmax(x::AbstractVector{T}) where {T<:AbstractFloat}
     m = maximum(x)
@@ -177,9 +181,29 @@ Keyword arguments mirror HuggingFace's `model.generate`:
   are divided (if positive) or multiplied (if negative) by `penalty`.
 - `eos_token_id`: `Integer` or `AbstractVector{<:Integer}` that
   terminates generation when sampled.
+- `stop_strings`: a string or vector of strings that ends generation once the
+  decoded text produces one, which needs `tokenizer`. As in HF, a stop string
+  must overlap the newest token, and it stays in the output.
+- `tokenizer`: the [`Tokenizer`](@ref HuggingFaceTransformers.Tokenizers.Tokenizer) used to decode for
+  `stop_strings`.
+- `streamer`: called with the prompt ids, then with each new token as a
+  one-element vector, as HF's `streamer.put` is. [`TextStreamer`](@ref) prints the
+  text. A call that returns `false` stops generation after that token.
+- `generation_config`: a [`GenerationConfig`](@ref), usually from
+  [`load_generation_config`](@ref), whose values replace these defaults. Keywords
+  passed explicitly win over it.
 - `rng::AbstractRNG = Random.default_rng()`.
 """
 function generate(
+    lm::DecoderLM,
+    input_ids::AbstractVector{<:Integer};
+    generation_config::Union{Nothing,GenerationConfig}=nothing,
+    kwargs...,
+)
+    return _generate(lm, input_ids; _config_kwargs(generation_config, length(input_ids))..., kwargs...)
+end
+
+function _generate(
     lm::DecoderLM,
     input_ids::AbstractVector{<:Integer};
     max_new_tokens::Integer=16,
@@ -189,14 +213,20 @@ function generate(
     top_p=nothing,
     repetition_penalty::Real=1.0,
     eos_token_id=nothing,
+    stop_strings=nothing,
+    tokenizer::Union{Nothing,Tokenizer}=nothing,
+    streamer=nothing,
     rng::AbstractRNG=Random.default_rng(),
 )
     isempty(input_ids) && throw(ArgumentError("input_ids must be non-empty"))
     max_new_tokens >= 0 ||
         throw(ArgumentError("max_new_tokens must be ≥ 0, got $(max_new_tokens)"))
+    stops = _check_stop_strings(_strings(stop_strings), tokenizer)
+    longest = maximum(ncodeunits, stops; init=0)
 
     all_ids = Int[Int(id) for id in input_ids]
     max_new_tokens == 0 && return all_ids
+    isnothing(streamer) || streamer(copy(all_ids))
 
     n_prompt = length(input_ids)
     caches = build_caches(lm, n_prompt + max_new_tokens, 1)
@@ -221,7 +251,9 @@ function generate(
         push!(all_ids, next_id)
         new_count += 1
 
-        next_id in eos_set && break
+        halt = !isnothing(streamer) && streamer([next_id]) === false
+        (halt || next_id in eos_set) && break
+        _hits_stop_string(tokenizer, all_ids, stops, longest) && break
         new_count >= max_new_tokens && break
 
         cur = reshape([next_id], 1, 1)
@@ -229,6 +261,7 @@ function generate(
         last_logits = collect(logits[:, 1, 1])
     end
 
+    isnothing(streamer) || _end_stream(streamer)
     return all_ids
 end
 
@@ -248,12 +281,26 @@ offset would change the vector; its trunk counts each row's real tokens from the
 padding mask rather than reusing the padded index. Every model in the supported
 decoder set batches.
 
-Each row stops at its own EOS while the others continue; finished rows are fed
-`pad_id` and their output discarded. Greedy decoding reproduces the
+Each row stops at its own EOS or stop string while the others continue; finished
+rows are fed `pad_id` and their output discarded. A `generation_config` applies as
+in the single-prompt method, its `max_length` counted from the longest prompt,
+and supplies `pad_id` from its `pad_token_id`. Streaming is single-prompt only. Greedy decoding reproduces the
 single-prompt method exactly. With `do_sample`, draws are taken per row from the
 shared `rng`, so the stream differs from running each prompt separately.
 """
 function generate(
+    lm::DecoderLM,
+    prompts::AbstractVector{<:AbstractVector{<:Integer}};
+    generation_config::Union{Nothing,GenerationConfig}=nothing,
+    kwargs...,
+)
+    n_prompt = maximum(length, prompts; init=0)
+    return _generate(
+        lm, prompts; _config_kwargs(generation_config, n_prompt; batched=true)..., kwargs...
+    )
+end
+
+function _generate(
     lm::DecoderLM,
     prompts::AbstractVector{<:AbstractVector{<:Integer}};
     max_new_tokens::Integer=16,
@@ -263,6 +310,8 @@ function generate(
     top_p=nothing,
     repetition_penalty::Real=1.0,
     eos_token_id=nothing,
+    stop_strings=nothing,
+    tokenizer::Union{Nothing,Tokenizer}=nothing,
     pad_id::Integer=0,
     rng::AbstractRNG=Random.default_rng(),
 )
@@ -270,6 +319,8 @@ function generate(
     any(isempty, prompts) && throw(ArgumentError("every prompt must be non-empty"))
     max_new_tokens >= 0 ||
         throw(ArgumentError("max_new_tokens must be ≥ 0, got $(max_new_tokens)"))
+    stops = _check_stop_strings(_strings(stop_strings), tokenizer)
+    longest = maximum(ncodeunits, stops; init=0)
 
     rows = [Int[Int(id) for id in p] for p in prompts]
     max_new_tokens == 0 && return rows
@@ -317,7 +368,8 @@ function generate(
             )
             push!(rows[b], id)
             next[1, b] = id
-            id in eos_set && (finished[b] = true)
+            (id in eos_set || _hits_stop_string(tokenizer, rows[b], stops, longest)) &&
+                (finished[b] = true)
         end
 
         (all(finished) || t == max_new_tokens) && break
@@ -343,11 +395,12 @@ end
 """
     generate(lm, tokenizer, prompt::AbstractString; kwargs...) -> String
 
-Tokenize → generate → detokenize. The REPL-friendly entry point.
+Tokenize → generate → detokenize. The REPL-friendly entry point. The tokenizer
+is passed on, so `stop_strings` work without naming it again.
 """
 function generate(lm::DecoderLM, tokenizer::Tokenizer, prompt::AbstractString; kwargs...)
     ids = encode(tokenizer, prompt)
-    out_ids = generate(lm, ids; kwargs...)
+    out_ids = generate(lm, ids; tokenizer=tokenizer, kwargs...)
     return decode(tokenizer, out_ids)
 end
 
@@ -356,9 +409,9 @@ end
         -> Vector{String}
 
 Batched tokenize → generate → detokenize. `pad_id` defaults to the tokenizer's
-padding token, falling back to 0 for the decoder-only checkpoints that declare
-none; the padded positions are masked out either way, so the value only matters
-if a row's own output is read before masking.
+padding token, then to a `generation_config`'s, then to 0 for the decoder-only
+checkpoints that declare none; the padded positions are masked out either way, so
+the value only matters if a row's own output is read before masking.
 """
 function generate(
     lm::DecoderLM,
@@ -368,7 +421,8 @@ function generate(
     kwargs...,
 )
     ids = [encode(tokenizer, p) for p in prompts]
-    outs = generate(lm, ids; pad_id=isnothing(pad_id) ? 0 : pad_id, kwargs...)
+    pad = isnothing(pad_id) ? (;) : (; pad_id=pad_id)
+    outs = generate(lm, ids; tokenizer=tokenizer, pad..., kwargs...)
     return [decode(tokenizer, o) for o in outs]
 end
 
