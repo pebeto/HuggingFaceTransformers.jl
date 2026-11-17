@@ -255,6 +255,12 @@ using HuggingFaceTransformers
         end
     end
 
+    if !isempty(get(ENV, "HFT_TEST_PARITY_GGUF", ""))
+        @testset verbose = true "GGUF parity" begin
+            include("parity_gguf.jl")
+        end
+    end
+
     if !isempty(get(ENV, "HFT_TEST_PARITY_EMBEDDING", ""))
         @testset verbose = true "Embedding parity" begin
             include("parity_embedding.jl")

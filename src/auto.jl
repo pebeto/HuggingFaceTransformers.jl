@@ -25,6 +25,14 @@ dir = HFHub.snapshot_download("gpt2")
 lm, tokenizer = load(dir), Tokenizers.load_tokenizer(dir)
 ```
 
+A llama.cpp GGUF file loads the same way, from a path ending in `.gguf` or from a
+repository with `gguf_file` naming the file to fetch; only that file downloads.
+See [`Models.load_gguf_model`](@ref) for the architectures it covers:
+
+```julia
+lm = load("Qwen/Qwen2.5-0.5B-Instruct-GGUF"; gguf_file="qwen2.5-0.5b-instruct-q4_k_m.gguf")
+```
+
 Unsupported architectures throw and name what was found. See
 [`Models.AUTO_ARCHITECTURES`](@ref) for the supported set and
 [`Models.load_pretrained`](@ref) for the offline half.
@@ -35,8 +43,20 @@ function load(
     cache_dir::AbstractString=HFHub.default_cache_dir(),
     token::Union{AbstractString,Nothing}=HFHub.default_token(),
     verbose::Bool=false,
+    gguf_file::Union{Nothing,AbstractString}=nothing,
     kwargs...,
 )
+    if isnothing(gguf_file) && isfile(repo_or_dir) && endswith(repo_or_dir, ".gguf")
+        return Models.load_gguf_model(repo_or_dir)
+    end
+    if !isnothing(gguf_file)
+        path = isdir(repo_or_dir) ? joinpath(repo_or_dir, gguf_file) :
+            HFHub.download_file(
+                repo_or_dir, gguf_file; revision=revision, cache_dir=cache_dir, token=token,
+                verbose=verbose,
+            )
+        return Models.load_gguf_model(path)
+    end
     dir = if isdir(repo_or_dir)
         repo_or_dir
     else

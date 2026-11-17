@@ -111,6 +111,38 @@ an entry already in a snapshot, so a cache written by another user or tool is
 safe to load from.
 PyTorch `.bin` pickles are not read at all.
 
+## GGUF files
+
+llama.cpp's GGUF files load through the same front door. Name the file in the
+repository, and only that file downloads:
+
+```julia
+lm = load("Qwen/Qwen2.5-0.5B-Instruct-GGUF"; gguf_file="qwen2.5-0.5b-instruct-q4_k_m.gguf")
+lm = load("path/to/model.gguf")
+```
+
+[`Models.load_gguf_model`](@ref) reads the architecture and hyperparameters from
+the file's metadata and maps llama.cpp's tensor names (`blk.0.attn_q.weight` and
+so on) onto the HF names the state-dict tables expect, so a GGUF model is the
+same model type a safetensors checkpoint builds. It covers the `llama` (Llama 2
+and 3.0, Mistral, SmolLM), `qwen2`, `qwen3` and `gemma2` architectures. Two
+conversions llama.cpp makes are undone on the way in: the llama family's query
+and key rows are reordered for its rotary layout, and Gemma 2's norm weights
+carry a folded-in 1.
+
+Every tensor type in the common quantizations decodes: F32, F16, BF16, the
+legacy Q4_0 to Q8_0 blocks, the k-quants Q2_K to Q6_K, and IQ4_NL, which
+llama.cpp substitutes in rows too short for a k-quant block. Each tensor is
+dequantized to `Float32` as it is copied into the model, so memory peaks at the
+dense model plus one tensor. A Q4_K_M file therefore takes as much RAM as the
+full-precision model once loaded. Checked against `transformers` loading the same
+files, the logits agree to within 2e-5.
+
+The tokenizer is not read from the file. Load it from the original repository
+with `load_tokenizer`, along with its chat template and `generation_config.json`.
+Llama 3.1 and later store per-dimension RoPE factors in GGUF, which raise an
+error rather than load as plain RoPE.
+
 ## Inspecting the wiring
 
 Every family exposes its mapping table, so you can see exactly which HF

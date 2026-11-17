@@ -15,8 +15,9 @@ Re-read the list whenever a PR feels like it's growing.
    `BytePairEncoding`, `DoubleArrayTries`, `Fetch`, `ValSplit`,
    `WordTokenizers`, `TextEncodeBase`, `StructWalk`, `PrimitiveOneHot`,
    `Tricks`). Most of those are abandoned alongside Transformers.jl itself.
-2. **Safetensors only.** No Pickle, no PyTorch `.bin`. If a model isn't
-   published in safetensors, we don't load it. The whole ecosystem has moved.
+2. **Safetensors, never pickles.** No Pickle, no PyTorch `.bin`. If a model
+   isn't published in safetensors or as a llama.cpp GGUF file, we don't load
+   it. The whole ecosystem has moved.
 3. **Generic loaders, not per-model branches.** A new model adds a config,
    layer wiring, and a state-dict mapping. It does not add a tokenizer
    subclass, a textencoder subclass, or a special download path. The hardcoded

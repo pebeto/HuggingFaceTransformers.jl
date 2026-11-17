@@ -34,3 +34,10 @@ read_config
 config_from_json
 AUTO_ARCHITECTURES
 ```
+
+## GGUF files
+
+```@docs
+load_gguf_model
+GGUFWeights
+```

@@ -33,6 +33,7 @@ using ..Layers:
     KVCache,
     _gelu_exact
 using ..Tokenizers: Tokenizer, encode
+using ..GGUF: GGUF
 
 export load_weights, load_into!
 export TokenEmbedding, DecoderLayer, DecoderModel, build_caches, load_state_dict!
@@ -72,6 +73,7 @@ export Float8E4M3, FP8Matrix, NVFP4Matrix, BF16Matrix
 export convert_eltype, fp16, bf16, fp32
 export QuantizedInt8Matrix, quantize_int8
 export read_config, config_from_json, load_pretrained, AUTO_ARCHITECTURES
+export GGUFWeights, load_gguf_model
 
 include("float8.jl")
 include("weights.jl")
@@ -103,5 +105,6 @@ include("dtype.jl")
 include("quantize.jl")
 # Last: the dispatch table references every config and wrapper type above.
 include("auto.jl")
+include("gguf.jl")
 
 end # module Models

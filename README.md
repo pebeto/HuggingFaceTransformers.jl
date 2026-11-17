@@ -4,9 +4,9 @@
 [![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://pebeto.github.io/HuggingFaceTransformers.jl/dev)
 
 Load and run HuggingFace transformer checkpoints in Julia. Weights come from
-the Hub in safetensors format, tokenizers from `tokenizer.json`, and the
-forward passes are plain Flux layers, so they differentiate and move to a GPU
-like any other Flux model.
+the Hub in safetensors format or as llama.cpp GGUF files, tokenizers from
+`tokenizer.json`, and the forward passes are plain Flux layers, so they
+differentiate and move to a GPU like any other Flux model.
 
 The spiritual successor to
 [`Transformers.jl`](https://github.com/chengchingwen/Transformers.jl), rebuilt
@@ -14,7 +14,7 @@ with a leaner dependency tree and a focus on decoder LLMs.
 
 Every architecture below except LLaVA has a numeric-parity test that compares
 logits against a reference recorded from `transformers` in Python. The CPU
-suite is 2099 assertions and runs in about four minutes.
+suite is 2139 assertions and runs in about four minutes.
 
 ## Installation
 
@@ -343,13 +343,19 @@ match the uncheckpointed path exactly, so it buys memory rather than accuracy.
 
 ## GGUF
 
-`load_gguf(path)` reads a llama.cpp GGUF file and returns its metadata plus
-tensors dequantized to `Float32`, keeping GGML's contiguous-first dimension
-order, which lines up with Julia's column-major layout. F32, F16, Q8_0, and
-Q4_0 are dequantized. The k-quants (Q4_K, Q5_K, Q6_K and friends) throw an
-error naming the dtype rather than returning garbage. Mapping a GGUF file onto
-one of the model types above is not wired up, so this is a loader, not yet a
-second checkpoint format.
+llama.cpp GGUF files load as models of the types above:
+
+```julia
+lm = load("Qwen/Qwen2.5-0.5B-Instruct-GGUF"; gguf_file="qwen2.5-0.5b-instruct-q4_k_m.gguf")
+```
+
+The `llama`, `qwen2`, `qwen3` and `gemma2` architectures are covered, in F32,
+F16, BF16, Q4_0 to Q8_0, the k-quants Q2_K to Q6_K, and IQ4_NL. Weights are
+dequantized to `Float32` at load, so a Q4_K_M file needs the full-precision
+model's memory. Logits match `transformers` loading the same file to within
+2e-5. The tokenizer comes from the original repository, not the GGUF file.
+`load_gguf(path)` is the lower-level reader, returning the metadata and every
+tensor dequantized.
 
 ## Examples
 
