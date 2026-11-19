@@ -57,6 +57,16 @@ generated token reads about 17 GB of weights, so at ~65 GB/s of memory
 bandwidth the floor is near 0.26 s; most of the remaining gap is the arithmetic
 of decoding NVFP4.
 
+GGUF files load the same way. Their projection matrices become
+[`Models.GGUFMatrix`](@ref) and their embedding a [`Models.GGUFEmbedding`](@ref),
+both over the memory-mapped file and multiplied through the same kernel. Q4_K,
+Q6_K and Q8_0, which make up nearly all of a Q4_K_M, Q6_K or Q8_0 file, have
+their own single-token kernels that apply each block's scales after summing its
+integer codes against the input; the other types decode a row and then multiply
+it. Qwen2.5-7B-Instruct at Q4_K_M peaks at 5.2 GB and decodes at about 0.13 s
+per token on 12 threads, with its largest matrices read at 50 to 60 GB/s. The
+same file dequantized with `packed=false` would need about 30 GB.
+
 This is weight-only quantization: activations stay in Float32. HF's default path
 for these checkpoints also rounds each layer's input to FP8 per token or to NVFP4
 per group of 16, as FP4 hardware does, so its logits differ slightly from these.

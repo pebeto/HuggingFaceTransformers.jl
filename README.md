@@ -14,7 +14,7 @@ with a leaner dependency tree and a focus on decoder LLMs.
 
 Every architecture below except LLaVA has a numeric-parity test that compares
 logits against a reference recorded from `transformers` in Python. The CPU
-suite is 2139 assertions and runs in about four minutes.
+suite is 2209 assertions and runs in about five minutes.
 
 ## Installation
 
@@ -350,10 +350,11 @@ lm = load("Qwen/Qwen2.5-0.5B-Instruct-GGUF"; gguf_file="qwen2.5-0.5b-instruct-q4
 ```
 
 The `llama`, `qwen2`, `qwen3` and `gemma2` architectures are covered, in F32,
-F16, BF16, Q4_0 to Q8_0, the k-quants Q2_K to Q6_K, and IQ4_NL. Weights are
-dequantized to `Float32` at load, so a Q4_K_M file needs the full-precision
-model's memory. Logits match `transformers` loading the same file to within
-2e-5. The tokenizer comes from the original repository, not the GGUF file.
+F16, BF16, Q4_0 to Q8_0, the k-quants Q2_K to Q6_K, and IQ4_NL. Weights stay
+quantized and memory-mapped, decoded as they are multiplied, so Qwen2.5-7B at
+Q4_K_M runs in 5.2 GB at about 0.13 s per token on a 12-core CPU;
+`packed=false` dequantizes to a dense `Float32` model for training or a GPU.
+Logits match `transformers` loading the same file to within 2e-5. The tokenizer comes from the original repository, not the GGUF file.
 `load_gguf(path)` is the lower-level reader, returning the metadata and every
 tensor dequantized.
 

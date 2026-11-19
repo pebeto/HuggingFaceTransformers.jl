@@ -141,14 +141,15 @@ function Flux.Optimisers.trainable(lm::GemmaForCausalLM)
 end
 
 """
-    GemmaForCausalLM(cfg::GemmaConfig)
+    GemmaForCausalLM(cfg::GemmaConfig; init=Flux.glorot_uniform)
 
 Materialize a fresh, randomly-initialized `GemmaForCausalLM` matching
 the shapes in `cfg`. The per-layer attention is built with alternating
 sliding-window: even-indexed layers get `cfg.sliding_window`, odd get
-plain causal.
+plain causal. `init` builds the embedding and every projection matrix from its
+dimensions.
 """
-function GemmaForCausalLM(cfg::GemmaConfig)
+function GemmaForCausalLM(cfg::GemmaConfig; init=Flux.glorot_uniform)
     rope = RoPE(cfg.head_dim; base=cfg.rope_theta)
     eps = Float32(cfg.rms_norm_eps)
 
@@ -170,21 +171,22 @@ function GemmaForCausalLM(cfg::GemmaConfig)
                 window_size=(i % 2 == 0) ? cfg.sliding_window : nothing,
                 softcap=cfg.attn_logit_softcapping,
                 query_scale=query_scale,
+                init=init,
             ),
             GemmaRMSNorm(cfg.hidden_size, eps),
             GemmaRMSNorm(cfg.hidden_size, eps),
             GemmaRMSNorm(cfg.hidden_size, eps),
             GemmaRMSNorm(cfg.hidden_size, eps),
-            GeluGatedMLP(cfg.hidden_size, cfg.intermediate_size),
+            GeluGatedMLP(cfg.hidden_size, cfg.intermediate_size; init=init),
         ) for i in 0:(cfg.num_hidden_layers - 1)
     ]
 
     model = GemmaModel(
-        TokenEmbedding(cfg.vocab_size, cfg.hidden_size),
+        TokenEmbedding(cfg.vocab_size, cfg.hidden_size; init=init),
         layers,
         GemmaRMSNorm(cfg.hidden_size, eps),
     )
-    lm_head = Linear(cfg.hidden_size, cfg.vocab_size)
+    lm_head = Linear(cfg.hidden_size, cfg.vocab_size; init=init)
     return GemmaForCausalLM(cfg, model, lm_head)
 end
 

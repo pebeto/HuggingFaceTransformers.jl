@@ -27,7 +27,8 @@ lm, tokenizer = load(dir), Tokenizers.load_tokenizer(dir)
 
 A llama.cpp GGUF file loads the same way, from a path ending in `.gguf` or from a
 repository with `gguf_file` naming the file to fetch; only that file downloads.
-See [`Models.load_gguf_model`](@ref) for the architectures it covers:
+Its weights stay quantized unless `packed=false` is passed. See
+[`Models.load_gguf_model`](@ref) for the architectures it covers:
 
 ```julia
 lm = load("Qwen/Qwen2.5-0.5B-Instruct-GGUF"; gguf_file="qwen2.5-0.5b-instruct-q4_k_m.gguf")
@@ -47,7 +48,7 @@ function load(
     kwargs...,
 )
     if isnothing(gguf_file) && isfile(repo_or_dir) && endswith(repo_or_dir, ".gguf")
-        return Models.load_gguf_model(repo_or_dir)
+        return Models.load_gguf_model(repo_or_dir; kwargs...)
     end
     if !isnothing(gguf_file)
         path = isdir(repo_or_dir) ? joinpath(repo_or_dir, gguf_file) :
@@ -55,7 +56,7 @@ function load(
                 repo_or_dir, gguf_file; revision=revision, cache_dir=cache_dir, token=token,
                 verbose=verbose,
             )
-        return Models.load_gguf_model(path)
+        return Models.load_gguf_model(path; kwargs...)
     end
     dir = if isdir(repo_or_dir)
         repo_or_dir

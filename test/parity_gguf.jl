@@ -23,8 +23,8 @@ end
 for name in _gguf_selected(get(ENV, "HFT_TEST_PARITY_GGUF", ""))
     fixture = JSON3.read(read(joinpath(@__DIR__, "fixtures", "gguf_$(name)_parity.json"), String))
     path = download_file(String(fixture.repo_id), String(fixture.gguf_file))
-    @testset "GGUF $(name) ($(fixture.gguf_file))" begin
-        lm = load_gguf_model(path)
+    @testset "GGUF $(name) ($(fixture.gguf_file)), packed=$(packed)" for packed in (true, false)
+        lm = load_gguf_model(path; packed=packed)
         ids = Int[Int(x) for x in fixture.input_token_ids]
         logits = collect(lm(reshape(ids, :, 1); step=1)[:, end, 1])
         @test argmax(logits) - 1 == fixture.argmax_token_id

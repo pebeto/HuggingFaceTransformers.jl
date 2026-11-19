@@ -89,16 +89,19 @@ end
 
 # llama.cpp's converter reorders each head's query and key outputs from HF's
 # split-halves rotary layout to interleaved pairs: HF output `a * half + b` of a
-# head becomes output `2b + a`. Undo that on GGML's (in, out) layout.
-function _unpermute_rotary(w::AbstractMatrix, heads::Integer)
-    head_dim = size(w, 2) ÷ heads
+# head becomes output `2b + a`. This is the file's output for each HF output.
+function _rotary_order(n_out::Integer, heads::Integer)
+    head_dim = n_out ÷ heads
     half = head_dim ÷ 2
-    cols = Vector{Int}(undef, size(w, 2))
+    order = Vector{Int}(undef, n_out)
     for h in 0:(heads - 1), a in 0:1, b in 0:(half - 1)
-        cols[h * head_dim + a * half + b + 1] = h * head_dim + 2b + a + 1
+        order[h * head_dim + a * half + b + 1] = h * head_dim + 2b + a + 1
     end
-    return w[:, cols]
+    return order
 end
+
+# Undo the reordering on GGML's (in, out) layout.
+_unpermute_rotary(w::AbstractMatrix, heads::Integer) = w[:, _rotary_order(size(w, 2), heads)]
 
 # GGUF stores these floats as Float32. Their shortest decimal form is the value
 # the HF config held: `1f-6` reads back as `1e-6`, not `9.99999997e-7`.
@@ -160,12 +163,84 @@ function _gguf_config(idx::GGUF._GGUFIndex, arch::AbstractString)
     return raw
 end
 
+# A weight's shape with no storage behind it, which the model constructors
+# allocate in place of every matrix when the matrices come from the file instead.
+struct _Unallocated{N} <: AbstractArray{Float32,N}
+    dims::NTuple{N,Int}
+end
+Base.size(a::_Unallocated) = a.dims
+Base.getindex(::_Unallocated, ::Int...) = error("this weight was never loaded")
+_unallocated(dims::Integer...) = _Unallocated(Int.(dims))
+
+# A 2-D GGUF tensor as the HF-shaped (out, in) matrix it stores, left in the file.
+function _gguf_matrix(idx::GGUF._GGUFIndex, name::AbstractString)
+    info = idx.tensors[name]
+    n_in, n_out = info.dims
+    per_block, block_bytes = GGUF._block(info.type)
+    nbytes = n_out * (n_in ÷ per_block) * block_bytes
+    return GGUFMatrix(info.type, view(idx.buf, (info.offset + 1):(info.offset + nbytes)), n_out, n_in)
+end
+
+# Build the model around placeholders, then put every weight in by its path: each
+# matrix as a `GGUFMatrix` over the file, the embedding as a `GGUFEmbedding`, and
+# the norms and biases, which are small, decoded to `Float32`.
+function _load_gguf_packed(model_type, cfg, weights::GGUFWeights, mapping)
+    idx, names = weights.index, weights.names
+    leaves = IdDict{Any,Any}()
+    paths = Dict{Tuple,Any}()
+    missing_keys = setdiff(keys(mapping), keys(names))
+    isempty(missing_keys) ||
+        throw(ArgumentError("GGUF file is missing tensors for $(sort(collect(missing_keys)))"))
+    for (key, (path, transform)) in mapping
+        name = names[key]
+        paths[path] = if length(idx.tensors[name].dims) == 2
+            m = _gguf_matrix(idx, name)
+            if weights.arch == "llama" && occursin(r"[qk]_proj\.weight$", key)
+                heads = endswith(key, "q_proj.weight") ? weights.heads : weights.kv_heads
+                m = _permute_rows(m, _rotary_order(size(m, 1), heads))
+            end
+            transform === :transpose ? GGUFEmbedding(m) : m
+        else
+            weights[key]
+        end
+    end
+    if cfg.tie_word_embeddings
+        paths[(:lm_head, :weight)] = _gguf_matrix(idx, "token_embd.weight")
+    end
+
+    lm = model_type(cfg; init=_unallocated)
+    exclude(_, x) = x isa AbstractArray{<:Number} || Functors.isleaf(x)
+    loaded = Functors.fmap_with_path(lm; exclude=exclude) do kp, x
+        path = Tuple(kp.keys)
+        haskey(paths, path) || return x
+        w = paths[path]
+        size(w) == size(x) ||
+            throw(DimensionMismatch("$(join(path, '.')): model $(size(x)) vs file $(size(w))"))
+        return w
+    end
+    unfilled = String[]
+    Functors.fmap_with_path(loaded; exclude=exclude) do kp, x
+        x isa _Unallocated && push!(unfilled, join(kp.keys, '.'))
+        return x
+    end
+    isempty(unfilled) || throw(ArgumentError("GGUF file left weights unset: $(unfilled)"))
+    return loaded
+end
+
 """
-    load_gguf_model(path) -> model
+    load_gguf_model(path; packed=true) -> model
 
 Build a model from a llama.cpp GGUF file. The architecture and hyperparameters
-come from the file's metadata, and every tensor is dequantized to `Float32` as it
-is copied in, so memory peaks at the model plus one tensor.
+come from the file's metadata.
+
+Weights stay in the file's encoding by default: every projection matrix becomes a
+[`GGUFMatrix`](@ref) over the memory-mapped file and the embedding a
+[`GGUFEmbedding`](@ref), decoded block by block as they are multiplied, so a
+Q4_K_M model takes about its file size in memory. Only the norms and biases are
+decoded up front. This path runs on the CPU. With `packed=false` every tensor is
+dequantized to `Float32` as it is copied in, for a dense model that trains and
+moves to a GPU like any other; memory then peaks at the dense model plus one
+tensor.
 
 Supported: GGUF architectures `llama` (Llama 2 and 3.0, Mistral, SmolLM and the
 like), `qwen2`, `qwen3` and `gemma2`, in any tensor type
@@ -175,7 +250,7 @@ per-dimension RoPE factors, which raise rather than load as plain RoPE.
 The tokenizer stays separate: load it from the original repository with
 `load_tokenizer`.
 """
-function load_gguf_model(path::AbstractString)
+function load_gguf_model(path::AbstractString; packed::Bool=true)
     idx = GGUF._open_gguf(path)
     arch = String(get(idx.metadata, "general.architecture", ""))
     haskey(_GGUF_ARCHITECTURES, arch) || throw(
@@ -199,5 +274,10 @@ function load_gguf_model(path::AbstractString)
     config_type, model_type = AUTO_ARCHITECTURES[_GGUF_ARCHITECTURES[arch]]
     cfg = config_from_json(config_type, raw)
     weights = GGUFWeights(idx, names, arch, raw[:num_attention_heads], raw[:num_key_value_heads])
-    return _build_and_load(model_type, cfg, weights)
+    packed || return _build_and_load(model_type, cfg, weights)
+    return _load_gguf_packed(model_type, cfg, weights, _state_dict_map(model_type, cfg))
 end
+
+_state_dict_map(::Type{<:LlamaForCausalLM}, cfg) = llama_state_dict_map(cfg)
+_state_dict_map(::Type{<:QwenForCausalLM}, cfg) = qwen_state_dict_map(cfg)
+_state_dict_map(::Type{<:GemmaForCausalLM}, cfg) = gemma_state_dict_map(cfg)

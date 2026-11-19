@@ -132,11 +132,18 @@ carry a folded-in 1.
 
 Every tensor type in the common quantizations decodes: F32, F16, BF16, the
 legacy Q4_0 to Q8_0 blocks, the k-quants Q2_K to Q6_K, and IQ4_NL, which
-llama.cpp substitutes in rows too short for a k-quant block. Each tensor is
-dequantized to `Float32` as it is copied into the model, so memory peaks at the
-dense model plus one tensor. A Q4_K_M file therefore takes as much RAM as the
-full-precision model once loaded. Checked against `transformers` loading the same
-files, the logits agree to within 2e-5.
+llama.cpp substitutes in rows too short for a k-quant block.
+
+The weights stay in the file's encoding. Each projection matrix becomes a
+[`Models.GGUFMatrix`](@ref) over the memory-mapped file, decoded block by block
+as it is multiplied, and the embedding a [`Models.GGUFEmbedding`](@ref) that
+decodes only the rows of the tokens it looks up. Only the norms and biases are
+decoded up front, so a model takes about its file size in memory: Qwen2.5-7B at
+Q4_K_M peaks at 5.2 GB and generates at about 0.13 s per token on a 12-core CPU.
+This path runs on the CPU. `load(...; packed=false)` dequantizes every tensor to
+`Float32` instead, for a dense model that trains and moves to a GPU like any
+other, at the full-precision model's memory. Both ways, the logits agree with
+`transformers` loading the same file to within 2e-5.
 
 The tokenizer is not read from the file. Load it from the original repository
 with `load_tokenizer`, along with its chat template and `generation_config.json`.

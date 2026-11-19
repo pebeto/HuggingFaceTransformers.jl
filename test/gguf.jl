@@ -7,7 +7,7 @@ using HuggingFaceTransformers.GGUF: load_gguf, GGUFFile
 using HuggingFaceTransformers.Models:
     LlamaConfig, QwenConfig, GemmaConfig, LlamaForCausalLM, QwenForCausalLM, GemmaForCausalLM,
     llama_state_dict_map, qwen_state_dict_map, gemma_state_dict_map, config_from_json,
-    load_gguf_model, _resolve
+    load_gguf_model, _resolve, GGUFMatrix, GGUFEmbedding
 
 # Minimal GGUF writer, used only to build round-trip fixtures in-process.
 _w(io, x) = write(io, htol(x))
@@ -374,7 +374,12 @@ end
                 path = _write_model_gguf(joinpath(dir, "$(arch).gguf"), lm, cfg, map_fn(cfg), arch; extra_meta=meta)
                 loaded = load_gguf_model(path)
                 @test loaded isa T && loaded.config == cfg
+                @test loaded.model.layers[1].self_attn.wq.weight isa GGUFMatrix
+                @test loaded.model.embed_tokens.weight isa GGUFEmbedding
                 @test loaded(ids) ≈ lm(ids) rtol = 1.0e-5
+                dense = load_gguf_model(path; packed=false)
+                @test dense.model.layers[1].self_attn.wq.weight isa Matrix{Float32}
+                @test dense(ids) ≈ lm(ids) rtol = 1.0e-5
                 arch == "llama" && @test HuggingFaceTransformers.load(path)(ids) ≈ lm(ids) rtol = 1.0e-5
             end
         end
@@ -393,4 +398,28 @@ end
             tensors=Dict{String,Tuple{Int,Vector{Int},Vector{UInt8}}}())
         @test_throws ArgumentError load_gguf_model(path)
     end
+end
+
+@testset verbose = true "packed GGUF matrices multiply as their decoded values do" begin
+    # Rows built from the real blocks of each type, two block orders alternating, so
+    # the fused kernels and the decode-then-multiply ones meet the same bytes the
+    # reference decoder reads exactly.
+    blocks = JSON3.read(read(joinpath(@__DIR__, "fixtures", "gguf_quant_blocks.json"), String))
+    rng = Xoshiro(41)
+    for (name, b) in pairs(blocks)
+        bytes = hex2bytes(String(b.bytes))
+        half = length(bytes) ÷ 2
+        rows = [isodd(r) ? bytes : [bytes[(half + 1):end]; bytes[1:half]] for r in 1:9]
+        n_in = length(b.values)
+        m = GGUFMatrix(Int(b.type), reduce(vcat, rows), 9, n_in)
+        dense = reduce(hcat, [HuggingFaceTransformers.GGUF._dequantize!(Vector{Float32}(undef, n_in), Val(Int(b.type)), r) for r in rows])'
+        @testset "$(name)" begin
+            @test size(m) == (9, n_in) && m[2, n_in] == dense[2, n_in]
+            @test all(n -> (x = randn(rng, Float32, n_in, n); m * x ≈ dense * x), (1, 2, 5, 9))
+            @test m * ones(Float32, n_in) ≈ dense * ones(Float32, n_in)
+            @test GGUFEmbedding(m)[:, [3, 1]] == permutedims(dense[[3, 1], :], (2, 1))
+        end
+    end
+    @test_throws DimensionMismatch GGUFMatrix(12, zeros(UInt8, 144), 1, 128)
+    @test_throws DimensionMismatch GGUFMatrix(12, zeros(UInt8, 140), 1, 256)
 end

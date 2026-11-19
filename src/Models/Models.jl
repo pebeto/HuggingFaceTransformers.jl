@@ -73,7 +73,7 @@ export Float8E4M3, FP8Matrix, NVFP4Matrix, BF16Matrix
 export convert_eltype, fp16, bf16, fp32
 export QuantizedInt8Matrix, quantize_int8
 export read_config, config_from_json, load_pretrained, AUTO_ARCHITECTURES
-export GGUFWeights, load_gguf_model
+export GGUFWeights, GGUFMatrix, GGUFEmbedding, load_gguf_model
 
 include("float8.jl")
 include("weights.jl")

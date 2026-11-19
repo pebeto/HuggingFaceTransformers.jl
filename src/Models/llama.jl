@@ -54,13 +54,14 @@ Flux.@layer LlamaForCausalLM
 Flux.Optimisers.trainable(lm::LlamaForCausalLM) = (; model=lm.model, lm_head=lm.lm_head)
 
 """
-    LlamaForCausalLM(cfg::LlamaConfig)
+    LlamaForCausalLM(cfg::LlamaConfig; init=Flux.glorot_uniform)
 
 Materialize a fresh, randomly-initialized `LlamaForCausalLM` matching the
 shapes in `cfg`. Weights are uninitialized for inference purposes, so they
-must be replaced by a state-dict load before the model is meaningful.
+must be replaced by a state-dict load before the model is meaningful. `init`
+builds the embedding and every projection matrix from its dimensions.
 """
-function LlamaForCausalLM(cfg::LlamaConfig)
+function LlamaForCausalLM(cfg::LlamaConfig; init=Flux.glorot_uniform)
     rope = if cfg.rope_scaling === nothing
         RoPE(cfg.head_dim; base=cfg.rope_theta)
     else
@@ -83,20 +84,21 @@ function LlamaForCausalLM(cfg::LlamaConfig)
                 cfg.num_attention_heads,
                 cfg.num_key_value_heads,
                 cfg.head_dim,
-                rope,
+                rope;
+                init=init,
             ),
             RMSNorm(cfg.hidden_size, eps),
             RMSNorm(cfg.hidden_size, eps),
-            SiLUGatedMLP(cfg.hidden_size, cfg.intermediate_size),
+            SiLUGatedMLP(cfg.hidden_size, cfg.intermediate_size; init=init),
         ) for _ in 1:(cfg.num_hidden_layers)
     ]
 
     model = DecoderModel(
-        TokenEmbedding(cfg.vocab_size, cfg.hidden_size),
+        TokenEmbedding(cfg.vocab_size, cfg.hidden_size; init=init),
         layers,
         RMSNorm(cfg.hidden_size, eps),
     )
-    lm_head = Linear(cfg.hidden_size, cfg.vocab_size)
+    lm_head = Linear(cfg.hidden_size, cfg.vocab_size; init=init)
     return LlamaForCausalLM(cfg, model, lm_head)
 end
 

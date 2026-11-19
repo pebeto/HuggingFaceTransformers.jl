@@ -39,5 +39,7 @@ AUTO_ARCHITECTURES
 
 ```@docs
 load_gguf_model
+GGUFMatrix
+GGUFEmbedding
 GGUFWeights
 ```

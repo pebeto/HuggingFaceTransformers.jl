@@ -67,6 +67,74 @@ end
 Base.size(m::BF16Matrix) = size(m.data)
 Base.getindex(m::BF16Matrix, i::Int, j::Int) = Float32(m.data[i, j])
 
+"""
+    GGUFMatrix
+
+An `(out, in)` weight kept in a GGUF file's own encoding, usually a block
+quantization such as Q4_K, and decoded on the fly when multiplied. Each output row
+is a contiguous run of blocks along the input, the order llama.cpp writes, so a
+row decodes without touching any other. `bytes` is normally a view into the
+memory-mapped file. Built by [`load_gguf_model`](@ref).
+"""
+struct GGUFMatrix{T,B<:AbstractVector{UInt8}} <: AbstractMatrix{Float32}
+    bytes::B
+    n_out::Int
+    n_in::Int
+    row_bytes::Int
+end
+
+function GGUFMatrix(type::Integer, bytes::AbstractVector{UInt8}, n_out::Integer, n_in::Integer)
+    per_block, block_bytes = GGUF._block(type)
+    n_in % per_block == 0 || throw(
+        DimensionMismatch("rows of $(n_in) do not fill whole $(GGUF._type_name(type)) blocks"),
+    )
+    row_bytes = (n_in ÷ per_block) * block_bytes
+    length(bytes) == n_out * row_bytes ||
+        throw(DimensionMismatch("$(length(bytes)) bytes for $(n_out) rows of $(row_bytes)"))
+    return GGUFMatrix{Int(type),typeof(bytes)}(bytes, Int(n_out), Int(n_in), row_bytes)
+end
+
+Base.size(m::GGUFMatrix) = (m.n_out, m.n_in)
+function Base.getindex(m::GGUFMatrix{T}, i::Int, j::Int) where {T}
+    per_block, block_bytes = GGUF._block(T)
+    offset = (i - 1) * m.row_bytes + ((j - 1) ÷ per_block) * block_bytes
+    block = GGUF._dequantize!(
+        Vector{Float32}(undef, per_block), Val(T), view(m.bytes, (offset + 1):(offset + block_bytes)),
+    )
+    return block[(j - 1) % per_block + 1]
+end
+
+# The same rows reordered: row `i` of the result is row `rows[i]` of `m`.
+function _permute_rows(m::GGUFMatrix{T}, rows::AbstractVector{<:Integer}) where {T}
+    bytes = Vector{UInt8}(undef, length(m.bytes))
+    for (i, r) in enumerate(rows)
+        copyto!(bytes, (i - 1) * m.row_bytes + 1, m.bytes, (r - 1) * m.row_bytes + 1, m.row_bytes)
+    end
+    return GGUFMatrix(T, bytes, m.n_out, m.n_in)
+end
+
+"""
+    GGUFEmbedding(rows::GGUFMatrix)
+
+A token embedding table, `(hidden, vocab)`, over a GGUF `(vocab, hidden)` matrix:
+looking up tokens decodes only their rows. A tied LM head multiplies by the same
+`rows`.
+"""
+struct GGUFEmbedding{M<:GGUFMatrix} <: AbstractMatrix{Float32}
+    rows::M
+end
+
+Base.size(e::GGUFEmbedding) = reverse(size(e.rows))
+Base.getindex(e::GGUFEmbedding, i::Int, j::Int) = e.rows[j, i]
+function Base.getindex(e::GGUFEmbedding, ::Colon, ids::AbstractVector{<:Integer})
+    out = Matrix{Float32}(undef, size(e, 1), length(ids))
+    for (k, id) in enumerate(ids)
+        checkbounds(e, 1, id)
+        _decode_row!(view(out, :, k), e.rows, e.rows.bytes, id)
+    end
+    return out
+end
+
 # The kernels below decode with bit arithmetic instead of a table lookup, which
 # keeps their loops vectorized.
 #
@@ -87,11 +155,11 @@ const _FP4_UNIT = 2.0f0^14
     return reinterpret(Float32, ifelse(em < 0x08, subnormal, normal) | ((b & 0x80) << 24))
 end
 
-const _PackedMatrix = Union{FP8Matrix,NVFP4Matrix}
+const _PackedMatrix = Union{FP8Matrix,NVFP4Matrix,GGUFMatrix}
 
 # The input as the row decoders below lay a row out: as is for FP8; for NVFP4 the
 # odd inputs (low nibbles) then the even ones (high nibbles).
-_packed_input(::FP8Matrix, x) = Matrix{Float32}(x)
+_packed_input(::Union{FP8Matrix,GGUFMatrix}, x) = Matrix{Float32}(x)
 function _packed_input(::NVFP4Matrix, x)
     xp = Matrix{Float32}(undef, size(x))
     half = size(x, 1) ÷ 2
@@ -177,6 +245,94 @@ end
 
 _packed_bytes(m::FP8Matrix) = _bytes(m.data)
 _packed_bytes(m::NVFP4Matrix) = (_bytes(m.packed), _bytes(m.scales))
+_packed_bytes(m::GGUFMatrix) = m.bytes
+
+# Scratch rows `_row_dot` needs: 16 for the fused kernels, a whole decoded row for
+# the GGUF types that decode first and then multiply.
+_dot_scratch(::_PackedMatrix) = 16
+_dot_scratch(m::GGUFMatrix) = m.n_in
+_dot_scratch(::GGUFMatrix{GGUF.GGML_Q8_0}) = 16
+_dot_scratch(::GGUFMatrix{GGUF.GGML_Q4_K}) = 16
+_dot_scratch(::GGUFMatrix{GGUF.GGML_Q6_K}) = 16
+
+function _decode_row!(buf, m::GGUFMatrix{T}, bytes, r) where {T}
+    offset = (r - 1) * m.row_bytes
+    GGUF._dequantize!(view(buf, 1:(m.n_in)), Val(T), view(bytes, (offset + 1):(offset + m.row_bytes)))
+    return buf
+end
+
+function _row_dot(m::GGUFMatrix, bytes, r, x, buf)
+    row = _decode_row!(view(buf, :, 1), m, bytes, r)
+    s = 0.0f0
+    @inbounds @simd for k in 1:(m.n_in)
+        s = muladd(row[k], x[k], s)
+    end
+    return s
+end
+
+# The fused kernels below cover the types that make up nearly all of a Q4_K_M,
+# Q6_K or Q8_0 file: each block's integer codes meet the input before its scales
+# are applied.
+function _row_dot(m::GGUFMatrix{GGUF.GGML_Q8_0}, b, r, x, _)
+    offset, s = (r - 1) * m.row_bytes, 0.0f0
+    @inbounds for blk in 0:(m.n_in ÷ 32 - 1)
+        p, y = offset + 34blk + 1, 32blk
+        t = 0.0f0
+        @simd for j in 1:32
+            t = muladd(Float32(reinterpret(Int8, b[p + 1 + j])), x[y + j], t)
+        end
+        s = muladd(GGUF._f16(b, p), t, s)
+    end
+    return s
+end
+
+function _row_dot(m::GGUFMatrix{GGUF.GGML_Q4_K}, b, r, x, _)
+    offset, s = (r - 1) * m.row_bytes, 0.0f0
+    @inbounds for blk in 0:(m.n_in ÷ 256 - 1)
+        p, y = offset + 144blk + 1, 256blk
+        d, dmin = GGUF._f16(b, p), GGUF._f16(b, p + 2)
+        for j in 0:3
+            sc1, m1 = GGUF._scale_min_k4(b, p + 4, 2j)
+            sc2, m2 = GGUF._scale_min_k4(b, p + 4, 2j + 1)
+            q, o = p + 16 + 32j, y + 64j
+            a1 = a2 = x1 = x2 = 0.0f0
+            @simd for l in 0:31
+                byte = b[q + l]
+                xa, xb = x[o + l + 1], x[o + l + 33]
+                a1 = muladd(Float32(byte & 0x0f), xa, a1)
+                a2 = muladd(Float32(byte >> 4), xb, a2)
+                x1 += xa
+                x2 += xb
+            end
+            s += d * (sc1 * a1 + sc2 * a2) - dmin * (m1 * x1 + m2 * x2)
+        end
+    end
+    return s
+end
+
+function _row_dot(m::GGUFMatrix{GGUF.GGML_Q6_K}, b, r, x, _)
+    offset, s = (r - 1) * m.row_bytes, 0.0f0
+    @inbounds for blk in 0:(m.n_in ÷ 256 - 1)
+        p, y = offset + 210blk + 1, 256blk
+        d = GGUF._f16(b, p + 208)
+        for half in 0:1, g in 0:1
+            ql, qh, sc = p + 64half, p + 128 + 32half, p + 192 + 8half + g
+            o = y + 128half
+            a1 = a2 = a3 = a4 = 0.0f0
+            @simd for l in (16g):(16g + 15)
+                h = b[qh + l]
+                lo, hi = b[ql + l], b[ql + l + 32]
+                a1 = muladd(Float32((lo & 0x0f) | ((h & 0x03) << 4)) - 32.0f0, x[o + l + 1], a1)
+                a2 = muladd(Float32((hi & 0x0f) | (((h >> 2) & 0x03) << 4)) - 32.0f0, x[o + l + 33], a2)
+                a3 = muladd(Float32((lo >> 4) | (((h >> 4) & 0x03) << 4)) - 32.0f0, x[o + l + 65], a3)
+                a4 = muladd(Float32((hi >> 4) | (((h >> 6) & 0x03) << 4)) - 32.0f0, x[o + l + 97], a4)
+            end
+            i8(k) = Float32(reinterpret(Int8, b[sc + k]))
+            s = muladd(d, i8(0) * a1 + i8(2) * a2 + i8(4) * a3 + i8(6) * a4, s)
+        end
+    end
+    return s
+end
 
 # Four decoded rows (the columns of `buf`) against tokens t:t+n-1 (n ≤ 4): sixteen
 # sums, with every weight and input loaded once.
@@ -211,7 +367,7 @@ function Base.:*(m::_PackedMatrix, x::AbstractMatrix{<:Real})
     n_tasks = min(n_quads, 2Threads.nthreads())
     @sync for c in 1:n_tasks
         Threads.@spawn begin
-            buf = Matrix{Float32}(undef, n_tok == 1 ? 16 : n_in, 4)
+            buf = Matrix{Float32}(undef, n_tok == 1 ? _dot_scratch(m) : n_in, 4)
             for q in (div((c - 1) * n_quads, n_tasks) + 1):div(c * n_quads, n_tasks)
                 rows = (4q - 3):min(4q, n_out)
                 if n_tok == 1

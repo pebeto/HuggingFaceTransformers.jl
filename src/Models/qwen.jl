@@ -60,13 +60,14 @@ function Flux.Optimisers.trainable(lm::QwenForCausalLM)
 end
 
 """
-    QwenForCausalLM(cfg::QwenConfig)
+    QwenForCausalLM(cfg::QwenConfig; init=Flux.glorot_uniform)
 
 Materialize a fresh, randomly-initialized `QwenForCausalLM` matching the
 shapes in `cfg`. Weights are uninitialized for inference purposes, so they
-must be replaced by a state-dict load before the model is meaningful.
+must be replaced by a state-dict load before the model is meaningful. `init`
+builds the embedding and every projection matrix from its dimensions.
 """
-function QwenForCausalLM(cfg::QwenConfig)
+function QwenForCausalLM(cfg::QwenConfig; init=Flux.glorot_uniform)
     rope = RoPE(cfg.head_dim; base=cfg.rope_theta)
     eps = Float32(cfg.rms_norm_eps)
 
@@ -82,19 +83,20 @@ function QwenForCausalLM(cfg::QwenConfig)
                 qkv_bias=cfg.qkv_bias,
                 wo_bias=cfg.o_bias,
                 qk_norm_eps=cfg.qk_norm ? cfg.rms_norm_eps : nothing,
+                init=init,
             ),
             RMSNorm(cfg.hidden_size, eps),
             RMSNorm(cfg.hidden_size, eps),
-            SiLUGatedMLP(cfg.hidden_size, cfg.intermediate_size),
+            SiLUGatedMLP(cfg.hidden_size, cfg.intermediate_size; init=init),
         ) for i in 1:(cfg.num_hidden_layers)
     ]
 
     model = DecoderModel(
-        TokenEmbedding(cfg.vocab_size, cfg.hidden_size),
+        TokenEmbedding(cfg.vocab_size, cfg.hidden_size; init=init),
         layers,
         RMSNorm(cfg.hidden_size, eps),
     )
-    lm_head = Linear(cfg.hidden_size, cfg.vocab_size)
+    lm_head = Linear(cfg.hidden_size, cfg.vocab_size; init=init)
     return QwenForCausalLM(cfg, model, lm_head)
 end
 
