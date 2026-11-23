@@ -57,8 +57,17 @@ end
 Read `generation_config.json` from a snapshot directory. A checkpoint without one
 gets HF's fallback: the token ids from `config.json` (its `text_config` for
 multimodal checkpoints) and the defaults for everything else.
+
+A path ending in `.gguf` takes the token ids from the file's tokenizer metadata.
+The end-of-sequence ids are every token llama.cpp ends generation on: the EOS, the
+end-of-turn and end-of-message tokens when the file names them, and the control
+tokens it recognizes as turn ends by their text, such as `<end_of_turn>` and
+`<|im_end|>`. For Gemma 2, Qwen2.5 and Llama 3.2 that is the list their
+`generation_config.json` gives. GGUF carries no sampling settings, so the rest
+are the defaults.
 """
 function load_generation_config(path::AbstractString)
+    isfile(path) && endswith(path, ".gguf") && return _gguf_generation_config(path)
     dir = isdir(path) ? path : dirname(path)
     file = joinpath(dir, "generation_config.json")
     isfile(file) && return _generation_config(JSON3.read(read(file, String)))
@@ -69,6 +78,25 @@ function load_generation_config(path::AbstractString)
     haskey(raw, :eos_token_id) || !haskey(raw, :text_config) || (raw = raw[:text_config])
     ids = Dict(k => raw[k] for k in (:eos_token_id, :bos_token_id, :pad_token_id) if haskey(raw, k))
     return _generation_config(ids)
+end
+
+# Control tokens llama.cpp ends generation on, found by their text.
+const _GGUF_TURN_ENDS = (
+    "<|eot_id|>", "<|eom_id|>", "<|end_of_text|>", "<|im_end|>", "<|endoftext|>", "<|end|>",
+    "<end_of_turn>", "<EOT>",
+)
+
+function _gguf_generation_config(path::AbstractString)
+    meta = GGUF._open_gguf(path).metadata
+    id(name) = (v = get(meta, "tokenizer.ggml.$(name)_token_id", nothing); isnothing(v) ? nothing : Int(v))
+    eos = Int[i for i in (id("eos"), id("eot"), id("eom")) if !isnothing(i)]
+    tokens = get(meta, "tokenizer.ggml.tokens", String[])
+    types = get(meta, "tokenizer.ggml.token_type", fill(3, length(tokens)))
+    for (i, t) in enumerate(tokens)
+        types[i] == 3 && t in _GGUF_TURN_ENDS && push!(eos, i - 1)
+    end
+    eos = unique(eos)
+    return GenerationConfig(; eos_token_id=eos, bos_token_id=id("bos"), pad_token_id=id("padding"))
 end
 
 # The keywords a config supplies to `generate`. `n_prompt` turns HF's total

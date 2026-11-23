@@ -70,7 +70,7 @@ function apply_pre(p::SplitPreTokenizer, ts::Vector{String})
             last_end = stop
         end
         if last_end < ncodeunits(t)
-            push!(out, String(SubString(t, last_end + 1, ncodeunits(t))))
+            push!(out, String(SubString(t, last_end + 1)))
         end
     end
     return filter(!isempty, out)

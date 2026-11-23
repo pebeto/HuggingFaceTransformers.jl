@@ -254,6 +254,10 @@ end
     @testset "Identity" begin
         @test apply_pre(IdentityPreTokenizer(), ["x", "y"]) == ["x", "y"]
     end
+
+    @testset "Split keeps a multi-byte tail after the last match" begin
+        @test apply_pre(SplitPreTokenizer(r"\p{N}", :isolated), ["a1ú"]) == ["a", "1", "ú"]
+    end
 end
 
 @testset "decoder building blocks" begin

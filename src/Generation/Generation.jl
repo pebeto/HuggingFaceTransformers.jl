@@ -13,6 +13,7 @@ module Generation
 
 using JSON3
 using Random
+using ..GGUF: GGUF
 using ..Models:
     LlamaForCausalLM,
     MistralForCausalLM,

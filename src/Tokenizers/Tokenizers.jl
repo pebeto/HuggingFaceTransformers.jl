@@ -9,6 +9,7 @@ for the vast majority of models.
 module Tokenizers
 
 using JSON3
+using ..GGUF: GGUF
 
 export Tokenizer, AddedToken, load_tokenizer, load_wordpiece_from_vocab_txt, encode, decode
 export encode_batch, pad_token_id
@@ -348,6 +349,10 @@ function _parse_pre_tokenizer(p::JSON3.Object)
         return MetaspacePreTokenizer(replacement, scheme)
     elseif typ == "BertPreTokenizer"
         return BertPreTokenizer()
+    elseif typ == "Digits"
+        # Numbers split from the text around them, digit by digit or as runs.
+        individual = _json_bool(p, :individual_digits, false)
+        return SplitPreTokenizer(individual ? r"\p{N}" : r"\p{N}+", :isolated)
     else
         throw(ArgumentError("unsupported pre_tokenizer type: $(typ)"))
     end
@@ -412,8 +417,12 @@ Three model types are supported:
 
 Checkpoints that ship only a `vocab.txt` load through
 [`load_wordpiece_from_vocab_txt`](@ref) instead.
+
+A path ending in `.gguf` reads the tokenizer a llama.cpp file carries in its
+metadata instead; see the GGUF section of the loading guide for what is covered.
 """
 function load_tokenizer(path::AbstractString)
+    isfile(path) && endswith(path, ".gguf") && return _gguf_tokenizer(path)
     file = isdir(path) ? joinpath(path, "tokenizer.json") : path
     isfile(file) || throw(ArgumentError("tokenizer.json not found at $(file)"))
 
@@ -451,6 +460,11 @@ function load_tokenizer(path::AbstractString)
         end
     end
 
+    return _assemble_tokenizer(model, norm, pre, dec, added, post)
+end
+
+# Register the added tokens with the model, which may not list them in its vocab.
+function _assemble_tokenizer(model, norm, pre, dec, added::Vector{AddedToken}, post::PostProcessor)
     added_lookup = Dict{String,Int}()
     id_lookup = Dict{Int,String}()
     for at in added
@@ -461,7 +475,6 @@ function load_tokenizer(path::AbstractString)
             model.id_to_token[at.id] = at.content
         end
     end
-
     return Tokenizer(model, norm, pre, dec, added, added_lookup, id_lookup, post)
 end
 
@@ -700,6 +713,10 @@ function _token_separator(d::SequenceDecoder)
     return isempty(d.steps) ? "" : _token_separator(d.steps[1])
 end
 
+_decodes_bytes(::Decoder) = false
+_decodes_bytes(::ByteLevelDecoder) = true
+_decodes_bytes(d::SequenceDecoder) = any(_decodes_bytes, d.steps)
+
 """
     decode(tk, ids; skip_special_tokens=false) -> String
 
@@ -715,6 +732,7 @@ function decode(
     out = IOBuffer()
     buffer = String[]
     sep = _token_separator(tk.decoder)
+    bytes = _decodes_bytes(tk.decoder)
 
     function flush!()
         isempty(buffer) && return nothing
@@ -726,17 +744,18 @@ function decode(
     for id in ids
         if haskey(tk.id_lookup, id)
             if skip_special_tokens && id in special_ids
-                isempty(sep) && flush!()
+                bytes && flush!()
                 continue
             end
-            if isempty(sep)
+            if bytes
                 # Byte-level pipelines decode bytes, so an added token has to
                 # bypass the decoder and be emitted literally.
                 flush!()
                 print(out, tk.id_lookup[id])
             else
-                # Separator-joined pipelines (WordPiece) keep added tokens in the
-                # stream so they are spaced like any other token, as HF does.
+                # Other pipelines keep added tokens in the stream, as HF does:
+                # WordPiece spaces them like any token, and SentencePiece's
+                # leading-space strip then applies only to the very start.
                 push!(buffer, tk.id_lookup[id])
             end
         else
@@ -748,5 +767,7 @@ function decode(
     flush!()
     return String(take!(out))
 end
+
+include("gguf.jl")
 
 end # module Tokenizers

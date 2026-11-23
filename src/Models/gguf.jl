@@ -247,8 +247,8 @@ like), `qwen2`, `qwen3` and `gemma2`, in any tensor type
 [`GGUF`](@ref HuggingFaceTransformers.GGUF) decodes. Llama 3.1 and later store
 per-dimension RoPE factors, which raise rather than load as plain RoPE.
 
-The tokenizer stays separate: load it from the original repository with
-`load_tokenizer`.
+The tokenizer, chat template and stop tokens the file carries load from the same
+path with `load_tokenizer`, `load_chat_template` and `load_generation_config`.
 """
 function load_gguf_model(path::AbstractString; packed::Bool=true)
     idx = GGUF._open_gguf(path)

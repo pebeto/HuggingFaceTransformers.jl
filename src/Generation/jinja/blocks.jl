@@ -1,3 +1,26 @@
+# The closing delimiter of a tag, skipping any inside a string literal: Qwen2.5's
+# tool prompt prints `{"name": ...}` from a string within `{{ }}`.
+function _find_tag_close(source::AbstractString, close_str::AbstractString, from::Integer)
+    i, n = from, ncodeunits(source)
+    quote_char = nothing
+    while i <= n
+        c = source[i]
+        if !isnothing(quote_char)
+            if c == '\\'
+                i = nextind(source, i)
+            elseif c == quote_char
+                quote_char = nothing
+            end
+        elseif c == '"' || c == '\''
+            quote_char = c
+        elseif startswith(SubString(source, i), close_str)
+            return i:(i + ncodeunits(close_str) - 1)
+        end
+        i = nextind(source, i)
+    end
+    return nothing
+end
+
 # Splits a template into text and tag blocks, applying whitespace control the way
 # HF's Jinja environment does. A `-` inside a tag strips all whitespace on that
 # side. HF also turns on `trim_blocks` (a block or comment tag eats the newline
@@ -45,7 +68,8 @@ function _split_blocks(source::AbstractString)
         else
             "#}"
         end
-        close_r = findnext(close_str, source, after_open)
+        close_r = best_kind === :comment ? findnext(close_str, source, after_open) :
+            _find_tag_close(source, close_str, after_open)
         isnothing(close_r) &&
             throw(ArgumentError("unclosed template tag starting at byte $(best_pos)"))
 

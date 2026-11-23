@@ -145,8 +145,36 @@ This path runs on the CPU. `load(...; packed=false)` dequantizes every tensor to
 other, at the full-precision model's memory. Both ways, the logits agree with
 `transformers` loading the same file to within 2e-5.
 
-The tokenizer is not read from the file. Load it from the original repository
-with `load_tokenizer`, along with its chat template and `generation_config.json`.
+The file also carries its tokenizer, chat template and stop tokens, so one
+download is enough. [`Tokenizers.load_tokenizer`](@ref),
+[`Generation.load_chat_template`](@ref) and
+[`Generation.load_generation_config`](@ref) all take the path of a `.gguf` file:
+
+```julia
+path = HFHub.download_file("Qwen/Qwen2.5-0.5B-Instruct-GGUF", "qwen2.5-0.5b-instruct-q4_k_m.gguf")
+lm, tokenizer = load(path), load_tokenizer(path)
+prompt = load_chat_template(path)([Dict("role" => "user", "content" => "Hi")]; add_generation_prompt=true)
+generate(lm, encode(tokenizer, prompt); generation_config=load_generation_config(path))
+```
+
+The tokenizer is rebuilt from llama.cpp's metadata. Byte-level BPE files
+(`tokenizer.ggml.model` is `gpt2`) use the split rules of their pre-tokenizer,
+which covers Llama 3 (`llama-bpe`), Qwen2 and Qwen3 (`qwen2`), SmolLM and plain
+GPT-2; other pre-tokenizers raise. SentencePiece files (`llama`, as Llama 2,
+Mistral, TinyLlama and Gemma 2 store theirs) keep scores rather than merges, and
+the merge order is derived from them. Like llama.cpp, a space is prefixed to
+every run of text, also right after a control token. On a set of strings with
+accents, CJK, emoji, digits, code and whitespace runs, the GGUF tokenizers of
+SmolLM2, Qwen2.5, Qwen3, Gemma 2, TinyLlama and Llama 3.2 encode and decode
+exactly as the original repositories' `tokenizer.json` does. Some older
+conversions wrote every SentencePiece score as 0, which loses the merge order;
+TheBloke's TinyLlama is one, and its whitespace runs split differently.
+
+The stop tokens are the ones llama.cpp ends generation on: the EOS, any
+end-of-turn token the file names, and turn-end control tokens such as
+`<end_of_turn>` and `<|im_end|>`. For Gemma 2, Qwen2.5 and Llama 3.2 that is the
+list their `generation_config.json` gives. GGUF holds no sampling settings.
+
 Llama 3.1 and later store per-dimension RoPE factors in GGUF, which raise an
 error rather than load as plain RoPE.
 

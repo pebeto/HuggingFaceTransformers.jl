@@ -11,6 +11,12 @@ using JSON3
         @test apply_chat_template("{{ none }}", []) == "None"      # as Jinja prints it
     end
 
+    @testset "a closing delimiter inside a string literal" begin
+        # Qwen2.5's tool prompt prints a JSON shape from a string inside `{{ }}`.
+        @test apply_chat_template("{{ '<call>{{\"name\": x}}</call>' }}!", []) == "<call>{{\"name\": x}}</call>!"
+        @test apply_chat_template("{% if 'a %} b' %}yes{% endif %}", []) == "yes"
+    end
+
     @testset "variables & kwargs context" begin
         @test apply_chat_template("Hi {{ name }}", []; name="world") == "Hi world"
         @test apply_chat_template("{{ bos_token }}x", []; bos_token="<s>") == "<s>x"

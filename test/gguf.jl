@@ -4,6 +4,8 @@ using Random
 using HuggingFaceTransformers
 using HuggingFaceTransformers.GGUF
 using HuggingFaceTransformers.GGUF: load_gguf, GGUFFile
+using HuggingFaceTransformers.Tokenizers: load_tokenizer, encode, decode, BYTES_TO_UNICODE
+using HuggingFaceTransformers.Generation: load_chat_template, load_generation_config
 using HuggingFaceTransformers.Models:
     LlamaConfig, QwenConfig, GemmaConfig, LlamaForCausalLM, QwenForCausalLM, GemmaForCausalLM,
     llama_state_dict_map, qwen_state_dict_map, gemma_state_dict_map, config_from_json,
@@ -422,4 +424,67 @@ end
     end
     @test_throws DimensionMismatch GGUFMatrix(12, zeros(UInt8, 144), 1, 128)
     @test_throws DimensionMismatch GGUFMatrix(12, zeros(UInt8, 140), 1, 256)
+end
+
+@testset verbose = true "the tokenizer a GGUF file carries" begin
+    mktempdir() do dir
+        # Byte-level BPE with Qwen2's split: the same tokenizer written as GGUF
+        # metadata and as tokenizer.json has to encode and decode the same way.
+        bytes = [string(BYTES_TO_UNICODE[b]) for b in 0x00:0xff]
+        merges = ["Ġ t", "h e", "Ġt he", "c a", "ca f"]
+        tokens = [bytes; "Ġt"; "he"; "Ġthe"; "ca"; "caf"; "<|im_end|>"; "<tool>"]
+        types = [fill(1, 261); 3; 4]
+        path = joinpath(dir, "bpe.gguf")
+        _write_gguf(path; metadata=[
+            "tokenizer.ggml.model" => (8, "gpt2"), "tokenizer.ggml.pre" => (8, "qwen2"),
+            "tokenizer.ggml.tokens" => (9, (8, tokens)), "tokenizer.ggml.token_type" => (9, (5, types)),
+            "tokenizer.ggml.merges" => (9, (8, merges)), "tokenizer.ggml.eos_token_id" => (4, 261),
+            "tokenizer.ggml.add_bos_token" => (7, false),
+            "tokenizer.chat_template" => (8, "{% for m in messages %}{{ m.content }}<|im_end|>{% endfor %}"),
+        ], tensors=Dict{String,Tuple{Int,Vector{Int},Vector{UInt8}}}())
+        regex = HuggingFaceTransformers.Tokenizers._QWEN2_SPLIT
+        json = joinpath(dir, "tokenizer.json")
+        write(json, JSON3.write(Dict(
+            "model" => Dict("type" => "BPE", "vocab" => Dict(t => i - 1 for (i, t) in enumerate(tokens[1:261])), "merges" => merges),
+            "normalizer" => Dict("type" => "NFC"),
+            "pre_tokenizer" => Dict("type" => "Sequence", "pretokenizers" => [
+                Dict("type" => "Split", "pattern" => Dict("Regex" => regex), "behavior" => "Isolated"),
+                Dict("type" => "ByteLevel", "add_prefix_space" => false, "use_regex" => false)]),
+            "decoder" => Dict("type" => "ByteLevel"),
+            "added_tokens" => [Dict("id" => 261, "content" => "<|im_end|>", "special" => true),
+                               Dict("id" => 262, "content" => "<tool>", "special" => false)],
+        )))
+        gguf, ref = load_tokenizer(path), load_tokenizer(json)
+        for text in ("the theme café 1234", "the<|im_end|> <tool>x", "  spaces\\nand\\ttabs ñ")
+            @test encode(gguf, text) == encode(ref, text)
+            @test decode(gguf, encode(gguf, text)) == text
+        end
+        @test 258 in encode(gguf, "the theme")
+        @test decode(gguf, encode(gguf, "a<|im_end|>"); skip_special_tokens=true) == "a"
+        @test load_chat_template(path)([Dict("role" => "user", "content" => "hi")]) == "hi<|im_end|>"
+        @test load_generation_config(path).eos_token_id == [261]
+
+        # SentencePiece: the merge order comes from the scores, a word boundary
+        # becomes ▁, and characters outside the vocabulary fall back to bytes.
+        pieces = ["▁", "h", "e", "l", "o", "▁h", "ll", "▁he", "llo", "▁hello", "▁▁"]
+        tokens = ["<unk>"; "<s>"; "</s>"; ["<0x$(uppercase(string(b; base=16, pad=2)))>" for b in 0:255]; pieces; "<end_of_turn>"]
+        scores = Float32[zeros(259); -(1:10); -1.0f9; 0]
+        types = [2; 3; 3; fill(6, 256); fill(1, 11); 3]
+        path = joinpath(dir, "spm.gguf")
+        _write_gguf(path; metadata=[
+            "tokenizer.ggml.model" => (8, "llama"), "tokenizer.ggml.tokens" => (9, (8, tokens)),
+            "tokenizer.ggml.scores" => (9, (6, scores)), "tokenizer.ggml.token_type" => (9, (5, types)),
+            "tokenizer.ggml.bos_token_id" => (4, 1), "tokenizer.ggml.eos_token_id" => (4, 2),
+            "tokenizer.ggml.unknown_token_id" => (4, 0),
+        ], tensors=Dict{String,Tuple{Int,Vector{Int},Vector{UInt8}}}())
+        tk = load_tokenizer(path)
+        id(t) = findfirst(==(t), tokens) - 1
+        @test encode(tk, "hello  hello") == [1, id("▁hello"), id("▁"), id("▁hello")]
+        @test encode(tk, "hé") == [1, id("▁h"), id("<0xC3>"), id("<0xA9>")]
+        @test decode(tk, encode(tk, "hello  hello")) == "<s> hello  hello"
+        @test decode(tk, encode(tk, "hello  hello"); skip_special_tokens=true) == "hello  hello"
+        @test decode(tk, encode(tk, "hé"); skip_special_tokens=true) == "hé"
+        @test load_generation_config(path).eos_token_id == [2, id("<end_of_turn>")]
+        @test_throws ArgumentError load_chat_template(path)
+    end
 end

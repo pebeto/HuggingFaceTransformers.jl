@@ -78,8 +78,17 @@ when the snapshot has one (gpt-oss ships its template that way), otherwise the
 `chat_template` field of `tokenizer_config.json`. `path` is a snapshot directory
 or a file inside it. When the field holds several named templates, the one called
 `name` is used.
+
+A path ending in `.gguf` reads the template the file carries, `tokenizer.chat_template`
+in its metadata, or `tokenizer.chat_template.<name>` for another named one.
 """
 function load_chat_template(path::AbstractString; name::AbstractString="default")
+    if isfile(path) && endswith(path, ".gguf")
+        meta = GGUF._open_gguf(path).metadata
+        key = name == "default" ? "tokenizer.chat_template" : "tokenizer.chat_template.$(name)"
+        haskey(meta, key) || throw(ArgumentError("$(path) has no `$(key)`"))
+        return ChatTemplate(String(meta[key]))
+    end
     dir = isdir(path) ? path : dirname(path)
     jinja = joinpath(dir, "chat_template.jinja")
     isfile(jinja) && return ChatTemplate(read(jinja, String))
