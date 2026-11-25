@@ -6,6 +6,8 @@ using HuggingFaceTransformers.GGUF
 using HuggingFaceTransformers.GGUF: load_gguf, GGUFFile
 using HuggingFaceTransformers.Tokenizers: load_tokenizer, encode, decode, BYTES_TO_UNICODE
 using HuggingFaceTransformers.Generation: load_chat_template, load_generation_config
+using HuggingFaceTransformers.Models: LlamaRopeScaling
+using HuggingFaceTransformers.Layers: RoPE
 using HuggingFaceTransformers.Models:
     LlamaConfig, QwenConfig, GemmaConfig, LlamaForCausalLM, QwenForCausalLM, GemmaForCausalLM,
     llama_state_dict_map, qwen_state_dict_map, gemma_state_dict_map, config_from_json,
@@ -393,8 +395,8 @@ end
             extra_tensors=extra("blk.0.attn_unknown.weight"))
         @test_throws ArgumentError load_gguf_model(path)
         path = _write_model_gguf(joinpath(dir, "freqs.gguf"), lm, cfg, llama_state_dict_map(cfg), "llama";
-            extra_tensors=extra("rope_freqs.weight"))
-        @test_throws ArgumentError load_gguf_model(path)
+            extra_tensors=Dict("rope_freqs.weight" => (0, [3], zeros(UInt8, 12))))
+        @test_throws DimensionMismatch load_gguf_model(path)
         path = joinpath(dir, "phi.gguf")
         _write_gguf(path; metadata=["general.architecture" => (8, "phi2")],
             tensors=Dict{String,Tuple{Int,Vector{Int},Vector{UInt8}}}())
@@ -486,5 +488,32 @@ end
         @test decode(tk, encode(tk, "hé"); skip_special_tokens=true) == "hé"
         @test load_generation_config(path).eos_token_id == [2, id("<end_of_turn>")]
         @test_throws ArgumentError load_chat_template(path)
+    end
+end
+
+@testset "Llama 3.1-style RoPE factors in a GGUF file" begin
+    # llama.cpp stores Llama 3's frequency scaling as one divisor per frequency. A
+    # file carrying them has to behave as the model built with the scaling config.
+    raw = Dict{Symbol,Any}(
+        :vocab_size => 64, :hidden_size => 32, :intermediate_size => 48,
+        :num_hidden_layers => 2, :num_attention_heads => 4, :num_key_value_heads => 2,
+        :head_dim => 8, :max_position_embeddings => 64, :rope_theta => 10_000.0,
+        :rms_norm_eps => 1.0e-6, :tie_word_embeddings => false,
+    )
+    cfg = config_from_json(LlamaConfig, raw)
+    scaled = LlamaConfig(; (f => getfield(cfg, f) for f in fieldnames(LlamaConfig) if f != :rope_scaling)...,
+        rope_scaling=LlamaRopeScaling(; factor=8.0, low_freq_factor=1.0, high_freq_factor=4.0,
+            original_max_position_embeddings=16))
+    lm = LlamaForCausalLM(scaled)
+    factors = RoPE(8; base=10_000.0).inv_freq ./ lm.model.layers[1].self_attn.rope.inv_freq
+    @test any(>(1), factors)
+    ids = reshape([1, 5, 9, 2, 40, 7, 3, 11], :, 1)
+    mktempdir() do dir
+        with = _write_model_gguf(joinpath(dir, "scaled.gguf"), lm, cfg, llama_state_dict_map(cfg), "llama";
+            extra_tensors=Dict("rope_freqs.weight" => (0, [4], collect(reinterpret(UInt8, Float32.(factors))))))
+        @test load_gguf_model(with)(ids) ≈ lm(ids) rtol = 1.0e-5
+        @test load_gguf_model(with; packed=false)(ids) ≈ lm(ids) rtol = 1.0e-5
+        without = _write_model_gguf(joinpath(dir, "plain.gguf"), lm, cfg, llama_state_dict_map(cfg), "llama")
+        @test !isapprox(load_gguf_model(without)(ids), lm(ids); rtol=1.0e-3)
     end
 end

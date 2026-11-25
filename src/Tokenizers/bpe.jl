@@ -4,6 +4,9 @@ struct BPEModel
     merge_ranks::Dict{Tuple{String,String},Int}
     unk_token::Union{Nothing,String}
     byte_fallback::Bool
+    # A word already in the vocabulary is one token, whatever the merges would
+    # make of it (Llama 3's `ignore_merges`).
+    ignore_merges::Bool
 end
 
 function BPEModel(
@@ -11,11 +14,12 @@ function BPEModel(
     merges::Vector{Tuple{String,String}},
     unk_token::Union{Nothing,AbstractString}=nothing;
     byte_fallback::Bool=false,
+    ignore_merges::Bool=false,
 )
     id_to_token = Dict{Int,String}(id => tok for (tok, id) in vocab)
     merge_ranks = Dict{Tuple{String,String},Int}(p => i - 1 for (i, p) in enumerate(merges))
     unk = unk_token === nothing ? nothing : String(unk_token)
-    return BPEModel(vocab, id_to_token, merge_ranks, unk, byte_fallback)
+    return BPEModel(vocab, id_to_token, merge_ranks, unk, byte_fallback, ignore_merges)
 end
 
 """
@@ -104,5 +108,9 @@ Mirrors the `encode_word(::UnigramModel, …)` signature so the top-level
 `encode` doesn't care which model family it's looking at.
 """
 function encode_word(model::BPEModel, word::AbstractString)
-    token_ids(model, bpe_encode_word(model, word))
+    if model.ignore_merges
+        id = get(model.vocab, word, nothing)
+        isnothing(id) || return [id]
+    end
+    return token_ids(model, bpe_encode_word(model, word))
 end

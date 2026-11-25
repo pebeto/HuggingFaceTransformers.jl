@@ -200,7 +200,11 @@ function _parse_model(m::JSON3.Object)
         merges = _parse_merges(m[:merges]::JSON3.Array)
         unk_raw = get(m, :unk_token, nothing)
         unk = unk_raw isa AbstractString ? String(unk_raw) : nothing
-        return BPEModel(vocab, merges, unk; byte_fallback=_json_bool(m, :byte_fallback, false))
+        return BPEModel(
+            vocab, merges, unk;
+            byte_fallback=_json_bool(m, :byte_fallback, false),
+            ignore_merges=_json_bool(m, :ignore_merges, false),
+        )
     elseif typ == "Unigram"
         vocab_raw = m[:vocab]::JSON3.Array
         vocab = Tuple{String,Float32}[]

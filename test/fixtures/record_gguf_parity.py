@@ -17,8 +17,16 @@ qwen3, gemma2) and between them every tensor type it decodes: llama.cpp falls
 back from the k-quants to Q5_0, Q5_1, Q8_0 and IQ4_NL for rows shorter than a
 256-value block, which the small models have plenty of.
 
+Llama 3.2 is the exception. Its GGUF stores the RoPE scaling as per-frequency
+factors (`rope_freqs.weight`), which transformers' GGUF loader does not apply, so
+its reference is the original safetensors checkpoint at fp32, and the GGUF is the
+F16 conversion of the same weights. Its prompt is a few hundred tokens long,
+because Llama 3's scaling changes the low frequencies, whose rotation only shows
+at later positions.
+
 Resource cost: SmolLM2 and the Qwen files are 100-500 MB each; gemma-2-2b is a
-1.7 GB download and about 11 GB of RAM once dequantized.
+1.7 GB download and about 11 GB of RAM once dequantized; Llama 3.2 is 2.5 GB for
+each of the GGUF and the safetensors.
 """
 import json
 import os
@@ -33,9 +41,18 @@ VARIANTS = {
     "qwen2.5-0.5b-q4_k_m": ("Qwen/Qwen2.5-0.5B-Instruct-GGUF", "qwen2.5-0.5b-instruct-q4_k_m.gguf"),
     "qwen3-0.6b-q2_k": ("unsloth/Qwen3-0.6B-GGUF", "Qwen3-0.6B-Q2_K.gguf"),
     "gemma2-2b-q4_k_m": ("bartowski/gemma-2-2b-it-GGUF", "gemma-2-2b-it-Q4_K_M.gguf"),
+    "llama3.2-1b-f16": ("bartowski/Llama-3.2-1B-Instruct-GGUF", "Llama-3.2-1B-Instruct-f16.gguf"),
 }
 
+# Variants checked against their original safetensors instead of transformers'
+# reading of the GGUF.
+SAFETENSORS_REFERENCE = {"llama3.2-1b-f16": "unsloth/Llama-3.2-1B-Instruct"}
+
 PROMPT = "The capital of France is"
+LONG_PROMPT = (
+    "The history of the city stretches back many centuries, through wars, trade, "
+    "floods and rebuilding, and every generation left its mark on the streets. "
+) * 24 + "The capital of France is"
 TOP_K = 50
 TOLERANCE = 1e-3
 FIXTURES_DIR = os.path.dirname(__file__)
@@ -43,13 +60,17 @@ FIXTURES_DIR = os.path.dirname(__file__)
 
 def record(variant):
     repo_id, gguf_file = VARIANTS[variant]
-    tokenizer = AutoTokenizer.from_pretrained(repo_id, gguf_file=gguf_file)
+    reference = SAFETENSORS_REFERENCE.get(variant)
+    source = {"pretrained_model_name_or_path": reference} if reference else {
+        "pretrained_model_name_or_path": repo_id, "gguf_file": gguf_file}
+    tokenizer = AutoTokenizer.from_pretrained(**source)
     model = AutoModelForCausalLM.from_pretrained(
-        repo_id, gguf_file=gguf_file, dtype=torch.float32, attn_implementation="eager"
+        **source, dtype=torch.float32, attn_implementation="eager"
     )
     model.eval()
 
-    encoded = tokenizer.encode(PROMPT)
+    prompt = LONG_PROMPT if reference else PROMPT
+    encoded = tokenizer.encode(prompt)
     with torch.no_grad():
         logits = model(torch.tensor([encoded])).logits[0, -1, :].float().numpy()
 
@@ -57,7 +78,8 @@ def record(variant):
     fixture = {
         "repo_id": repo_id,
         "gguf_file": gguf_file,
-        "prompt": PROMPT,
+        "reference": f"{reference} (safetensors)" if reference else "transformers with gguf_file",
+        "prompt": prompt,
         "input_token_ids": encoded,
         "argmax_token_id": int(top[0]),
         "top_indices": [int(i) for i in top],

@@ -8,10 +8,12 @@ using HuggingFaceTransformers.Tokenizers: load_tokenizer, encode, decode
 # file with `gguf_file=` (test/fixtures/record_gguf_parity.py). The tokenizer
 # fixture holds how the repository each GGUF was converted from tokenizes a set of
 # strings (test/fixtures/record_gguf_tokenizer_parity.py); TinyLlama and Llama 3.2
-# are checked there only.
+# at Q4_K_M are checked there only. Llama 3.2's model fixture comes from its
+# original safetensors instead, since transformers does not apply the RoPE factors
+# its GGUF stores.
 const GGUF_MODEL_VARIANTS = (
     "smollm2-q4_k_m", "smollm2-q3_k_m", "qwen2.5-0.5b-q4_k_m", "qwen3-0.6b-q2_k",
-    "gemma2-2b-q4_k_m",
+    "gemma2-2b-q4_k_m", "llama3.2-1b-f16",
 )
 const GGUF_TOKENIZERS = JSON3.read(read(joinpath(@__DIR__, "fixtures", "gguf_tokenizer_parity.json"), String))
 const GGUF_VARIANTS = union(GGUF_MODEL_VARIANTS, String.(keys(GGUF_TOKENIZERS.variants)))

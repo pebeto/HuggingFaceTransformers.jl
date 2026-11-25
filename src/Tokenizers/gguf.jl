@@ -59,8 +59,10 @@ function _gguf_tokenizer(path::AbstractString)
     if kind == "gpt2"
         vocab = Dict(t => i - 1 for (i, t) in enumerate(tokens))
         merges = Tuple{String,String}[Tuple(split(m, ' '; limit=2)) for m in key("merges")]
-        model = BPEModel(vocab, merges)
         pre_name = String(key("pre", "default"))
+        # llama.cpp takes a pre-token whole when it is in the vocabulary for Llama 3,
+        # as its tokenizer.json's `ignore_merges` does.
+        model = BPEModel(vocab, merges; ignore_merges=pre_name in ("llama-bpe", "llama3"))
         pre = _gguf_byte_level_pre(pre_name)
         norm = pre_name == "qwen2" ? UnicodeNormalizer(:NFC) : IdentityNormalizer()
         dec = ByteLevelDecoder()

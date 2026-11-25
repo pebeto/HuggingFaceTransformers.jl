@@ -255,6 +255,14 @@ end
         @test apply_pre(IdentityPreTokenizer(), ["x", "y"]) == ["x", "y"]
     end
 
+    @testset "ignore_merges takes a word in the vocabulary whole" begin
+        vocab = Dict("a" => 0, "b" => 1, "c" => 2, "ab" => 3, "abc" => 4)
+        merges = [("a", "b")]
+        @test encode_word(BPEModel(vocab, merges), "abc") == [3, 2]
+        @test encode_word(BPEModel(vocab, merges; ignore_merges=true), "abc") == [4]
+        @test encode_word(BPEModel(vocab, merges; ignore_merges=true), "abcb") == [3, 2, 1]
+    end
+
     @testset "Split keeps a multi-byte tail after the last match" begin
         @test apply_pre(SplitPreTokenizer(r"\p{N}", :isolated), ["a1ú"]) == ["a", "1", "ú"]
     end

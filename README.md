@@ -3,32 +3,29 @@
 [![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://pebeto.github.io/HuggingFaceTransformers.jl/stable)
 [![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://pebeto.github.io/HuggingFaceTransformers.jl/dev)
 
-Load and run HuggingFace transformer checkpoints in Julia. Weights come from
-the Hub in safetensors format or as llama.cpp GGUF files, tokenizers from
-`tokenizer.json`, and the forward passes are plain Flux layers, so they
-differentiate and move to a GPU like any other Flux model.
+Load and run Hugging Face transformer checkpoints in Julia. Weights come from
+safetensors or llama.cpp GGUF files, tokenizers from `tokenizer.json`, and the
+models are plain Flux layers, so they differentiate and move to a GPU like any
+other Flux model.
 
-The spiritual successor to
-[`Transformers.jl`](https://github.com/chengchingwen/Transformers.jl), rebuilt
-with a leaner dependency tree and a focus on decoder LLMs.
+It is a successor to
+[Transformers.jl](https://github.com/chengchingwen/Transformers.jl), with fewer
+dependencies and a focus on decoder LLMs. Each supported architecture is tested
+for numeric parity: its logits are compared against a reference recorded from
+Python `transformers`.
 
-Every architecture below except LLaVA has a numeric-parity test that compares
-logits against a reference recorded from `transformers` in Python. The CPU
-suite is 2229 assertions and runs in about five minutes.
+This is a personal project that I work on in my spare time. It is not
+registered yet, and the API may still change.
 
 ## Installation
 
-Julia 1.10 or newer. Not registered yet, so install from the repository:
+Requires Julia 1.10 or newer.
 
 ```julia
-julia> ]
 pkg> dev https://github.com/pebeto/HuggingFaceTransformers.jl
 ```
 
 ## Quick start
-
-GPT-2 needs no access token, which makes it the shortest end-to-end example.
-Roughly 0.5 GB downloads to `~/.cache/huggingface/hub` on first run.
 
 ```julia
 using HuggingFaceTransformers
@@ -42,391 +39,61 @@ tokenizer = load_tokenizer(snapshot_download("gpt2"))
 println(generate(lm, tokenizer, "The Julia language is"; max_new_tokens=32))
 ```
 
-`load` reads `config.json` to pick the architecture, so no config type is named
-and no field is copied by hand. The download is cached, which is why asking for
-the snapshot directory a second time costs nothing.
-
-Gated repositories (Llama and Gemma among them) need a token in `HF_TOKEN`, or
-a `huggingface-cli login` done once. The package reads the same
-`~/.cache/huggingface/token` file the Python library writes.
-
-## Loading a checkpoint
-
-`load(repo_or_dir)` downloads the repository, reads the architecture out of
-`config.json`, builds the matching config and model, and loads the weights.
-Keywords reach the model constructor, so an embedding checkpoint that wants mean
-pooling is `load("intfloat/e5-small-v2"; pooling=:mean)`. The architectures it
-dispatches on are listed in `Models.AUTO_ARCHITECTURES`.
-
-For an architecture `load` does not know, or to change a hyperparameter, do the
-same work by hand in four steps:
-
-1. `snapshot_download(repo_id)` resolves the revision and fetches
-   `config.json`, the tokenizer files, and the weights into the Python-compatible
-   cache layout. Already-cached blobs are reused.
-2. Build the config struct with `config_from_json(GPT2Config, read_config(dir))`,
-   or construct it yourself with the fields you want changed.
-3. Construct the model from the config, which allocates the parameters.
-4. `load_state_dict!(model, load_weights(dir))` walks a pure-data mapping table
-   from HF parameter names to Julia layer addresses, transposing or slicing
-   where the layouts differ.
-
-`load_weights` accepts a directory, a single `.safetensors` file, or a
-`model.safetensors.index.json` for sharded checkpoints, and returns lazy views
-over a memory map by default, so loading copies each tensor once, straight from
-the file into its parameter. Pass `mmap=false` to read everything up front.
-`HF_HUB_OFFLINE=1` keeps `snapshot_download` off the network, as it does the
-Python library, and a cached snapshot is never modified. PyTorch
-`.bin` pickles are not read at all.
-
-Every family also exposes its mapping table (`llama_state_dict_map(cfg)` and
-friends) if you want to inspect or extend the wiring.
-
-## Supported architectures
-
-### Decoder language models
-
-| Family | Type | Parity recorded against |
-| --- | --- | --- |
-| Llama 3.x | `LlamaForCausalLM` | `Llama-3.2-1B/3B-Instruct`, `Llama-3.1-8B/70B-Instruct` |
-| Mistral | `MistralForCausalLM` | `Mistral-7B-Instruct-v0.2`, `v0.3` |
-| Qwen2 / Qwen2.5 / Qwen3 | `QwenForCausalLM` | `Qwen2.5-0.5B/1.5B/3B/7B-Instruct`, `Qwen3-0.6B` |
-| Qwen3.5 (text) | `Qwen3_5ForCausalLM` | `Qwen3.5-0.8B`, `unsloth/Qwen3.8-27B-NVFP4` (four-layer cut) |
-| Gemma 2 | `GemmaForCausalLM` | `gemma-2-2b/9b/27b-it` |
-| Phi-3 | `Phi3ForCausalLM` | `Phi-3-mini-4k-instruct`, `Phi-3-medium-4k-instruct` |
-| GPT-2 | `GPT2ForCausalLM` | `gpt2`, `gpt2-medium`, `gpt2-large`, `gpt2-xl` |
-| GPT-NeoX / Pythia | `NeoXForCausalLM` | `pythia-70m/410m/1b/6.9b` |
-| Mixtral (sparse MoE) | `MixtralForCausalLM` | `Mixtral-8x7B/8x22B-Instruct-v0.1` |
-| gpt-oss | `GptOssForCausalLM` | `gpt-oss-20b` (two-layer cut, float32) |
-
-Llama 3 RoPE scaling, Mistral and Gemma sliding-window attention, Gemma's
-logit softcapping, Qwen3's per-head query and key norms, Phi-3's fused QKV,
-NeoX's partial RoPE and parallel-residual block, Mixtral's top-k expert routing,
-gpt-oss's attention sinks, YaRN RoPE and MXFP4 experts, and Qwen3.5's Gated
-DeltaNet linear attention and gated full attention are all handled inside these
-types.
-
-gpt-oss keeps its experts in MXFP4, exactly as the checkpoint stores them and
-memory-mapped, and decodes each expert only when a token is routed to it. That
-puts gpt-oss-20b at about 13 GB of experts plus 7 GB for everything else, so it
-runs in about 20 GB (about 0.3 s per token on a 24-thread CPU). HF itself
-needs ~42 GB to run it on a CPU, which is why its parity reference is the
-checkpoint's first two layers, run in float32: logits agree to 1e-5.
-
-Qwen3.5 also reads compressed-tensors checkpoints, such as
-`unsloth/Qwen3.8-27B-NVFP4`: NVFP4 and FP8 linear layers stay packed and
-memory-mapped, and bf16 embeddings stay in the file. The 27B model then needs
-under 1 GB of its own memory, with its ~20 GB of weights held as page cache,
-and generates about 0.4 s per token on a 24-thread CPU.
-Weights are decoded exactly and activations stay in float32, so this is
-weight-only quantization; HF's default path also rounds activations to FP8 or
-NVFP4, as FP4 hardware would. Against HF running the checkpoint's first four
-layers that same way, logits agree to 4e-6.
-
-### Encoders and embeddings
-
-| Family | Type | Parity recorded against |
-| --- | --- | --- |
-| BERT / RoBERTa | `BertModel`, `BertForMaskedLM` | `bert-base-uncased`, `bert-base-cased`, `roberta-base`, `roberta-large` |
-| Sentence embeddings | `BertEmbeddingModel` | `bge-small-en-v1.5`, `e5-small-v2` |
-| Nomic | `NomicBertModel` | `nomic-embed-text-v1.5` |
-
-### Vision, audio, and multimodal
-
-| Family | Type | Parity recorded against |
-| --- | --- | --- |
-| ViT | `ViTModel`, `ViTForImageClassification` | `vit-base-patch16-224` |
-| SigLIP | `SiglipModel` (vision and text towers) | `siglip-base-patch16-224` |
-| DINOv2 | `Dinov2Model` | `facebook/dinov2-base` |
-| Whisper | `WhisperModel`, `transcribe` | `openai/whisper-base` |
-| LLaVA | `LlavaForConditionalGeneration` | unit tests only, no recorded fixture |
-
-## Generation
-
-`generate` mirrors the keyword arguments of HuggingFace's `model.generate`:
-
-```julia
-ids = generate(
-    lm,
-    prompt_ids;
-    max_new_tokens=256,
-    do_sample=true,
-    temperature=0.7,
-    top_k=50,
-    top_p=0.9,
-    repetition_penalty=1.1,
-    eos_token_id=[128001, 128009],
-)
-```
-
-Token IDs are 0-indexed to match HF, and the return value is the full
-`[prompt..., generated...]` sequence. The two-argument form
-`generate(lm, tokenizer, prompt)` tokenizes and detokenizes around it. Pass a
-vector of prompts to generate them as one left-padded batch.
-
-A checkpoint's `generation_config.json` supplies its stop tokens and sampling
-settings, `TextStreamer` prints text as it arrives, and `stop_strings` ends
-generation on text rather than on token ids:
-
-```julia
-generate(
-    lm,
-    prompt_ids;
-    generation_config=load_generation_config(dir),
-    streamer=TextStreamer(tokenizer; skip_prompt=true),
-    stop_strings=["</tool_call>"],
-    tokenizer=tokenizer,
-)
-```
-
-The KV-cache is preallocated as
-`(head_dim, n_kv_heads, max_seq, batch)` and mutated in place, feature-first so
-that cache writes are zero-copy slice assignments. `generate` manages it for
-you; drive it yourself when you need the logits:
-
-```julia
-caches = build_caches(lm, max_seq, 1)
-logits = lm(reshape(prompt_ids, :, 1); caches=caches, step=1)
-reset!(caches)
-```
-
-### Chat templates
-
-`ChatTemplate` renders a model's chat template through a small Jinja2
-interpreter. It follows HF's Jinja environment, and the Qwen3, Qwen2.5, Qwen3.5
-and gpt-oss (harmony) templates render byte for byte as `apply_chat_template` does,
-tools and thinking blocks included. `load_chat_template(dir)` finds the template
-where HF does (`chat_template.jinja`, else `tokenizer_config.json`):
-
-```julia
-template = load_chat_template(dir)
-
-prompt = template(
-    [
-        Dict("role" => "system", "content" => "You are a terse assistant."),
-        Dict("role" => "user", "content" => "What is the capital of Peru?"),
-    ];
-    add_generation_prompt=true,
-    bos_token="<|begin_of_text|>",
-)
-```
-
-Supported: `if`/`elif`/`else`, `for`, `set`, attribute and item access,
-slicing, arithmetic and comparison and logical operators, `in`, `is defined`,
-the `trim` and `tojson` filters, `raise_exception`, the `loop.*` variables, and
-whitespace control. Not supported: tuple, list, and dict literals, float
-literals, macros, includes, custom filters, custom tests, and step slicing.
-Templates that reach for those raise on construction, which is why the
-examples carry a plain fallback template.
-
-### Speculative decoding
-
-```julia
-ids = speculative_generate(target, draft, prompt_ids; n_draft=4, max_new_tokens=64)
-```
-
-The draft model proposes `n_draft` tokens, the target verifies them in one
-forward pass, and the accept/reject rule keeps the output distributed exactly
-as the target alone would produce. Greedy speculative decoding reproduces
-`generate(target, ...)` byte for byte. The two models must share a vocabulary.
-`top_k`, `top_p`, and `repetition_penalty` are not applied on this path yet.
-
-## Embeddings
-
-```julia
-model = BertEmbeddingModel(cfg; pooling=:mean, normalize=true)
-load_state_dict!(model, load_weights(dir))
-
-v = embed(model, tokenizer, "hello world")
-```
-
-`pooling` takes `:cls` or `:mean`, and `normalize=true` applies L2. The
-`mean_pool`, `cls_pool`, and `l2_normalize` functions are exported if you want
-to pool the trunk output yourself.
-
-## Images
-
-```julia
-using HuggingFaceTransformers.Models: load_image_processor
-import FileIO        # exports a `load` of its own, so keep it qualified
-
-dir = snapshot_download("google/vit-base-patch16-224")
-model, processor = load(dir), load_image_processor(dir)
-logits = model(processor(FileIO.load("cats.jpg")))     # pixel_values: (3, 224, 224, 1)
-```
-
-`load_image_processor` reads `preprocessor_config.json` for the ViT, SigLIP,
-DINOv2 (Bit), and CLIP processors. The processor it returns takes a decoded
-color image, or a `(3, height, width)` `UInt8` array, and resizes, crops, and
-normalizes it into the `(channels, height, width, batch)` layout the vision
-models take. The resize
-reproduces torchvision's fixed-point uint8 kernel, so `pixel_values` equal HF's
-bit for bit.
-
-## Tokenizers
-
-`load_tokenizer(path)` reads `tokenizer.json` and handles three model types
-with no per-model subclasses:
-
-- BPE with ByteLevel pre-tokenization, for the GPT-2, Llama-3, Qwen2, and
-  RoBERTa family.
-- Unigram with Metaspace pre-tokenization, for SentencePiece checkpoints such
-  as Gemma.
-- WordPiece with the BERT normalizer, for BERT and its descendants.
-
-Older checkpoints that ship only a `vocab.txt` load through
-`load_wordpiece_from_vocab_txt(path)`. Round-trip behavior is checked against
-Python `AutoTokenizer` output on a shared prompt set covering accents, CJK,
-Korean, emoji, and whitespace edge cases.
-
-## Precision and quantization
-
-```julia
-lm16 = fp16(lm)          # also bf16(lm), fp32(lm), convert_eltype(lm, T)
-lmq  = quantize_int8(lm) # per-row symmetric int8, weight-only
-```
-
-The conversions return a new model and leave the original alone. Norms and
-token embeddings stay Float32 under `quantize_int8`, weights shrink about 4x,
-and the matmul dequantizes per call. Expect logit error around `1e-2` to `1e-1`
-against the fp32 reference, growing with depth. The docstring on
-`convert_eltype` records the per-dtype tolerance bands.
-
-## GPU
-
-Move a model with Flux and the rest follows:
-
-```julia
-using Flux: gpu
-using CUDA   # or AMDGPU, or Metal on Apple Silicon
-
-lm_gpu = gpu(lm)
-```
-
-Importing a backend loads the matching package extension, which routes `sdpa`
-on device arrays to `flash_sdpa`, a tiled attention kernel that never
-materializes the full score matrix. The CPU suite checks the tiled path against
-the materialized one on causal, sliding-window, softcap, and multi-block
-inputs. `test/gpu_attention.jl` runs the same comparison on a real device and
-is not part of the default suite:
-
-```
-HFT_GPU_BACKEND=cuda julia --project=. test/gpu_attention.jl
-```
-
-## Fine-tuning
-
-LoRA adapters, gradient checkpointing, and PEFT-format saving are here; a
-training framework is not. `examples/lora_finetune.jl` is a plain Flux loop
-that ties them together.
-
-```julia
-lora = lora_wrap(base_linear, 8, 16.0)   # rank 8, alpha 16
-merged = merge_lora(lora)                # fold A*B back into one Linear
-
-save_lora(
-    adapter_dir,
-    LoraConfig(; r=8, lora_alpha=16.0, target_modules=["q_proj", "v_proj"]),
-    Dict("model.layers.0.self_attn.q_proj" => (lora.lora_A, lora.lora_B)),
-)
-
-adapter_cfg, adapter_weights = load_lora(adapter_dir)
-n_applied = apply_lora!(model, adapter_dir, llama_state_dict_map(cfg))
-```
-
-The LoRA functions live in `HuggingFaceTransformers.Models`, while `Linear` and
-`Checkpointed` come from `HuggingFaceTransformers.Layers`.
-
-`Checkpointed(layer)` recomputes activations in the backward pass instead of
-storing them. It is transparent to Flux and Functors, and results and gradients
-match the uncheckpointed path exactly, so it buys memory rather than accuracy.
-
-## GGUF
-
-llama.cpp GGUF files load as models of the types above:
+`load` reads `config.json` to choose the architecture. GGUF files load the same
+way, and stay quantized in memory:
 
 ```julia
 lm = load("Qwen/Qwen2.5-0.5B-Instruct-GGUF"; gguf_file="qwen2.5-0.5b-instruct-q4_k_m.gguf")
 ```
 
-The `llama`, `qwen2`, `qwen3` and `gemma2` architectures are covered, in F32,
-F16, BF16, Q4_0 to Q8_0, the k-quants Q2_K to Q6_K, and IQ4_NL. Weights stay
-quantized and memory-mapped, decoded as they are multiplied, so Qwen2.5-7B at
-Q4_K_M runs in 5.2 GB at about 0.13 s per token on a 12-core CPU;
-`packed=false` dequantizes to a dense `Float32` model for training or a GPU.
-Logits match `transformers` loading the same file to within 2e-5. The file's
-own tokenizer, chat template and stop tokens load from its path too, through
-`load_tokenizer`, `load_chat_template` and `load_generation_config`, so one
-download runs a chat.
-`load_gguf(path)` is the lower-level reader, returning the metadata and every
-tensor dequantized.
+Gated repositories such as Llama and Gemma read the token from `HF_TOKEN` or
+from the file that `huggingface-cli login` writes.
 
-## Examples
+## Supported models
 
-Each file runs standalone with `julia --project=. examples/<file>`, and every
-one except `lora_finetune.jl` takes a repository ID as an optional first
-argument.
-
-| File | What it does |
+| Kind | Families |
 | --- | --- |
-| `repl_chat.jl` | Llama-3.x chat, including the download and chat templating |
-| `repl_chat_mistral.jl` | Mistral chat with the `[INST]` template |
-| `repl_chat_qwen.jl` | Qwen2 / Qwen2.5 / Qwen3 chat |
-| `repl_chat_gemma.jl` | Gemma 2 chat |
-| `repl_chat_phi3.jl` | Phi-3 chat |
-| `repl_chat_mixtral.jl` | Mixtral chat |
-| `completion_gpt2.jl` | GPT-2 prefix completion, no chat roles |
-| `completion_neox.jl` | Pythia prefix completion |
-| `mask_fill_roberta.jl` | RoBERTa masked-token filling |
-| `lora_finetune.jl` | LoRA training loop with gradient checkpointing, on a small random model so it needs no download |
+| Decoders | Llama 3.x, Mistral, Mixtral, Qwen2/2.5/3, Qwen3.5 (text), Gemma 2, Phi-3, GPT-2, GPT-NeoX/Pythia, gpt-oss |
+| Encoders | BERT, RoBERTa, BGE/E5 sentence embeddings, Nomic Embed |
+| Vision and audio | ViT, SigLIP, DINOv2, Whisper, LLaVA |
+| GGUF | `llama` (Llama 2 and 3.x), `qwen2`, `qwen3`, `gemma2`, from F32 down to Q2_K |
+
+The [documentation](https://pebeto.github.io/HuggingFaceTransformers.jl/dev)
+lists the checkpoints each family was checked against and the known
+limitations.
+
+## Features
+
+- [Generation](https://pebeto.github.io/HuggingFaceTransformers.jl/dev/guide/generation/):
+  sampling, batching, streaming, stop strings, chat templates, speculative
+  decoding and Whisper transcription.
+- [Quantization](https://pebeto.github.io/HuggingFaceTransformers.jl/dev/guide/performance/):
+  fp16/bf16, int8, and packed NVFP4, FP8, MXFP4 and GGUF weights decoded as they
+  are multiplied.
+- [GPU](https://pebeto.github.io/HuggingFaceTransformers.jl/dev/guide/performance/#GPU):
+  through CUDA, AMDGPU or Metal, with a tiled attention kernel.
+- [Fine-tuning](https://pebeto.github.io/HuggingFaceTransformers.jl/dev/guide/finetuning/):
+  LoRA adapters in PEFT format and gradient checkpointing.
+- [Tokenizers](https://pebeto.github.io/HuggingFaceTransformers.jl/dev/guide/tokenizers/)
+  and [image processors](https://pebeto.github.io/HuggingFaceTransformers.jl/dev/guide/images/)
+  that match their Python counterparts output for output.
+
+Runnable scripts are in [`examples/`](examples).
 
 ## Tests
 
-```julia
+```
 julia --project -e 'using Pkg; Pkg.test()'
 ```
 
-That runs the CPU suite, which needs no network and no model downloads.
-Numeric-parity tests are separate: they download real checkpoints and compare
-logits against a fixture recorded from Python, so each is opt-in through an
-environment variable.
-
-```
-HFT_TEST_PARITY=1B          julia --project -e 'using Pkg; Pkg.test()'
-HFT_TEST_PARITY_QWEN=all    julia --project -e 'using Pkg; Pkg.test()'
-```
-
-The gates are `HFT_TEST_PARITY` for Llama and `HFT_TEST_PARITY_<FAMILY>` for
-the rest, each taking a variant label, a comma-separated list, or `all`.
-Unknown labels fail loudly with the valid set, and missing fixtures skip with
-the exact recorder command to run. Recorders live in `test/fixtures/` as small
-Python scripts. `HFT_TEST_JET=1` adds a JET smoke pass, and
-`HFT_TEST_NETWORK=1` enables the Hub integration test.
-
-## Rough edges
-
-- There is no continuous batching; a batch runs until its last row finishes.
-- Image files are decoded by FileIO, JpegTurbo, or Images.jl rather than this
-  package; `ImageProcessor` takes over from the decoded image. Only the ViT,
-  SigLIP, Bit (DINOv2), and CLIP processors are implemented.
-- Whisper's `transcribe` recomputes the decoder each step rather than using a
-  KV cache, making cost quadratic in output length. Audio decoding is not in
-  the package: pass 16 kHz mono samples to `WhisperFeatureExtractor`.
-- LLaVA expects a vision tower that returns patch features with the CLS token
-  already dropped. SigLIP fits; a CLIP tower is not implemented, which is what
-  llava-1.5 end-to-end parity is waiting on.
-- gpt-oss decodes its MXFP4 experts on the CPU only.
-- Qwen3.5 loads the language model only (no vision tower), runs its delta-net
-  layers and packed FP8/NVFP4 weights on the CPU, and cannot be used for
-  speculative decoding, whose cache rewind its recurrent state does not allow.
-- Mixtral runs each expert once over its assigned tokens without fusing the
-  expert matmuls.
+The default suite runs on the CPU, with no network access. The parity tests
+download real checkpoints, so they are opt-in; see
+[`CONTRIBUTING.md`](CONTRIBUTING.md#tests).
 
 ## Contributing
 
-A new model is a five-part contract: config struct, layer wiring, state-dict
-map, numeric-parity test, and a runnable example. See
-[`CONTRIBUTING.md`](CONTRIBUTING.md).
+Each new model comes with a config, its layers, a state-dict map, a parity test
+and an example. [`CONTRIBUTING.md`](CONTRIBUTING.md) has the details.
 
 ## License
 

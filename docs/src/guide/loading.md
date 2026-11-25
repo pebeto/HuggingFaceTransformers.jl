@@ -125,10 +125,10 @@ lm = load("path/to/model.gguf")
 the file's metadata and maps llama.cpp's tensor names (`blk.0.attn_q.weight` and
 so on) onto the HF names the state-dict tables expect, so a GGUF model is the
 same model type a safetensors checkpoint builds. It covers the `llama` (Llama 2
-and 3.0, Mistral, SmolLM), `qwen2`, `qwen3` and `gemma2` architectures. Two
-conversions llama.cpp makes are undone on the way in: the llama family's query
-and key rows are reordered for its rotary layout, and Gemma 2's norm weights
-carry a folded-in 1.
+and 3.x, Mistral, SmolLM, TinyLlama), `qwen2`, `qwen3` and `gemma2`
+architectures. Two conversions llama.cpp makes are undone on the way in: the
+llama family's query and key rows are reordered for its rotary layout, and Gemma
+2's norm weights carry a folded-in 1.
 
 Every tensor type in the common quantizations decodes: F32, F16, BF16, the
 legacy Q4_0 to Q8_0 blocks, the k-quants Q2_K to Q6_K, and IQ4_NL, which
@@ -175,8 +175,15 @@ end-of-turn token the file names, and turn-end control tokens such as
 `<end_of_turn>` and `<|im_end|>`. For Gemma 2, Qwen2.5 and Llama 3.2 that is the
 list their `generation_config.json` gives. GGUF holds no sampling settings.
 
-Llama 3.1 and later store per-dimension RoPE factors in GGUF, which raise an
-error rather than load as plain RoPE.
+Llama 3.1 and later scale RoPE, and GGUF stores the result as one divisor per
+rotary frequency (`rope_freqs.weight`) rather than the scaling parameters; each
+frequency is divided by its factor, as llama.cpp does. `transformers` skips these
+factors when it loads a GGUF, so this path is checked against the original
+safetensors instead: Llama-3.2-1B-Instruct's F16 GGUF matches its safetensors
+checkpoint to within 2e-5 on a 702-token prompt, where leaving the factors out is
+off by 1.4. Other RoPE scaling types in GGUF metadata raise. Llama 3's tokenizer
+takes a pre-token whole when it is in the vocabulary (`ignore_merges`), from GGUF
+and from `tokenizer.json` alike.
 
 ## Inspecting the wiring
 

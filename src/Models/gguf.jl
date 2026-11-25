@@ -125,11 +125,8 @@ function _gguf_config(idx::GGUF._GGUFIndex, arch::AbstractString)
     scaling = get_meta("rope.scaling.type", "none")
     scaling == "none" ||
         throw(ArgumentError("GGUF RoPE scaling `$(scaling)` is not supported yet"))
-    haskey(idx.tensors, "rope_freqs.weight") && throw(
-        ArgumentError(
-            "this GGUF scales RoPE frequencies per dimension (Llama 3.1 and later), " *
-            "which is not supported from GGUF yet; load the safetensors checkpoint",
-        ),
+    arch == "llama" || !haskey(idx.tensors, "rope_freqs.weight") || throw(
+        ArgumentError("per-dimension RoPE factors are supported for the llama architecture only"),
     )
 
     heads = Int(required("attention.head_count"))
@@ -242,10 +239,12 @@ dequantized to `Float32` as it is copied in, for a dense model that trains and
 moves to a GPU like any other; memory then peaks at the dense model plus one
 tensor.
 
-Supported: GGUF architectures `llama` (Llama 2 and 3.0, Mistral, SmolLM and the
+Supported: GGUF architectures `llama` (Llama 2 and 3.x, Mistral, SmolLM and the
 like), `qwen2`, `qwen3` and `gemma2`, in any tensor type
 [`GGUF`](@ref HuggingFaceTransformers.GGUF) decodes. Llama 3.1 and later store
-per-dimension RoPE factors, which raise rather than load as plain RoPE.
+their RoPE scaling as one factor per frequency, `rope_freqs.weight`, and each
+rotary frequency is divided by its factor as llama.cpp does. Other RoPE scaling
+types raise.
 
 The tokenizer, chat template and stop tokens the file carries load from the same
 path with `load_tokenizer`, `load_chat_template` and `load_generation_config`.
@@ -274,8 +273,22 @@ function load_gguf_model(path::AbstractString; packed::Bool=true)
     config_type, model_type = AUTO_ARCHITECTURES[_GGUF_ARCHITECTURES[arch]]
     cfg = config_from_json(config_type, raw)
     weights = GGUFWeights(idx, names, arch, raw[:num_attention_heads], raw[:num_key_value_heads])
-    packed || return _build_and_load(model_type, cfg, weights)
-    return _load_gguf_packed(model_type, cfg, weights, _state_dict_map(model_type, cfg))
+    lm = packed ? _load_gguf_packed(model_type, cfg, weights, _state_dict_map(model_type, cfg)) :
+        _build_and_load(model_type, cfg, weights)
+    haskey(idx.tensors, "rope_freqs.weight") || return lm
+    return _scale_rope(lm, vec(GGUF._tensor(idx, "rope_freqs.weight")))
+end
+
+# Divide every rotary frequency by the file's factor for it. Llama 3.1's scaling
+# keeps high frequencies, divides low ones by the scaling factor and blends in
+# between; llama.cpp's converter stores the resulting divisors.
+function _scale_rope(lm, factors::AbstractVector)
+    return Functors.fmap(lm; exclude=x -> x isa RoPE) do rope
+        length(rope.inv_freq) == length(factors) || throw(
+            DimensionMismatch("$(length(factors)) RoPE factors for $(length(rope.inv_freq)) frequencies"),
+        )
+        RoPE(Float32.(rope.inv_freq ./ factors), rope.rotary_dim, rope.attention_scaling)
+    end
 end
 
 _state_dict_map(::Type{<:LlamaForCausalLM}, cfg) = llama_state_dict_map(cfg)
